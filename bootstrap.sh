@@ -55,17 +55,13 @@ for f in "${SHARED_FILES[@]}"; do
 done
 
 # --------------------------------------------------------------------------
-# Install user-installed skills (separate from plugins)
-# These live on their own update channels — easier to install fresh than vendor.
+# User-installed skills
 # --------------------------------------------------------------------------
+# Most domain skills are now bundled in plugins (settings.json declares them).
+# The only standalone user skill is `find-skills`, which has no auto-installer.
+# If you want it, manually drop the skill folder into ~/.claude/skills/find-skills/.
 echo
-echo "→ Installing user skills"
-if command -v npx >/dev/null 2>&1; then
-  # Supabase agent skills (supabase + supabase-postgres-best-practices)
-  npx --yes skills add supabase/agent-skills || echo "  warn: supabase/agent-skills install failed (continuing)"
-else
-  echo "  skip: npx not installed — install Node first, then re-run"
-fi
+echo "→ User skills: nothing to install (all domain skills come from plugins)"
 
 # --------------------------------------------------------------------------
 # Plugins are declared in settings.json (enabledPlugins + extraKnownMarketplaces).

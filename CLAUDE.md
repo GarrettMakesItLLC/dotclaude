@@ -92,9 +92,18 @@ These are the defaults across my repos. Per-repo `CLAUDE.md` overrides if a proj
 
 ## MCPs available — prefer over generic alternatives
 
-I have these MCP servers configured. Use them instead of WebFetch / WebSearch / shell scripting when relevant:
+I have these MCP servers configured. Use them instead of WebFetch / WebSearch / shell scripting when relevant.
+
+**From plugins (auto-installed via `enabledPlugins`):**
 
 - **Supabase MCP** — schema introspection, migrations, advisors, logs, edge functions. Use `list_tables` before schema changes, `get_logs` + `get_advisors` before debugging.
+- **Stripe MCP** — Stripe API surface, account ops, billing.
+- **Prisma MCP** — Prisma schema/client interactions.
+- **Playwright MCP** — full browser control (navigate, click, screenshot, network, console). Use to verify UI changes and run E2E flows live.
+- **GitHub plugin** (not MCP, but plugin tooling) — beyond `gh` for repo/PR/issue ops.
+
+**Top-level MCPs (configured in `~/.claude.json`, per-machine OAuth):**
+
 - **Vercel MCP** — deployments, build logs, runtime logs, projects.
 - **Notion MCP** — search pages, fetch docs, query databases. Many specs / playbooks live here.
 - **Gmail MCP / Google Calendar MCP** — read/draft emails, manage calendar events.
@@ -102,7 +111,7 @@ I have these MCP servers configured. Use them instead of WebFetch / WebSearch / 
 - **PubMed MCP** — for MuscleBuddy research-backed features.
 - **Spotify MCP** — for RedThreadEvents karaoke metadata.
 
-Never expose Supabase service-role keys or Vercel tokens in client-bundled code.
+Never expose Supabase service-role keys, Stripe secret keys, or Vercel tokens in client-bundled code.
 
 ---
 
