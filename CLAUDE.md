@@ -1,0 +1,120 @@
+# Global CLAUDE.md (Garrett)
+
+Loaded from `~/.claude/CLAUDE.md` for every Claude Code session. Per-repo `CLAUDE.md` files override anything here.
+
+---
+
+## Workflow rules — always apply
+
+### Worktree-first for code changes
+
+Before making any code changes in a repo with `.worktrees/` (gitignored), set up an isolated worktree using the `superpowers:using-git-worktrees` skill. Multiple Claude sessions in the same checkout will conflict.
+
+```bash
+git worktree add .worktrees/<short-name> -b feature/<short-name>
+cd .worktrees/<short-name>
+```
+
+Skip for read-only work: questions, reviews, exploration, running tests without changes.
+
+### No ephemeral summary docs
+
+Never create files like `INTEGRATION_SUMMARY.md`, `CHANGES.md`, `WHAT_I_DID.md`, or any document whose purpose is summarizing what just happened. The diff and the commit message are the record. Permanent docs (architecture, runbooks) belong in the existing docs tree.
+
+### Don't bypass git hooks
+
+Never use `--no-verify` on commit or push unless I explicitly ask. If a pre-commit hook fails:
+- gitleaks flagged a real secret → rotate it, don't allowlist
+- lint-staged failed → fix the lint/format issue
+- typecheck failed → fix the types
+
+If a hook fails and you fix the issue, create a NEW commit. Don't `--amend` after a hook failure (the original commit didn't happen).
+
+### Conventional commits
+
+`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `perf:`, `style:`, `ci:`, `build:`, `revert:`. Most repos enforce this with commitlint.
+
+### Never commit `.env`
+
+Only `.env.example` is tracked. Use `vercel env pull` to populate local `.env` files.
+
+---
+
+## Default stack assumptions
+
+These are the defaults across my repos. Per-repo `CLAUDE.md` overrides if a project differs.
+
+### TypeScript
+
+- **Strict mode everywhere.** No `any` — use `unknown` and narrow.
+- `import type { ... }` for type-only imports (`consistent-type-imports: error`).
+- All promises must be awaited or explicitly voided (`no-floating-promises`, `no-misused-promises`).
+- Unused vars allowed only with `_` prefix.
+- ESLint runs with `--max-warnings 0` in CI.
+
+### Frameworks & data
+
+- **Next.js (App Router)** for new web apps; Vite + React for older / PWA repos.
+- **Prisma** for all database access — no raw SQL.
+- **Run `prisma generate`** after `npm ci` / `pnpm install` and after any schema change.
+- **Zod at every API boundary.** Never trust raw `req.body` or untyped query params.
+- **Supabase Auth** for auth where present. Two clients, never crossed: `supabaseServer()` (RSC/actions/handlers) vs `supabaseBrowser()` (`'use client'` only). Service-role key is server-only.
+
+### Hosting
+
+- **Vercel** for frontends (Next.js + Vite both deploy here).
+- **Railway** for separate backend services (Fastify) when not deployable on Vercel.
+- Postgres + Redis usually via Vercel Marketplace (Neon + Upstash) or Supabase.
+
+### Monorepos
+
+- pnpm workspaces (newer repos: AdventureOS) or npm workspaces (older: MuscleBuddy, RedThreadEvents).
+- Common layout: `apps/web/`, optionally `apps/server/`, `packages/{engine,types,ui,database}/`.
+- `packages/engine` (where present) is **pure deterministic logic** — no I/O, no DB, no Node built-ins. Fully unit-testable.
+- Web app never imports from server package; comms via REST only.
+
+### Testing
+
+- Unit tests (Vitest or Jest) for pure logic.
+- **Integration tests hit a real database** — never mock Prisma.
+- E2E via Playwright.
+- Coverage thresholds enforced on engine packages where defined.
+
+### Frontend conventions
+
+- Tailwind for styling.
+- Dark mode (`dark:` variants) required on new components.
+- WCAG 2.1 AA contrast.
+- Lucide icons (when an icon set isn't otherwise specified).
+- For Next.js i18n repos: never hardcode English strings in JSX — use `useTranslations`.
+
+---
+
+## MCPs available — prefer over generic alternatives
+
+I have these MCP servers configured. Use them instead of WebFetch / WebSearch / shell scripting when relevant:
+
+- **Supabase MCP** — schema introspection, migrations, advisors, logs, edge functions. Use `list_tables` before schema changes, `get_logs` + `get_advisors` before debugging.
+- **Vercel MCP** — deployments, build logs, runtime logs, projects.
+- **Notion MCP** — search pages, fetch docs, query databases. Many specs / playbooks live here.
+- **Gmail MCP / Google Calendar MCP** — read/draft emails, manage calendar events.
+- **Google Drive MCP** — fetch shared docs.
+- **PubMed MCP** — for MuscleBuddy research-backed features.
+- **Spotify MCP** — for RedThreadEvents karaoke metadata.
+
+Never expose Supabase service-role keys or Vercel tokens in client-bundled code.
+
+---
+
+## Communication preferences
+
+- **No status summaries.** Don't repeat what was done multiple times. Say it once and move on. The diff is the record.
+- **Brief end-of-turn summaries only** — one or two sentences. What changed and what's next.
+- **Verify before claiming done.** Run typecheck / tests / start the dev server before asserting something works. Use `superpowers:verification-before-completion`.
+- For exploratory questions ("what should we do about X"), respond with a recommendation + main tradeoff in 2–3 sentences. Don't implement until I agree.
+
+---
+
+## Per-repo override pattern
+
+Project repos define their own `CLAUDE.md`, plus `.claude/rules/<rule>.md` for repo-specific conventions (e.g., `worktree-first.md`). Repo files always win. This file is just the baseline so I don't have to repeat the same rules in every repo.

@@ -1,0 +1,23 @@
+# Local-only files we never want to ship across machines
+settings.local.json
+.last-cleanup
+backups/
+cache/
+downloads/
+file-history/
+history.jsonl
+ide/
+mcp-needs-auth-cache.json
+paste-cache/
+plans/
+projects/
+session-env/
+sessions/
+shell-snapshots/
+tasks/
+telemetry/
+.credentials.json
+
+# OS noise
+.DS_Store
+Thumbs.db
