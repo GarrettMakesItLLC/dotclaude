@@ -43,15 +43,9 @@
 | `mcp-server-dev` | Build MCP servers (remote HTTP, MCPB, local stdio) + bundle as MCPB packages |
 | `atomic-agents` | Agent toolkit (TBD — investigate when needed) |
 
-## Overlap with user-installed skills
+## User-installed skills
 
-| User skill (`~/.claude/skills/`) | Replaced by plugin? | Notes |
-|----------------------------------|---------------------|-------|
-| `find-skills` | ❌ — keep | Skill discovery, not in any plugin |
-| `supabase` | ✅ `supabase@claude-plugins-official` | Plugin is the same content + MCP. Safe to delete user skill. |
-| `supabase-postgres-best-practices` | ✅ `supabase@claude-plugins-official` | Bundled into the plugin. Safe to delete user skill. |
-
-The bootstrap script no longer installs the supabase user-skills — the plugin replaces them. `find-skills` is the only remaining user skill, and it has no installer (manually drop in `~/.claude/skills/find-skills/` if rebuilding from scratch).
+Only one user skill remains: `find-skills` (skill discovery — not in any plugin). It has no installer; manually drop it in `~/.claude/skills/find-skills/` if rebuilding from scratch. All domain skills (Supabase, etc.) come from plugins.
 
 ## MCP servers added by plugins
 

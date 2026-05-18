@@ -55,15 +55,6 @@ for f in "${SHARED_FILES[@]}"; do
 done
 
 # --------------------------------------------------------------------------
-# User-installed skills
-# --------------------------------------------------------------------------
-# Most domain skills are now bundled in plugins (settings.json declares them).
-# The only standalone user skill is `find-skills`, which has no auto-installer.
-# If you want it, manually drop the skill folder into ~/.claude/skills/find-skills/.
-echo
-echo "→ User skills: nothing to install (all domain skills come from plugins)"
-
-# --------------------------------------------------------------------------
 # Plugins are declared in settings.json (enabledPlugins + extraKnownMarketplaces).
 # Claude Code auto-installs them on first launch from the official marketplace.
 # --------------------------------------------------------------------------

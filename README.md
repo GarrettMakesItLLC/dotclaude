@@ -9,7 +9,7 @@ My personal Claude Code configuration — synced across machines via git.
 | `CLAUDE.md` | Global instructions injected into every Claude Code session. Cross-cutting rules + default stack assumptions. |
 | `settings.json` | User-scope settings. Declares enabled plugins, the official marketplace, and permission defaults. |
 | `keybindings.json` | Custom keyboard shortcuts (e.g., shift+enter for newline in chat). |
-| `bootstrap.sh` | One-command installer for a fresh machine. Symlinks files into `~/.claude/` and installs user skills. |
+| `bootstrap.sh` | One-command installer for a fresh machine. Symlinks files into `~/.claude/`. |
 | `plugins.md` | Notes on which plugins are installed and what each one is for. |
 | `.gitignore` | Keeps machine-local cruft out of the repo (history, sessions, caches, credentials). |
 
@@ -22,8 +22,7 @@ bash ~/dotclaude/bootstrap.sh
 
 The bootstrap script:
 1. Symlinks `CLAUDE.md`, `settings.json`, `keybindings.json` into `~/.claude/`
-2. Installs user-installed skills (`supabase/agent-skills`) via `npx skills add`
-3. Reports which plugins will auto-install on first `claude` launch
+2. Reports which plugins will auto-install on first `claude` launch
 
 Existing files in `~/.claude/` are backed up to `~/.claude.bak.<timestamp>/` (never overwritten).
 
@@ -54,4 +53,4 @@ If a rule starts being repeated in 3+ project repos, hoist it here and remove it
 - **Per-project `.claude/` folders** — those live with each project (rules, commands, worktrees state).
 - **Local-only files** — sessions, history, paste cache, credentials. Listed in `.gitignore`.
 - **Vendored plugin source** — plugins are declared in `settings.json` and installed from the marketplace. Self-contained, versioned, and easy to update with `/plugin update`.
-- **Vendored skills** — installed via `bootstrap.sh` so they stay on their own update channels.
+- **Vendored skills** — domain skills now come from plugins. The only standalone user skill is `find-skills`; manually drop it in `~/.claude/skills/find-skills/` if needed.
