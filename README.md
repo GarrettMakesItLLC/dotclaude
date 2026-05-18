@@ -16,7 +16,7 @@ My personal Claude Code configuration — synced across machines via git.
 ## Setup on a new machine
 
 ```bash
-git clone git@github.com:<your-user>/dotclaude.git ~/dotclaude
+git clone git@github.com:GarrettMakesIt/dotclaude.git ~/dotclaude
 bash ~/dotclaude/bootstrap.sh
 ```
 
