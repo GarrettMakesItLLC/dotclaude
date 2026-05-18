@@ -1,3 +1,30 @@
+## About this repo (dotclaude)
+
+This file lives in `~/dotclaude/CLAUDE.md` and is **symlinked** to `~/.claude/CLAUDE.md` by `bootstrap.sh`. Editing it here changes the global instructions loaded into every future Claude Code session on this machine. Same applies to `settings.json` and `keybindings.json` — they're symlinks, not copies.
+
+**Layout:**
+- `CLAUDE.md` — this file (global instructions, symlinked)
+- `settings.json` — `enabledPlugins`, marketplace, permissions (symlinked)
+- `keybindings.json` — chord/key overrides (symlinked)
+- `bootstrap.sh` — idempotent installer; symlinks the three files above into `~/.claude/`, backs up any real files it finds to `~/.claude.bak.<timestamp>/`
+- `plugins.md` — human-readable inventory of what each enabled plugin is for
+- `README.md` — setup/update workflow for a fresh machine
+- `.gitignore` — keeps machine-local state (sessions, history, credentials, caches) out of the repo
+
+**Plugin model:** plugins are *declared*, not vendored. `settings.json` lists them under `enabledPlugins`; Claude Code auto-installs from `anthropics/claude-plugins-official` on next launch. To add one: edit `settings.json`, update `plugins.md`, commit. To browse what's available: `/plugin marketplace browse claude-plugins-official`.
+
+**What's intentionally NOT here:** per-project `.claude/` folders, session/history/cache files, top-level MCP OAuth state (Notion, Gmail, Vercel etc. live in `~/.claude.json` per-machine), vendored plugin source. See `README.md` "What's intentionally NOT here" for rationale.
+
+**Workflow for changes:**
+1. Edit the file here in `~/dotclaude/`
+2. `git add -A && git commit -m "feat: …" && git push` (conventional commits enforced)
+3. Symlinks already point at the repo — changes apply on next Claude session
+4. On other machines: `cd ~/dotclaude && git pull`
+
+**Gotcha:** if `bootstrap.sh` is re-run after manual edits to `~/.claude/CLAUDE.md` (the symlink target), it will detect a non-symlink, move it to `~/.claude.bak.<timestamp>/`, and re-link from the repo. Real edits should always happen here in the repo, not in `~/.claude/`.
+
+---
+
 # Global CLAUDE.md (Garrett)
 
 Loaded from `~/.claude/CLAUDE.md` for every Claude Code session. Per-repo `CLAUDE.md` files override anything here.
