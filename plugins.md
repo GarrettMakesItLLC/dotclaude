@@ -1,6 +1,6 @@
 # Plugins
 
-22 plugins enabled, all from `anthropics/claude-plugins-official`. Declared in `settings.json` under `enabledPlugins` — Claude Code auto-installs them on first launch.
+21 plugins enabled, all from `anthropics/claude-plugins-official`. Declared in `settings.json` under `enabledPlugins` — Claude Code auto-installs them on first launch.
 
 ## Stack-specific (use what you actually deploy)
 
@@ -41,7 +41,8 @@
 | `skill-creator` | Create new skills, edit existing, run evals to measure performance |
 | `plugin-dev` | End-to-end plugin creation workflow |
 | `mcp-server-dev` | Build MCP servers (remote HTTP, MCPB, local stdio) + bundle as MCPB packages |
-| `atomic-agents` | Agent toolkit (TBD — investigate when needed) |
+
+> **Removed:** `atomic-agents` — investigated and dropped. It's tooling for the **Atomic Agents Python framework** (BrainBlend AI): scaffolding/auditing apps built on that specific framework. My stack is TS/Next.js/Vercel/Supabase, so it added skills + 2 subagents to every session for nothing. Re-add `"atomic-agents@claude-plugins-official": true` to `settings.json` if I ever pick up that framework.
 
 ## User-installed skills
 
