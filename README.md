@@ -60,4 +60,4 @@ If a rule starts being repeated in 3+ project repos, hoist it here and remove it
 - **Per-project `.claude/` folders** — those live with each project (rules, commands, worktrees state).
 - **Local-only files** — sessions, history, paste cache, credentials. Listed in `.gitignore`.
 - **Vendored plugin source** — plugins are declared in `settings.json` and installed from the marketplace. Self-contained, versioned, and easy to update with `/plugin update`.
-- **Vendored skills** — domain skills now come from plugins. The only standalone user skill is `find-skills`; manually drop it in `~/.claude/skills/find-skills/` if needed.
+- **Vendored plugin skills** — domain skills come from plugins, installed from the marketplace. The one standalone user skill, `find-skills`, *is* vendored here (`skills/find-skills/`) and symlinked into `~/.claude/skills/` by bootstrap — it's not in any plugin, so the repo is its source of truth.

@@ -45,7 +45,7 @@
 
 ## User-installed skills
 
-Only one user skill remains: `find-skills` (skill discovery — not in any plugin). It has no installer; manually drop it in `~/.claude/skills/find-skills/` if rebuilding from scratch. All domain skills (Supabase, etc.) come from plugins.
+Only one user skill remains: `find-skills` (skill discovery — not in any plugin). It's **vendored in this repo** at `skills/find-skills/` and symlinked into `~/.claude/skills/` by `bootstrap.sh`, so a fresh machine gets it automatically. All domain skills (Supabase, etc.) come from plugins.
 
 ## MCP servers added by plugins
 

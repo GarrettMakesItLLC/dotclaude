@@ -7,6 +7,7 @@ This file lives in `~/dotclaude/CLAUDE.md` and is **symlinked** to `~/.claude/CL
 - `settings.json` — `enabledPlugins`, marketplace, permissions (symlinked)
 - `keybindings.json` — chord/key overrides (symlinked)
 - `hooks/` — PreToolUse hook scripts (symlinked to `~/.claude/hooks/`). `git-guard.sh` hard-blocks `--no-verify`, force-push to `main`/`master`, and `.env` commits — the enforcement layer behind the prose rules below. Matters because `settings.json` runs `bypassPermissions`, so the hook is the only gate.
+- `skills/` — vendored user-level skills (just `find-skills`); each is symlinked into `~/.claude/skills/<name>` by bootstrap. Plugin skills are NOT here — they come from the marketplace.
 - `bootstrap.sh` — idempotent installer; symlinks the files + `hooks/` above into `~/.claude/`, backs up any real files it finds to `~/.claude.bak.<timestamp>/`
 - `plugins.md` — human-readable inventory of what each enabled plugin is for
 - `README.md` — setup/update workflow for a fresh machine

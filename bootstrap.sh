@@ -23,6 +23,11 @@ SHARED_FILES=(
 SHARED_DIRS=(
   "hooks"   # PreToolUse git-guard etc. — enforce CLAUDE.md rules deterministically
 )
+# Skills are linked individually into ~/.claude/skills/<name> (NOT a whole-dir
+# link) so they coexist with skills sourced elsewhere (e.g. ~/.agents).
+SHARED_SKILLS=(
+  "find-skills"   # skill discovery — the one user-level skill not in a plugin
+)
 
 MODE="install"
 case "${1:-}" in
@@ -59,6 +64,17 @@ doctor() {
       problems=$((problems + 1))
     else
       echo "  ✗ $name — missing. Run bootstrap to link it."
+      problems=$((problems + 1))
+    fi
+  done
+  for name in "${SHARED_SKILLS[@]}"; do
+    src="$REPO_DIR/skills/$name"
+    dst="$CLAUDE_DIR/skills/$name"
+    [ -e "$src" ] || continue
+    if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
+      echo "  ✓ skills/$name"
+    else
+      echo "  ✗ skills/$name — not linked to repo. Run bootstrap to fix."
       problems=$((problems + 1))
     fi
   done
@@ -129,6 +145,23 @@ done
 # Hook scripts must be executable.
 if [ -d "$REPO_DIR/hooks" ]; then
   chmod +x "$REPO_DIR"/hooks/*.sh 2>/dev/null || true
+fi
+
+# Per-skill links into ~/.claude/skills/ (coexist with other skill sources).
+if [ "${#SHARED_SKILLS[@]}" -gt 0 ]; then
+  echo "→ Linking skills into $CLAUDE_DIR/skills"
+  mkdir -p "$CLAUDE_DIR/skills"
+  for s in "${SHARED_SKILLS[@]}"; do
+    src="$REPO_DIR/skills/$s"
+    dst="$CLAUDE_DIR/skills/$s"
+    if [ ! -d "$src" ]; then
+      echo "  skip: skills/$s (not in repo)"
+      continue
+    fi
+    backup_if_real "$dst"
+    ln -s "$src" "$dst"
+    echo "  linked: skills/$s"
+  done
 fi
 
 # --------------------------------------------------------------------------
