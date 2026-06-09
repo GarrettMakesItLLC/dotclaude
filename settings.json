@@ -1,6 +1,19 @@
 {
   "permissions": {
-    "defaultMode": "bypassPermissions"
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Bash(git fetch *)",
+      "Bash(git worktree add *)",
+      "Bash(pnpm type-check)",
+      "Bash(pnpm lint)",
+      "mcp__plugin_railway_railway__get_logs",
+      "mcp__plugin_railway_railway__list_deployments",
+      "mcp__plugin_railway_railway__list_services",
+      "mcp__plugin_railway_railway__list_projects",
+      "mcp__plugin_supabase_supabase__list_projects",
+      "mcp__plugin_supabase_supabase__get_project",
+      "mcp__plugin_supabase_supabase__list_tables"
+    ]
   },
   "skipDangerousModePermissionPrompt": true,
   "extraKnownMarketplaces": {
