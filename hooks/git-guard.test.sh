@@ -33,6 +33,17 @@ check 2 'git push --force-with-lease origin master'
 check 2 'git add .env'
 check 2 'git add config/.env.production'
 check 2 'git commit .env -m "x"'
+check 2 'git -c core.hooksPath=/dev/null commit -m "x"'
+check 2 'git push --force origin refs/heads/main'
+check 2 'git push origin +main'
+check 2 'git push origin +HEAD:main'
+
+# Should ALLOW — flag/path tokens that appear only inside a -m MESSAGE body.
+check 0 'git commit -m "fix: load .env before init"'
+check 0 'git commit -am "chore: add .env to gitignore"'
+check 0 'git commit -m "stop using --no-verify in scripts"'
+check 0 'git commit -m "force-push to main is now blocked"'
+check 0 'git commit -m "document core.hooksPath bypass"'
 
 # Should ALLOW (exit 0)
 check 0 'git commit -m "feat: normal commit about main flow"'
