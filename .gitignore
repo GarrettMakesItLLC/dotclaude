@@ -17,6 +17,7 @@ shell-snapshots/
 tasks/
 telemetry/
 .credentials.json
+.worktrees/
 
 # OS noise
 .DS_Store
