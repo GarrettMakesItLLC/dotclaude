@@ -64,5 +64,5 @@ jobs:
             else
               echo "✓ $subject"
             fi
-          done < <(git rev-list "$base..$head")
+          done < <(git rev-list --no-merges "$base..$head")
           exit $fail
