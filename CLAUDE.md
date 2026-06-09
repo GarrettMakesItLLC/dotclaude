@@ -10,6 +10,7 @@ This file lives in `~/dotclaude/CLAUDE.md` and is **symlinked** to `~/.claude/CL
 - `skills/` — vendored user-level skills (just `find-skills`); each is symlinked into `~/.claude/skills/<name>` by bootstrap. Plugin skills are NOT here — they come from the marketplace.
 - `bootstrap.sh` — idempotent installer; symlinks the files + `hooks/` above into `~/.claude/`, backs up any real files it finds to `~/.claude.bak.<timestamp>/`
 - `plugins.md` — human-readable inventory of what each enabled plugin is for
+- `mcp-connectors.md` — checklist of claude.ai OAuth connectors (Notion, Gmail, Vercel…) to reconnect on a fresh machine; they live per-machine in `~/.claude.json`, not in this repo
 - `README.md` — setup/update workflow for a fresh machine
 - `.gitignore` — keeps machine-local state (sessions, history, credentials, caches) out of the repo
 
@@ -156,7 +157,7 @@ I have these MCP servers configured. Use them instead of WebFetch / WebSearch / 
 - **Playwright MCP** — full browser control (navigate, click, screenshot, network, console). Use to verify UI changes and run E2E flows live.
 - **GitHub plugin** (not MCP, but plugin tooling) — beyond `gh` for repo/PR/issue ops.
 
-**Top-level MCPs (configured in `~/.claude.json`, per-machine OAuth):**
+**Top-level MCPs (claude.ai connectors, per-machine OAuth in `~/.claude.json` — reconnect list in `mcp-connectors.md`):**
 
 - **Vercel MCP** — deployments, build logs, runtime logs, projects.
 - **Notion MCP** — search pages, fetch docs, query databases. Many specs / playbooks live here.
