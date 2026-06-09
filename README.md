@@ -22,10 +22,16 @@ bash ~/dotclaude/bootstrap.sh
 ```
 
 The bootstrap script:
-1. Symlinks `CLAUDE.md`, `settings.json`, `keybindings.json` into `~/.claude/`
+1. Symlinks `CLAUDE.md`, `settings.json`, `keybindings.json` + the `hooks/` dir into `~/.claude/`
 2. Reports which plugins will auto-install on first `claude` launch
 
 Existing files in `~/.claude/` are backed up to `~/.claude.bak.<timestamp>/` (never overwritten).
+
+Verify the links anytime (changes nothing):
+
+```bash
+bash ~/dotclaude/bootstrap.sh --check
+```
 
 ## Updating
 

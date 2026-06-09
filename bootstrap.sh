@@ -1,16 +1,83 @@
 #!/usr/bin/env bash
-# dotclaude bootstrap — run on a fresh machine to set up Claude Code with my global config.
+# dotclaude bootstrap — set up Claude Code with my global config on a machine.
 #
 # Usage:
 #   git clone git@github.com:<user>/dotclaude.git ~/dotclaude
-#   bash ~/dotclaude/bootstrap.sh
+#   bash ~/dotclaude/bootstrap.sh            # install (symlink into ~/.claude/)
+#   bash ~/dotclaude/bootstrap.sh --check    # doctor: verify links, change nothing
 #
-# Idempotent: safe to re-run. Existing files are backed up to ~/.claude.bak.<timestamp>/.
+# Idempotent: safe to re-run. Existing real files are backed up to
+# ~/.claude.bak.<timestamp>/ before being replaced with symlinks.
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
+
+# What gets linked into ~/.claude/. Single source of truth for install + doctor.
+SHARED_FILES=(
+  "CLAUDE.md"
+  "settings.json"
+  "keybindings.json"
+)
+SHARED_DIRS=(
+  "hooks"   # PreToolUse git-guard etc. — enforce CLAUDE.md rules deterministically
+)
+
+MODE="install"
+case "${1:-}" in
+  --check|-c)  MODE="check" ;;
+  --help|-h)   sed -n '2,11p' "$0"; exit 0 ;;
+  "")          ;;
+  *)           echo "unknown arg: $1 (try --help)" >&2; exit 2 ;;
+esac
+
+# --------------------------------------------------------------------------
+# Doctor: verify every expected symlink exists and points back into the repo.
+# Catches the documented footgun where a re-run (or a stray editor) replaced
+# ~/.claude/CLAUDE.md with a real file, silently detaching it from the repo.
+# Changes nothing; exits non-zero if anything is off.
+# --------------------------------------------------------------------------
+doctor() {
+  echo "→ dotclaude doctor — verifying symlinks in $CLAUDE_DIR"
+  echo "  repo: $REPO_DIR"
+  local problems=0 name src dst tgt
+  for name in "${SHARED_FILES[@]}" "${SHARED_DIRS[@]}"; do
+    src="$REPO_DIR/$name"
+    dst="$CLAUDE_DIR/$name"
+    [ -e "$src" ] || continue
+    if [ -L "$dst" ]; then
+      tgt="$(readlink "$dst")"
+      if [ "$tgt" = "$src" ]; then
+        echo "  ✓ $name"
+      else
+        echo "  ✗ $name — points to '$tgt', expected '$src'"
+        problems=$((problems + 1))
+      fi
+    elif [ -e "$dst" ]; then
+      echo "  ✗ $name — real file/dir shadowing the repo (not a symlink). Re-run bootstrap to fix."
+      problems=$((problems + 1))
+    else
+      echo "  ✗ $name — missing. Run bootstrap to link it."
+      problems=$((problems + 1))
+    fi
+  done
+  if [ "$problems" -eq 0 ]; then
+    echo "✓ All symlinks healthy."
+    return 0
+  fi
+  echo
+  echo "✗ $problems issue(s) found. Fix with: bash $REPO_DIR/bootstrap.sh"
+  return 1
+}
+
+if [ "$MODE" = "check" ]; then
+  if doctor; then exit 0; else exit 1; fi
+fi
+
+# --------------------------------------------------------------------------
+# Install
+# --------------------------------------------------------------------------
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="$HOME/.claude.bak.$TIMESTAMP"
 
@@ -20,15 +87,6 @@ echo "  target:  $CLAUDE_DIR"
 echo
 
 mkdir -p "$CLAUDE_DIR"
-
-# --------------------------------------------------------------------------
-# Symlink shared files from the repo into ~/.claude/
-# --------------------------------------------------------------------------
-SHARED_FILES=(
-  "CLAUDE.md"
-  "settings.json"
-  "keybindings.json"
-)
 
 backup_if_real() {
   local target="$1"
@@ -54,14 +112,7 @@ for f in "${SHARED_FILES[@]}"; do
   echo "  linked: $f"
 done
 
-# --------------------------------------------------------------------------
-# Symlink shared directories from the repo into ~/.claude/ (whole-dir links so
-# anything added to them in the repo syncs automatically).
-# --------------------------------------------------------------------------
-SHARED_DIRS=(
-  "hooks"   # PreToolUse git-guard etc. — enforce CLAUDE.md rules deterministically
-)
-
+# Whole-dir links so anything added to them in the repo syncs automatically.
 echo "→ Linking directories into $CLAUDE_DIR"
 for d in "${SHARED_DIRS[@]}"; do
   src="$REPO_DIR/$d"
@@ -95,6 +146,7 @@ echo "Next steps:"
 echo "  1. Launch Claude Code: \`claude\`"
 echo "  2. Trust the marketplace when prompted (anthropics/claude-plugins-official)"
 echo "  3. Plugins will install automatically; verify with \`/plugin\`"
+echo "  4. Sanity-check anytime with: bash $REPO_DIR/bootstrap.sh --check"
 echo
 if [ -d "$BACKUP_DIR" ]; then
   echo "Existing files backed up to: $BACKUP_DIR"

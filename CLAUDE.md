@@ -22,7 +22,7 @@ This file lives in `~/dotclaude/CLAUDE.md` and is **symlinked** to `~/.claude/CL
 3. Symlinks already point at the repo — changes apply on next Claude session
 4. On other machines: `cd ~/dotclaude && git pull`
 
-**Gotcha:** if `bootstrap.sh` is re-run after manual edits to `~/.claude/CLAUDE.md` (the symlink target), it will detect a non-symlink, move it to `~/.claude.bak.<timestamp>/`, and re-link from the repo. Real edits should always happen here in the repo, not in `~/.claude/`.
+**Gotcha:** if `bootstrap.sh` is re-run after manual edits to `~/.claude/CLAUDE.md` (the symlink target), it will detect a non-symlink, move it to `~/.claude.bak.<timestamp>/`, and re-link from the repo. Real edits should always happen here in the repo, not in `~/.claude/`. Run `bash ~/dotclaude/bootstrap.sh --check` anytime to detect drift (a link replaced by a real file, or a missing link) without changing anything.
 
 ---
 
