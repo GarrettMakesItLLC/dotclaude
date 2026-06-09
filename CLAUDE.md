@@ -62,6 +62,8 @@ Everything else: decide and move. When in doubt between asking and proceeding on
 - Built-in "review checkpoints" in skills (`executing-plans`, `requesting-code-review`, `finishing-a-development-branch`) are **pre-approved** for routine work. Run the review, address what it finds, and continue — surface results in the final summary, not as a gate.
 - `brainstorming` is for genuinely greenfield or ambiguous work. For a well-specified feature/bug, skip it: proceed on best-practice assumptions instead of opening a Q&A.
 
+**Agent teams** (experimental, enabled via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in `settings.json`; needs Claude Code ≥ 2.1.32). These spawn *separate* Claude sessions that share a task list and message each other directly — heavier than subagents but they can challenge each other's findings. Don't reach for them by default. Use a team only when I explicitly ask, or for work where parallel *independent* exploration genuinely pays: multi-angle research/review, competing-hypothesis debugging, or features that split cleanly across frontend/backend/tests with one owner each. For everything else, subagents (report-back, cheaper) remain the default. Runtime state lives in `~/.claude/teams/` + `~/.claude/tasks/` (gitignored) — never pre-author or commit it.
+
 ### Worktree-first for code changes
 
 Before making any code changes in a repo with `.worktrees/` (gitignored), set up an isolated worktree using the `superpowers:using-git-worktrees` skill. Multiple Claude sessions in the same checkout will conflict.

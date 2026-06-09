@@ -15,6 +15,7 @@ session-env/
 sessions/
 shell-snapshots/
 tasks/
+teams/
 telemetry/
 .credentials.json
 .worktrees/
