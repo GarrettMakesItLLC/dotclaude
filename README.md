@@ -9,6 +9,7 @@ My personal Claude Code configuration — synced across machines via git.
 | `CLAUDE.md` | Global instructions injected into every Claude Code session. Cross-cutting rules + default stack assumptions. |
 | `settings.json` | User-scope settings. Declares enabled plugins, the official marketplace, and permission defaults. |
 | `keybindings.json` | Custom keyboard shortcuts (e.g., shift+enter for newline in chat). |
+| `hooks/` | PreToolUse hook scripts, symlinked to `~/.claude/hooks/`. `git-guard.sh` enforces the git rules (blocks `--no-verify`, force-push to `main`, `.env` commits) — the deterministic backstop under `bypassPermissions` mode. |
 | `bootstrap.sh` | One-command installer for a fresh machine. Symlinks files into `~/.claude/`. |
 | `plugins.md` | Notes on which plugins are installed and what each one is for. |
 | `.gitignore` | Keeps machine-local cruft out of the repo (history, sessions, caches, credentials). |

@@ -6,7 +6,8 @@ This file lives in `~/dotclaude/CLAUDE.md` and is **symlinked** to `~/.claude/CL
 - `CLAUDE.md` — this file (global instructions, symlinked)
 - `settings.json` — `enabledPlugins`, marketplace, permissions (symlinked)
 - `keybindings.json` — chord/key overrides (symlinked)
-- `bootstrap.sh` — idempotent installer; symlinks the three files above into `~/.claude/`, backs up any real files it finds to `~/.claude.bak.<timestamp>/`
+- `hooks/` — PreToolUse hook scripts (symlinked to `~/.claude/hooks/`). `git-guard.sh` hard-blocks `--no-verify`, force-push to `main`/`master`, and `.env` commits — the enforcement layer behind the prose rules below. Matters because `settings.json` runs `bypassPermissions`, so the hook is the only gate.
+- `bootstrap.sh` — idempotent installer; symlinks the files + `hooks/` above into `~/.claude/`, backs up any real files it finds to `~/.claude.bak.<timestamp>/`
 - `plugins.md` — human-readable inventory of what each enabled plugin is for
 - `README.md` — setup/update workflow for a fresh machine
 - `.gitignore` — keeps machine-local state (sessions, history, credentials, caches) out of the repo
@@ -75,7 +76,7 @@ Never create files like `INTEGRATION_SUMMARY.md`, `CHANGES.md`, `WHAT_I_DID.md`,
 
 ### Don't bypass git hooks
 
-Never use `--no-verify` on commit or push unless I explicitly ask. If a pre-commit hook fails:
+Never use `--no-verify` on commit or push unless I explicitly ask. (Enforced: `hooks/git-guard.sh` hard-blocks `--no-verify`, `commit -n`, force-push to `main`/`master`, and `.env` commits.) If a pre-commit hook fails:
 - gitleaks flagged a real secret → rotate it, don't allowlist
 - lint-staged failed → fix the lint/format issue
 - typecheck failed → fix the types

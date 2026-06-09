@@ -55,6 +55,32 @@ for f in "${SHARED_FILES[@]}"; do
 done
 
 # --------------------------------------------------------------------------
+# Symlink shared directories from the repo into ~/.claude/ (whole-dir links so
+# anything added to them in the repo syncs automatically).
+# --------------------------------------------------------------------------
+SHARED_DIRS=(
+  "hooks"   # PreToolUse git-guard etc. — enforce CLAUDE.md rules deterministically
+)
+
+echo "→ Linking directories into $CLAUDE_DIR"
+for d in "${SHARED_DIRS[@]}"; do
+  src="$REPO_DIR/$d"
+  dst="$CLAUDE_DIR/$d"
+  if [ ! -d "$src" ]; then
+    echo "  skip: $d/ (not in repo)"
+    continue
+  fi
+  backup_if_real "$dst"
+  ln -s "$src" "$dst"
+  echo "  linked: $d/"
+done
+
+# Hook scripts must be executable.
+if [ -d "$REPO_DIR/hooks" ]; then
+  chmod +x "$REPO_DIR"/hooks/*.sh 2>/dev/null || true
+fi
+
+# --------------------------------------------------------------------------
 # Plugins are declared in settings.json (enabledPlugins + extraKnownMarketplaces).
 # Claude Code auto-installs them on first launch from the official marketplace.
 # --------------------------------------------------------------------------
