@@ -6,7 +6,7 @@ This file lives in `~/dotclaude/CLAUDE.md` and is **symlinked** to `~/.claude/CL
 - `CLAUDE.md` — this file (global instructions, symlinked)
 - `settings.json` — `enabledPlugins`, marketplace, permissions (symlinked)
 - `keybindings.json` — chord/key overrides (symlinked)
-- `hooks/` — PreToolUse hook scripts (symlinked to `~/.claude/hooks/`). `git-guard.sh` hard-blocks `--no-verify`, force-push to `main`/`master`, and `.env` commits — the enforcement layer behind the prose rules below. Matters because `settings.json` runs `bypassPermissions`, so the hook is the only gate.
+- `hooks/` — PreToolUse hook scripts (symlinked to `~/.claude/hooks/`). `git-guard.sh` hard-blocks `--no-verify`, force-push to `main`/`master`, and `.env` commits — the enforcement layer behind the prose rules below. It's a **targeted backstop for those three git rules**, not a sandbox: under `bypassPermissions` everything else (arbitrary `rm`, `curl | sh`, writes outside the repo) still runs unguarded. The hook narrows that one class of mistake; it does not make bypass mode safe.
 - `skills/` — vendored user-level skills (just `find-skills`); each is symlinked into `~/.claude/skills/<name>` by bootstrap. Plugin skills are NOT here — they come from the marketplace.
 - `commands/` — personal slash commands (symlinked to `~/.claude/commands/`). `/dotclaude-sync` pulls the repo and runs the link doctor.
 - `bootstrap.sh` — idempotent installer; symlinks the files + `hooks/` above into `~/.claude/`, backs up any real files it finds to `~/.claude.bak.<timestamp>/`

@@ -13,6 +13,15 @@
 # JSON), we exit 0 and let the command through. A guard that bricks every Bash
 # call is far worse than one that occasionally misses — it is a backstop, not
 # the only safety boundary (project-level gitleaks/pre-commit still apply).
+#
+# KNOWN GAPS (by design — this is a backstop, not a sandbox; don't expand into a
+# regex arms race):
+#   - Env-var hook bypasses: `HUSKY=0 git commit`, or core.hooksPath set via
+#     GIT_CONFIG_* env vars rather than `-c`. Same class as --no-verify.
+#   - `git add -A` / `git add .` that sweeps an unmentioned .env — left to
+#     project gitleaks/pre-commit.
+#   - Anything non-git (rm -rf, curl | sh, writes outside the repo) — entirely
+#     out of scope; bypassPermissions does not gate those either.
 
 set -uo pipefail
 

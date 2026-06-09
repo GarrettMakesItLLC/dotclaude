@@ -9,9 +9,12 @@ My personal Claude Code configuration — synced across machines via git.
 | `CLAUDE.md` | Global instructions injected into every Claude Code session. Cross-cutting rules + default stack assumptions. |
 | `settings.json` | User-scope settings. Declares enabled plugins, the official marketplace, and permission defaults. |
 | `keybindings.json` | Custom keyboard shortcuts (e.g., shift+enter for newline in chat). |
-| `hooks/` | PreToolUse hook scripts, symlinked to `~/.claude/hooks/`. `git-guard.sh` enforces the git rules (blocks `--no-verify`, force-push to `main`, `.env` commits) — the deterministic backstop under `bypassPermissions` mode. |
+| `hooks/` | PreToolUse hook scripts, symlinked to `~/.claude/hooks/`. `git-guard.sh` enforces three git rules (blocks `--no-verify`, force-push to `main`, `.env` commits). A *targeted* backstop for those rules — not a sandbox; it doesn't gate the rest of what `bypassPermissions` allows. |
+| `commands/` | Personal slash commands, symlinked to `~/.claude/commands/` (e.g. `/dotclaude-sync`). |
+| `skills/` | Vendored user-level skills (`find-skills`); each linked into `~/.claude/skills/<name>`. |
 | `bootstrap.sh` | One-command installer for a fresh machine. Symlinks files into `~/.claude/`. |
 | `plugins.md` | Notes on which plugins are installed and what each one is for. |
+| `mcp-connectors.md` | Checklist of claude.ai OAuth connectors (Notion, Gmail, Vercel…) to reconnect on a fresh machine. |
 | `.gitignore` | Keeps machine-local cruft out of the repo (history, sessions, caches, credentials). |
 
 ## Setup on a new machine
@@ -22,7 +25,7 @@ bash ~/dotclaude/bootstrap.sh
 ```
 
 The bootstrap script:
-1. Symlinks `CLAUDE.md`, `settings.json`, `keybindings.json` + the `hooks/` dir into `~/.claude/`
+1. Symlinks `CLAUDE.md`, `settings.json`, `keybindings.json`, the `hooks/` and `commands/` dirs, and vendored skills into `~/.claude/`
 2. Reports which plugins will auto-install on first `claude` launch
 
 Existing files in `~/.claude/` are backed up to `~/.claude.bak.<timestamp>/` (never overwritten).

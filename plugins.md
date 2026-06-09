@@ -57,6 +57,7 @@ These run automatically once the plugin is installed and you've authenticated:
 | Supabase MCP | `supabase` | OAuth via `mcp__plugin_supabase_supabase__authenticate` |
 | Stripe MCP | `stripe` | OAuth via `mcp__plugin_stripe_stripe__authenticate` |
 | Prisma MCP | `prisma` | OAuth via `mcp__plugin_prisma_Prisma-Remote__authenticate` |
+| Railway MCP | `railway` | OAuth via `mcp__plugin_railway_railway__*` (read-only ops allowlisted in `settings.json`) |
 | Playwright MCP | `playwright` | None (local browser control) |
 
 Plus separately-configured top-level MCPs (Notion, Gmail, Calendar, Drive, PubMed, Spotify, Vercel) live in `~/.claude.json` and are NOT in this repo — they're per-machine OAuth state.

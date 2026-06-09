@@ -20,6 +20,10 @@ SHARED_FILES=(
   "settings.json"
   "keybindings.json"
 )
+# Whole-dir symlinks: the repo dir BECOMES ~/.claude/<dir>, so nothing
+# machine-local can live alongside these. If you ever need a non-repo hook or
+# command on one machine, move that entry to a per-name scheme like
+# SHARED_SKILLS below.
 SHARED_DIRS=(
   "hooks"      # PreToolUse git-guard etc. — enforce CLAUDE.md rules deterministically
   "commands"   # personal slash commands (e.g. /dotclaude-sync)
