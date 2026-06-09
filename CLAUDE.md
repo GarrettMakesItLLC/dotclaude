@@ -33,6 +33,31 @@ Loaded from `~/.claude/CLAUDE.md` for every Claude Code session. Per-repo `CLAUD
 
 ## Workflow rules — always apply
 
+### Autonomy — drive every task to completion
+
+When I hand you a feature or bug, **own it end-to-end without checkpoint questions.** The whole arc is one task, not six approvals:
+
+**plan → implement → test → self-review → address review findings → PR-ready**
+
+- Don't stop between stages to ask "should I continue?" / "want me to move on?" / "should I implement now?" / "linear or subagents?". The answer is always: yes, keep going, use subagents. Carry the work to a PR that's ready to merge.
+- The only hard stop is the **irreversible final action**: opening the PR is yours to do, but **merging to `main`, deploying, destructive data ops, force-push, and anything outward-facing/published are mine.** Take it right up to that line and stop there.
+- **Make industry-standard assumptions and proceed.** Pick the conventional, best-practice option, note it in one line, and keep moving. A wrong assumption is cheap — it's visible in the diff and trivial to fix. A stalled task costs me more.
+- Bundle any non-blocking questions or flagged choices into the **final summary**, not as mid-task interruptions.
+
+**When you MAY stop and ask** — only when guessing wrong is genuinely costly:
+- **Irreversible / hard-to-undo**: prod migrations, deletes, merges, deploys, force-push, anything published or outward-facing.
+- **Big architecture forks / one-way doors**: choice of framework, data model, auth model, public API shape, or anything expensive to reverse later.
+- **Genuinely ambiguous intent** where reasonable engineers would build materially *different* things — and only after you've tried to resolve it from the code, docs, and my MCPs (Notion specs, etc.) first.
+
+Everything else: decide and move. When in doubt between asking and proceeding on a reasonable default, **proceed.**
+
+### Default to parallel + subagents
+
+- Non-trivial features and bugs are **subagent-driven by default** (`superpowers:subagent-driven-development`) — don't ask which mode. Reserve linear/inline execution for genuinely small, single-file, low-risk changes.
+- Run independent work **in parallel** (`superpowers:dispatching-parallel-agents`): parallel exploration, parallel implementation of independent slices, parallel review dimensions. Always batch independent tool calls into one message.
+- Built-in "review checkpoints" in skills (`executing-plans`, `requesting-code-review`, `finishing-a-development-branch`) are **pre-approved** for routine work. Run the review, address what it finds, and continue — surface results in the final summary, not as a gate.
+- `brainstorming` is for genuinely greenfield or ambiguous work. For a well-specified feature/bug, skip it: proceed on best-practice assumptions instead of opening a Q&A.
+
 ### Worktree-first for code changes
 
 Before making any code changes in a repo with `.worktrees/` (gitignored), set up an isolated worktree using the `superpowers:using-git-worktrees` skill. Multiple Claude sessions in the same checkout will conflict.
