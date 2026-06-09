@@ -49,6 +49,9 @@ cd ~/dotclaude && git pull
 # Symlinks already point at the repo — changes apply on next Claude session.
 ```
 
+Or just run `/dotclaude-sync` in any Claude Code session — it pulls the repo and
+runs the link doctor (`bootstrap.sh --check`) for you.
+
 ## Per-repo overrides
 
 Each project repo has its own `CLAUDE.md` and optionally `.claude/rules/<rule>.md`. Per-repo files always win over what's in this global `CLAUDE.md`.

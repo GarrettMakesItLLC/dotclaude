@@ -21,7 +21,8 @@ SHARED_FILES=(
   "keybindings.json"
 )
 SHARED_DIRS=(
-  "hooks"   # PreToolUse git-guard etc. — enforce CLAUDE.md rules deterministically
+  "hooks"      # PreToolUse git-guard etc. — enforce CLAUDE.md rules deterministically
+  "commands"   # personal slash commands (e.g. /dotclaude-sync)
 )
 # Skills are linked individually into ~/.claude/skills/<name> (NOT a whole-dir
 # link) so they coexist with skills sourced elsewhere (e.g. ~/.agents).
