@@ -63,6 +63,14 @@ These run automatically once the plugin is installed and you've authenticated:
 
 Plus separately-configured top-level MCPs (Notion, Gmail, Calendar, Drive, PubMed, Spotify, Vercel) live in `~/.claude.json` and are NOT in this repo — they're per-machine OAuth state.
 
+## Custom MCPs (vendored in this repo)
+
+Unlike marketplace plugins (declared, not vendored), these are servers I built — their source lives in `mcp/`. `bootstrap.sh` installs deps, builds, and registers them with `claude mcp add` (user scope).
+
+| MCP | Source | Auth | Purpose |
+|-----|--------|------|---------|
+| `github-rest` | `mcp/github/` | Reuses `gh auth token` at runtime | Local stdio server wrapping the GitHub **REST** API (PR + issue + repo ops). Built because the `gh` CLI / `github` plugin route PR ops through GraphQL, which fails on the deprecated `projectCards` field. REST-only — so no `projectCards` error and no `jq` dependency. **Prefer it over `gh pr ...` for PR/issue edits.** See `mcp/github/README.md`. |
+
 ## Discovering more
 
 ```
