@@ -55,6 +55,52 @@ for f in "${SHARED_FILES[@]}"; do
 done
 
 # --------------------------------------------------------------------------
+# Symlink whole directories that the repo fully owns: path-scoped rules and
+# the safety hooks referenced by settings.json.
+# --------------------------------------------------------------------------
+SHARED_DIRS=(
+  "rules"
+  "hooks"
+)
+
+echo
+echo "→ Linking directories into $CLAUDE_DIR"
+for d in "${SHARED_DIRS[@]}"; do
+  src="$REPO_DIR/$d"
+  dst="$CLAUDE_DIR/$d"
+  if [ ! -d "$src" ]; then
+    echo "  skip: $d/ (not in repo)"
+    continue
+  fi
+  backup_if_real "$dst"
+  ln -s "$src" "$dst"
+  echo "  linked: $d/"
+done
+
+# Ensure hook scripts are executable (git preserves the bit, but be safe).
+if [ -d "$REPO_DIR/hooks" ]; then
+  chmod +x "$REPO_DIR"/hooks/*.sh 2>/dev/null || true
+fi
+
+# --------------------------------------------------------------------------
+# Skills: ~/.claude/skills/ may hold plugin- and user-managed skills, so link
+# each of our skills individually instead of clobbering the whole directory.
+# --------------------------------------------------------------------------
+if [ -d "$REPO_DIR/skills" ]; then
+  echo
+  echo "→ Linking skills into $CLAUDE_DIR/skills"
+  mkdir -p "$CLAUDE_DIR/skills"
+  for src in "$REPO_DIR"/skills/*/; do
+    [ -d "$src" ] || continue
+    name="$(basename "$src")"
+    dst="$CLAUDE_DIR/skills/$name"
+    backup_if_real "$dst"
+    ln -s "${src%/}" "$dst"
+    echo "  linked: skills/$name"
+  done
+fi
+
+# --------------------------------------------------------------------------
 # Plugins are declared in settings.json (enabledPlugins + extraKnownMarketplaces).
 # Claude Code auto-installs them on first launch from the official marketplace.
 # --------------------------------------------------------------------------
