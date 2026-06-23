@@ -10,6 +10,7 @@ My personal Claude Code configuration — synced across machines via git.
 | `rules/` | Path-scoped stack conventions (TypeScript, frontend, data/API, testing, monorepo/hosting). Each loads only when Claude opens a matching file. Symlinked to `~/.claude/rules/`. |
 | `skills/` | Personal skills (currently `finishing-work`). Load on demand when invoked or matched. Each linked into `~/.claude/skills/`. |
 | `hooks/` | Deterministic guardrails run by Claude Code. `guard-bash.sh` blocks dangerous shell commands. Symlinked to `~/.claude/hooks/`. |
+| `mcp/` | Source for custom MCP servers I built (e.g. `mcp/github` — a REST wrapper for GitHub PR/issue/repo ops). `bootstrap.sh` builds and registers each with `claude mcp add`. See `plugins.md`. |
 | `settings.json` | User-scope settings: enabled plugins, the official marketplace, permission defaults, and the hooks wiring. |
 | `keybindings.json` | Custom keyboard shortcuts (e.g., shift+enter for newline in chat). |
 | `bootstrap.sh` | One-command installer for a fresh machine. Symlinks files + directories into `~/.claude/`. |
@@ -79,5 +80,5 @@ Each project repo has its own `CLAUDE.md` and optionally `.claude/rules/<rule>.m
 - **Per-project `.claude/` folders** — those live with each project (rules, commands, worktree state).
 - **Local-only files** — sessions, history, paste cache, credentials. Listed in `.gitignore`.
 - **Top-level MCP OAuth state** — Notion, Gmail, Vercel, etc. live in `~/.claude.json` per-machine.
-- **Vendored plugin source** — plugins are declared in `settings.json` and installed from the marketplace. Update with `/plugin update`.
+- **Vendored plugin source** — plugins are declared in `settings.json` and installed from the marketplace. Update with `/plugin update`. (Custom MCP servers I wrote *are* vendored, under `mcp/` — they have no marketplace to install from.)
 - **Vendored domain skills** — those come from plugins. The only standalone external skill is `find-skills`; drop it in `~/.claude/skills/find-skills/` if needed.

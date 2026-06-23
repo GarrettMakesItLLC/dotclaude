@@ -109,6 +109,41 @@ if [ -d "$REPO_DIR/skills" ]; then
 fi
 
 # --------------------------------------------------------------------------
+# Custom MCP servers vendored in this repo. Unlike marketplace plugins, their
+# source lives here, so a fresh machine must install deps, build, and register
+# the server with Claude Code. node_modules/ and dist/ are gitignored, so this
+# step is what makes the server runnable after a clone or pull.
+# --------------------------------------------------------------------------
+GITHUB_MCP_DIR="$REPO_DIR/mcp/github"
+if [ -f "$GITHUB_MCP_DIR/package.json" ]; then
+  echo
+  echo "→ Building custom github-rest MCP ($GITHUB_MCP_DIR)"
+  if command -v npm >/dev/null 2>&1; then
+    if [ -f "$GITHUB_MCP_DIR/package-lock.json" ]; then
+      ( cd "$GITHUB_MCP_DIR" && npm ci )
+    else
+      ( cd "$GITHUB_MCP_DIR" && npm install )
+    fi
+    ( cd "$GITHUB_MCP_DIR" && npm run build )
+    echo "  built: mcp/github/dist"
+
+    if command -v claude >/dev/null 2>&1; then
+      if claude mcp get github-rest >/dev/null 2>&1; then
+        echo "  already registered: github-rest (run \`claude mcp remove github-rest\` to re-add)"
+      else
+        claude mcp add --scope user github-rest -- node "$GITHUB_MCP_DIR/dist/index.js"
+        echo "  registered: github-rest (user scope)"
+      fi
+    else
+      echo "  NOTE: \`claude\` CLI not found — register manually:"
+      echo "        claude mcp add --scope user github-rest -- node $GITHUB_MCP_DIR/dist/index.js"
+    fi
+  else
+    echo "  WARNING: npm not found — install Node.js, then re-run bootstrap to build the github-rest MCP" >&2
+  fi
+fi
+
+# --------------------------------------------------------------------------
 # Plugins are declared in settings.json (enabledPlugins + extraKnownMarketplaces).
 # Claude Code auto-installs them on first launch from the official marketplace.
 # --------------------------------------------------------------------------
