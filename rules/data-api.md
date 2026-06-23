@@ -4,6 +4,7 @@ paths:
   - "**/*.prisma"
   - "**/api/**"
   - "**/route.ts"
+  - "**/route.tsx"
   - "**/actions/**"
   - "**/server/**"
 ---

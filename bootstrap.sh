@@ -77,9 +77,17 @@ for d in "${SHARED_DIRS[@]}"; do
   echo "  linked: $d/"
 done
 
-# Ensure hook scripts are executable (git preserves the bit, but be safe).
+# Ensure hook scripts are executable (git preserves the bit, but some
+# filesystems/clones drop it). A non-executable hook silently no-ops, so
+# warn loudly if we can't fix it.
 if [ -d "$REPO_DIR/hooks" ]; then
   chmod +x "$REPO_DIR"/hooks/*.sh 2>/dev/null || true
+  for hook in "$REPO_DIR"/hooks/*.sh; do
+    [ -e "$hook" ] || continue
+    if [ ! -x "$hook" ]; then
+      echo "  WARNING: $hook is not executable — the hook will not run" >&2
+    fi
+  done
 fi
 
 # --------------------------------------------------------------------------

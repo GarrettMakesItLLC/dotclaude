@@ -10,7 +10,8 @@
 # mode — so this script, not the permission list, is the real guardrail.
 #
 # Design goals: zero false positives on everyday commands (rm -rf node_modules,
-# git push to a feature branch, etc.); only block the genuinely dangerous shape.
+# git push to a feature branch, a commit message that mentions "--no-verify");
+# only block the genuinely dangerous shape.
 
 set -uo pipefail
 
@@ -31,6 +32,11 @@ fi
 # Nothing to inspect → allow.
 [ -z "${cmd:-}" ] && exit 0
 
+# Scrub commit/-m message bodies so their prose can't trip flag/path checks
+# (e.g. a commit message that literally says "--no-verify" or "rm -rf /").
+# Chained commands outside the message are preserved and still inspected.
+scrubbed="$(printf '%s' "$cmd" | sed -E "s/(-m|--message)[[:space:]]*(\"[^\"]*\"|'[^']*'|=[^[:space:]]*)/\1/g")"
+
 block() {
   echo "BLOCKED by dotclaude guard: $1" >&2
   echo "(This is a hard safety rule. If it's genuinely intended, ask Garrett to run it.)" >&2
@@ -40,31 +46,34 @@ block() {
 # 1. --no-verify bypasses git hooks (gitleaks, lint-staged, typecheck).
 #    -n means --no-verify on commit, but --dry-run on push, so only treat
 #    -n as a violation for commit.
-if printf '%s' "$cmd" | grep -Eq 'git[[:space:]].*commit.*([[:space:]]--no-verify([[:space:]]|=|$)|[[:space:]]-[a-z]*n[a-z]*([[:space:]]|$))' \
-   || printf '%s' "$cmd" | grep -Eq 'git[[:space:]].*push.*--no-verify'; then
+if printf '%s' "$scrubbed" | grep -Eq 'git[[:space:]].*commit.*([[:space:]]--no-verify([[:space:]]|=|$)|[[:space:]]-[a-z]*n[a-z]*([[:space:]]|$))' \
+   || printf '%s' "$scrubbed" | grep -Eq 'git[[:space:]].*push.*--no-verify'; then
   block "git commit/push with --no-verify skips pre-commit hooks. Fix the underlying lint/type/secret failure instead."
 fi
 
 # 2. Staging or committing a real .env file (.env.example is always fine).
-if printf '%s' "$cmd" | grep -Eq 'git[[:space:]]+(add|commit)'; then
-  if printf '%s' "$cmd" | grep -Eq '(^|[[:space:]/])\.env([[:space:]]|$|\.local|\.production|\.development)' \
-     && ! printf '%s' "$cmd" | grep -Eq '\.env\.example'; then
+#    Drop any .env.example mention first, so it can't excuse a sibling real
+#    .env file staged in the same command (git add .env.local .env.example).
+if printf '%s' "$scrubbed" | grep -Eq 'git[[:space:]]+(add|commit)'; then
+  cleaned="$(printf '%s' "$scrubbed" | sed 's/\.env\.example//g')"
+  if printf '%s' "$cleaned" | grep -Eq '(^|[[:space:]/])\.env([[:space:]]|$|\.[^[:space:]/]*)'; then
     block ".env must never be committed — only .env.example is tracked. Use 'vercel env pull' for local values."
   fi
 fi
 
 # 3. Force-push to a protected branch (main/master).
-if printf '%s' "$cmd" | grep -Eq 'git[[:space:]]+push' \
-   && printf '%s' "$cmd" | grep -Eq '(--force([[:space:]=]|$)|--force-with-lease|[[:space:]]-f([[:space:]]|$))' \
-   && printf '%s' "$cmd" | grep -Eq '(^|[[:space:]/])(main|master)([[:space:]]|$|:)'; then
+if printf '%s' "$scrubbed" | grep -Eq 'git[[:space:]]+push' \
+   && printf '%s' "$scrubbed" | grep -Eq '(--force([[:space:]=]|$)|--force-with-lease|[[:space:]]-f([[:space:]]|$))' \
+   && printf '%s' "$scrubbed" | grep -Eq '(^|[[:space:]/])(main|master)([[:space:]]|$|:)'; then
   block "force-push to main/master is destructive and owner-only. Push to a feature branch and open a PR."
 fi
 
-# 4. Reckless recursive force-delete of a root / home / parent path.
-#    Narrow on purpose: rm -rf node_modules / .worktrees/x / build are allowed.
-if printf '%s' "$cmd" | grep -Eq 'rm[[:space:]]+-[a-zA-Z]*[rf][a-zA-Z]*[[:space:]]' \
-   && printf '%s' "$cmd" | grep -Eq 'rm[[:space:]]+-[a-zA-Z]+[[:space:]]+(/|~|\$HOME|/\*|\.\.|/[A-Za-z._-]+)([[:space:]]|/?\*?$)'; then
-  block "recursive force-delete targeting a root/home/parent path. Delete specific subpaths explicitly instead."
+# 4. Reckless recursive delete of a root / home / system / parent path.
+#    Requires a recursive flag (cluster containing r). Allowed by design:
+#    relative paths (node_modules, dist, .worktrees/x), /tmp/..., and deeper
+#    project paths — only root/home/system/parent roots are blocked.
+if printf '%s' "$scrubbed" | grep -Eq 'rm[[:space:]]+-[a-zA-Z]*r[a-zA-Z]*[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*((/|~|\$HOME)([[:space:]]|$|\*)|(~|\$HOME)/|/(home|root|usr|etc|var|bin|sbin|lib|lib64|opt|boot|sys|proc|dev|Users)([[:space:]]|$|/)|\.\.([[:space:]]|$|/))'; then
+  block "recursive delete targeting a root / home / system / parent path. Delete specific project subpaths (relative, or under /tmp) explicitly instead."
 fi
 
 exit 0
