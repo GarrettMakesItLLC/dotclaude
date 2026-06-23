@@ -80,6 +80,14 @@ A task isn't done at "PR opened" — it's done when the checkout is **clean, on 
 
 Never create `INTEGRATION_SUMMARY.md`, `CHANGES.md`, `WHAT_I_DID.md`, or any file whose purpose is summarizing what just happened. The diff and commit message are the record. Permanent docs (architecture, runbooks) belong in the existing docs tree.
 
+### Write for the final state, not the journey
+
+Docs, PR descriptions, comments, and code describe **what is** — never the history of how it got there. Readers care about the end state; git is the changelog. This applies to *all* output: prose and code alike.
+
+- **PR descriptions / docs**: write the final state once. Don't narrate incremental progress ("first I tried X, then switched to Y"), and don't keep editing the description as a running diary as you work — it reflects the merged result.
+- **Code comments**: only ones that earn their place — explain *why* something non-obvious exists, a gotcha, an invariant. Never "what changed" / "removed the old version" / "previously this did X", and never leave commented-out code as a tombstone.
+- **Delete dead code.** Deprecated, legacy, unused, or superseded code goes — don't keep it "just in case." It's bloat and a maintenance trap; git history holds anything you'd ever need back.
+
 ---
 
 ## Stack defaults

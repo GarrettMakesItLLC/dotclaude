@@ -33,7 +33,7 @@ For anything deferred — out of scope, big, unrelated, a known limitation, a fl
 
 A PR body worth merging has:
 
-- **What & why** — one or two sentences on the change and motivation, not a file-by-file restatement of the diff.
+- **What & why** — one or two sentences on the change and motivation, not a file-by-file restatement of the diff. Describe the **final state**, never the journey (no "first I tried X" / incremental progress diary).
 - **Test evidence** — what you ran and that it passed.
 - **Linked follow-ups** — `Follow-up: #123` for issues opened off this work; `Closes #N` for any it fully resolves.
 - **Screenshots / notes** for UI or otherwise reviewer-visible changes.
