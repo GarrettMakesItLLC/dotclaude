@@ -63,6 +63,14 @@ cd .worktrees/<short-name>
 
 Skip for read-only work: questions, reviews, exploration, running tests without changes.
 
+### Stay current with the default branch
+
+Branches drift behind `main` fast — stale bases cause avoidable conflicts and reviews against code that's already moved.
+
+- **Starting a new batch of work**: sync first — `git checkout main && git pull` — and cut your worktree/branch off the freshly-pulled `main`, never a days-old local copy.
+- **During longer work**: periodically pull the default branch into your feature branch (`git fetch origin && git rebase origin/main`, or merge) so the diff stays small and current. Don't let it fall many commits behind.
+- If a pull/rebase surfaces conflicts, resolve them as part of the work — don't defer them to merge time.
+
 ### Finishing a task
 
 A task isn't done at "PR opened" — it's done when the checkout is **clean, on the default branch, and pulled current**, ready for the next task. No stray worktrees, dead branches, or feature-branch HEAD left behind.
