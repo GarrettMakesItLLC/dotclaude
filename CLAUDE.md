@@ -42,6 +42,7 @@ When I hand you a feature or bug, **own it end-to-end without checkpoint questio
 - Don't stop between stages to ask "should I continue?" / "want me to move on?" / "should I implement now?" / "linear or subagents?". The answer is always: yes, keep going, use subagents. Carry the work to a PR that's ready to merge.
 - The only hard stop is the **irreversible final action**: opening the PR is yours to do, but **merging to `main`, deploying, destructive data ops, force-push, and anything outward-facing/published are mine.** Take it right up to that line and stop there.
 - **Make industry-standard assumptions and proceed.** Pick the conventional, best-practice option, note it in one line, and keep moving. A wrong assumption is cheap — it's visible in the diff and trivial to fix. A stalled task costs me more.
+- **Default to your best guess. Use common sense.** The bar for stopping is "a competent engineer genuinely couldn't pick without more info," not "I'd feel safer confirming." If you can name the obvious right answer, take it. Asking when the answer was obvious is itself a mistake — I'd rather correct a reasonable guess than be interviewed.
 - Bundle any non-blocking questions or flagged choices into the **final summary**, not as mid-task interruptions.
 
 **When you MAY stop and ask** — only when guessing wrong is genuinely costly:
@@ -50,6 +51,18 @@ When I hand you a feature or bug, **own it end-to-end without checkpoint questio
 - **Genuinely ambiguous intent** where reasonable engineers would build materially *different* things — and only after you've tried to resolve it from the code, docs, and my MCPs (Notion specs, etc.) first.
 
 Everything else: decide and move. When in doubt between asking and proceeding on a reasonable default, **proceed.**
+
+### Fix what's relevant; track-and-tackle the rest
+
+**Scope call first.** If something you notice is small and relevant to the task at hand, just fix it inline — don't ask. If it's **big, risky, or unrelated** to the current task, don't sprawl the diff to chase it: capture it instead.
+
+When you defer something — out of scope, a leftover TODO, a "we should also…", a known limitation, a flagged risk — **open a GitHub issue for it** (`gh issue create`) instead of only mentioning it in the summary or dropping a bare `// TODO` in the code. Follow-up work must not evaporate into chat history.
+
+- Title it clearly; give it a short body (what + why + a `file:line` pointer); apply a label if the repo uses them.
+- **Don't just file it and walk away.** Once the issue is open, **dispatch a subagent to address it** — in its own worktree, in parallel with the main task — rather than leaving it for "later." Default to tackling follow-ups now. Only leave one un-started if it's genuinely blocked, needs my input, or truly belongs in a separate session — and say which in the summary.
+- Reference each issue from the PR ("Follow-up: #123") and list every issue you opened — with its status (agent working it / blocked / parked) — in the final summary.
+- Batch related follow-ups into one issue rather than spamming many tiny ones. If you're unsure something is worth tracking, it probably is — open it; closing a stray issue is cheaper than losing the thread.
+- Creating issues in my own repos is **pre-approved** — it's the one outward-facing action you may take without asking, since it's just bookkeeping in my tracker. (Opening the PR itself still stops at the line in the Autonomy rule.)
 
 ### Default to parallel + subagents
 
@@ -68,6 +81,21 @@ cd .worktrees/<short-name>
 ```
 
 Skip for read-only work: questions, reviews, exploration, running tests without changes.
+
+### Leave the workspace clean and ready
+
+A task isn't done when the PR is open — it's done when the checkout is back to a **clean, ready state** for the next task. Don't leave stray worktrees, dead branches, or a detached/feature-branch HEAD behind.
+
+After finishing (`superpowers:finishing-a-development-branch`):
+1. Remove the worktree you created, from the main checkout: `git worktree remove .worktrees/<short-name>`.
+2. Delete the local feature branch once it's merged or its PR is open: `git branch -d feature/<short-name>` (`-D` only if I've explicitly abandoned it).
+3. Return the main checkout to the default branch and bring it current: `git checkout main && git pull`.
+4. Verify: `git status` is clean and `git worktree list` shows no leftovers.
+
+Guardrails:
+- **Never** delete a worktree or branch that has uncommitted or unpushed work without flagging it first. If a branch isn't merged and has no PR, stop and ask before deleting.
+- Use `commit-commands:clean_gone` to sweep branches whose remotes are already deleted (`[gone]`) plus their worktrees.
+- End the turn on the default branch with a clean tree, so the next task starts fresh — confirm this in the final summary.
 
 ### No ephemeral summary docs
 
@@ -89,6 +117,31 @@ If a hook fails and you fix the issue, create a NEW commit. Don't `--amend` afte
 ### Never commit `.env`
 
 Only `.env.example` is tracked. Use `vercel env pull` to populate local `.env` files.
+
+### Definition of done
+
+Before calling work complete or opening a PR, this must actually pass — run the commands, don't assume:
+
+- [ ] Typecheck and lint clean (`--max-warnings 0` where CI enforces it).
+- [ ] Tests pass — existing plus new ones covering the change.
+- [ ] App runs / change verified live where feasible (`superpowers:verification-before-completion`).
+- [ ] No debug logging, commented-out code, dead code, or stray scratch files in the diff.
+- [ ] No unrelated / scope-creep changes in the diff (those went to follow-up issues).
+- [ ] Diff self-reviewed; no secrets committed; `.env` not staged.
+- [ ] Workspace left clean and on the default branch (see "Leave the workspace clean and ready").
+
+If any box can't be checked, **say so explicitly in the summary** — never present unfinished or unverified work as done.
+
+### PR descriptions
+
+A PR body I'd actually merge has:
+
+- **What & why** — one or two sentences on the change and the motivation, not a file-by-file restatement of the diff.
+- **Test evidence** — what you ran and that it passed (typecheck / tests / manual verification).
+- **Linked follow-ups** — "Follow-up: #123" for every issue opened off this work; `Closes #N` for any it fully resolves.
+- **Screenshots / notes** for UI changes or anything reviewer-visible.
+
+Conventional-commit-style title. Keep it tight.
 
 ---
 
