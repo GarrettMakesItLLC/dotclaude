@@ -2,9 +2,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
   errorResult,
+  ghPaginate,
   ghRequest,
   jsonText,
-  perPage,
   resolveRepo,
 } from "../github.js";
 
@@ -24,7 +24,7 @@ export function registerIssueTools(server: McpServer): void {
     "issue_list",
     {
       description:
-        "List issues in a repo (up to `limit` issues, default 30, from the first 100 items). Pull requests are filtered out.",
+        "List issues in a repo (up to `limit` issues, default 30, following pagination). Pull requests are filtered out.",
       inputSchema: {
         repo: repoParam,
         state: z.enum(["open", "closed", "all"]).default("open"),
@@ -32,27 +32,25 @@ export function registerIssueTools(server: McpServer): void {
           .array(z.string())
           .optional()
           .describe("Filter to issues having all of these labels."),
-        limit: z.number().int().positive().optional().describe("Max issues (<=100, default 30)."),
+        limit: z.number().int().positive().optional().describe("Max issues (<=1000, default 30)."),
       },
     },
     async ({ repo, state, labels, limit }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        // The /issues endpoint mixes in PRs, so fetch a full page and trim to
-        // `limit` after filtering — otherwise PR-heavy repos return too few.
-        const data = await ghRequest<IssueLike[]>(
+        // The /issues endpoint mixes in PRs, so filter them out and page until
+        // we have `limit` real issues — otherwise PR-heavy repos return too few.
+        const issuesOnly = await ghPaginate<IssueLike>(
           `/repos/${owner}/${name}/issues`,
           {
             query: {
               state,
               labels: labels && labels.length ? labels.join(",") : undefined,
-              per_page: 100,
             },
+            limit,
+            filter: (item) => !("pull_request" in item) || !item.pull_request,
           },
         );
-        const issuesOnly = data
-          .filter((item) => !("pull_request" in item) || !item.pull_request)
-          .slice(0, perPage(limit));
         return jsonText(issuesOnly);
       } catch (err) {
         return errorResult(err);
