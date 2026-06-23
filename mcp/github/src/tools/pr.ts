@@ -2,9 +2,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
   errorResult,
+  ghPaginate,
   ghRequest,
   jsonText,
-  perPage,
   resolveRepo,
 } from "../github.js";
 import { getChecksSummary } from "../checks.js";
@@ -37,7 +37,7 @@ export function registerPrTools(server: McpServer): void {
     "pr_list",
     {
       description:
-        "List pull requests in a repo (returns up to `limit` items, first page only).",
+        "List pull requests in a repo (returns up to `limit` items, following pagination).",
       inputSchema: {
         repo: repoParam,
         state: z.enum(["open", "closed", "all"]).default("open"),
@@ -46,14 +46,15 @@ export function registerPrTools(server: McpServer): void {
           .string()
           .optional()
           .describe('Filter by head, formatted "user:ref-name" or "ref-name".'),
-        limit: z.number().int().positive().optional().describe("Max items (<=100, default 30)."),
+        limit: z.number().int().positive().optional().describe("Max items (<=1000, default 30)."),
       },
     },
     async ({ repo, state, base, head, limit }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(`/repos/${owner}/${name}/pulls`, {
-          query: { state, base, head, per_page: perPage(limit) },
+        const data = await ghPaginate(`/repos/${owner}/${name}/pulls`, {
+          query: { state, base, head },
+          limit,
         });
         return jsonText(data);
       } catch (err) {

@@ -69,7 +69,12 @@ Repo:
 - `branch_list` — list branches.
 - `ref_status` — merged status + check-runs summary for a branch or sha.
 
-List tools return up to `limit` items (max 100, default 30) from the first page only.
+The list tools (`pr_list`, `issue_list`, `branch_list`) return up to `limit`
+items (max 1000, default 30), following GitHub's `Link: rel="next"` pagination
+across pages of 100. For `issue_list` the GitHub `/issues` endpoint mixes in
+pull requests; those are filtered out and pages are followed until `limit` real
+issues are collected, so PR-heavy repos still return a full result. Pagination
+is bounded to 10 pages per call.
 
 ## Build
 
@@ -77,6 +82,7 @@ List tools return up to `limit` items (max 100, default 30) from the first page 
 npm install
 npm run build      # tsc -> dist/
 npm run typecheck  # tsc --noEmit
+npm test           # vitest run (no network; gh + fetch are mocked)
 ```
 
 ## Register (local stdio)

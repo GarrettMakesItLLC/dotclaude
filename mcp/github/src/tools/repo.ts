@@ -2,9 +2,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
   errorResult,
+  ghPaginate,
   ghRequest,
   jsonText,
-  perPage,
   resolveRepo,
 } from "../github.js";
 import { getChecksSummary } from "../checks.js";
@@ -52,17 +52,17 @@ export function registerRepoTools(server: McpServer): void {
     "branch_list",
     {
       description:
-        "List branches in a repo (returns up to `limit` items, first page only).",
+        "List branches in a repo (returns up to `limit` items, following pagination).",
       inputSchema: {
         repo: repoParam,
-        limit: z.number().int().positive().optional().describe("Max items (<=100, default 30)."),
+        limit: z.number().int().positive().optional().describe("Max items (<=1000, default 30)."),
       },
     },
     async ({ repo, limit }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(`/repos/${owner}/${name}/branches`, {
-          query: { per_page: perPage(limit) },
+        const data = await ghPaginate(`/repos/${owner}/${name}/branches`, {
+          limit,
         });
         return jsonText(data);
       } catch (err) {

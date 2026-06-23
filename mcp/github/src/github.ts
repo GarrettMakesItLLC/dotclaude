@@ -83,28 +83,24 @@ async function parseErrorBody(res: Response): Promise<string> {
 }
 
 /**
- * Perform a GitHub REST request. REST only — never GraphQL.
- * On a 401 the token is refetched once and the request retried once.
- * On any other non-2xx, throws an Error including the HTTP status and the
- * GitHub error `message` (and `errors` if present).
+ * Perform the authenticated fetch with the cached token. On a 401 the token is
+ * refetched once and the request retried exactly once. Returns the raw
+ * `Response` regardless of status — callers decide how to handle non-2xx.
+ *
+ * This is the single place the token + single-401-retry behavior lives;
+ * `ghRequest` and `ghPaginate` both delegate here so the logic is not
+ * duplicated.
  */
-export async function ghRequest<T = unknown>(
-  path: string,
-  options: RequestOptions = {},
-): Promise<T> {
-  const url = buildUrl(path, options.query);
-  const method = options.method ?? "GET";
-  const init: RequestInit = { method };
-  if (options.body !== undefined) {
-    init.body = JSON.stringify(options.body);
-  }
-
+async function ghFetch(
+  url: string,
+  init: RequestInit & { body?: string } = {},
+): Promise<Response> {
   let retriedAuth = false;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const token = await getToken();
     const headers = buildHeaders(token);
-    if (options.body !== undefined) {
+    if (init.body !== undefined) {
       headers["Content-Type"] = "application/json";
     }
     const res = await fetch(url, { ...init, headers });
@@ -116,23 +112,128 @@ export async function ghRequest<T = unknown>(
       continue;
     }
 
-    if (!res.ok) {
-      const detail = await parseErrorBody(res);
-      throw new Error(
-        `GitHub API ${method} ${path} failed: HTTP ${res.status}${
-          detail ? ` — ${detail}` : ""
-        }`,
-      );
-    }
+    return res;
+  }
+}
 
-    if (res.status === 204) {
-      return undefined as T;
+/**
+ * Build the standard non-2xx Error: HTTP status plus the GitHub error `message`
+ * (and `errors` if present). The token is never included.
+ */
+async function requestError(
+  method: string,
+  path: string,
+  res: Response,
+): Promise<Error> {
+  const detail = await parseErrorBody(res);
+  return new Error(
+    `GitHub API ${method} ${path} failed: HTTP ${res.status}${
+      detail ? ` — ${detail}` : ""
+    }`,
+  );
+}
+
+/**
+ * Perform a GitHub REST request. REST only — never GraphQL.
+ * On a 401 the token is refetched once and the request retried once.
+ * On any other non-2xx, throws an Error including the HTTP status and the
+ * GitHub error `message` (and `errors` if present).
+ */
+export async function ghRequest<T = unknown>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
+  const url = buildUrl(path, options.query);
+  const method = options.method ?? "GET";
+  const init: RequestInit & { body?: string } = { method };
+  if (options.body !== undefined) {
+    init.body = JSON.stringify(options.body);
+  }
+
+  const res = await ghFetch(url, init);
+
+  if (!res.ok) {
+    throw await requestError(method, path, res);
+  }
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await res.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
+}
+
+/** Extract the `rel="next"` URL from a `Link` response header, if present. */
+function parseNextLink(linkHeader: string | null): string | undefined {
+  if (!linkHeader) return undefined;
+  // e.g. `<https://api.github.com/...&page=2>; rel="next", <...>; rel="last"`
+  for (const part of linkHeader.split(",")) {
+    const match = /<([^>]+)>\s*;\s*(.+)/.exec(part.trim());
+    if (!match) continue;
+    const [, target, params] = match;
+    if (/\brel\s*=\s*"?next"?/.test(params)) return target;
+  }
+  return undefined;
+}
+
+interface PaginateOptions<T> {
+  query?: RequestOptions["query"];
+  /** Max items to return after filtering. Clamped to 1000, default 30. */
+  limit?: number;
+  /** Only items passing this predicate count toward `limit` and are returned. */
+  filter?: (item: T) => boolean;
+  /** Hard cap on pages fetched, regardless of `limit`. Default 10. */
+  maxPages?: number;
+}
+
+const MAX_PER_PAGE = 100;
+const DEFAULT_MAX_PAGES = 10;
+
+/**
+ * Fetch a paginated GitHub list endpoint, following `Link: rel="next"` headers.
+ *
+ * Requests `per_page=100` per page and accumulates items. When `filter` is
+ * provided only items passing it count toward `limit` and appear in the result.
+ * Stops at the first of: `limit` items collected, no `next` page, or `maxPages`
+ * pages fetched. The result is sliced to `limit`. Non-2xx pages throw via the
+ * same error path as `ghRequest`.
+ */
+export async function ghPaginate<T = unknown>(
+  path: string,
+  opts: PaginateOptions<T> = {},
+): Promise<T[]> {
+  const limit = listLimit(opts.limit);
+  const maxPages = opts.maxPages ?? DEFAULT_MAX_PAGES;
+  const filter = opts.filter;
+
+  let url: string | undefined = buildUrl(path, {
+    ...opts.query,
+    per_page: MAX_PER_PAGE,
+  });
+  const collected: T[] = [];
+  let pages = 0;
+
+  while (url && pages < maxPages && collected.length < limit) {
+    pages += 1;
+    const res = await ghFetch(url, { method: "GET" });
+    if (!res.ok) {
+      throw await requestError("GET", path, res);
     }
 
     const text = await res.text();
-    if (!text) return undefined as T;
-    return JSON.parse(text) as T;
+    const items = (text ? JSON.parse(text) : []) as T[];
+    for (const item of items) {
+      if (filter && !filter(item)) continue;
+      collected.push(item);
+      if (collected.length >= limit) break;
+    }
+
+    url = parseNextLink(res.headers.get("Link"));
   }
+
+  return collected.slice(0, limit);
 }
 
 export interface RepoRef {
@@ -187,11 +288,18 @@ export async function resolveRepo(repo?: string): Promise<RepoRef> {
   return { owner, name };
 }
 
-/** Cap a requested limit to the GitHub per_page maximum of 100 (default 30). */
-export function perPage(limit?: number): number {
-  const n = limit ?? 30;
-  if (!Number.isFinite(n) || n < 1) return 30;
-  return Math.min(Math.floor(n), 100);
+const DEFAULT_LIMIT = 30;
+const MAX_LIMIT = 1000;
+
+/**
+ * Clamp a user-supplied list limit to a sane maximum (1000), defaulting to 30.
+ * This is the total number of items a paginated list tool returns, not a single
+ * page size — `ghPaginate` always requests pages of 100.
+ */
+export function listLimit(limit?: number): number {
+  const n = limit ?? DEFAULT_LIMIT;
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_LIMIT;
+  return Math.min(Math.floor(n), MAX_LIMIT);
 }
 
 /** Render a value as a single pretty-printed JSON text content block. */
