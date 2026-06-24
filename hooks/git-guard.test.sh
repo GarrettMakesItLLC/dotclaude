@@ -37,6 +37,12 @@ check 2 'git -c core.hooksPath=/dev/null commit -m "x"'
 check 2 'git push --force origin refs/heads/main'
 check 2 'git push origin +main'
 check 2 'git push origin +HEAD:main'
+check 2 'rm -rf /'
+check 2 'rm -rf ~'
+check 2 'rm -rf $HOME'
+check 2 'rm -rf /usr/local/bin'
+check 2 'rm -rf /etc'
+check 2 'rm -rf ../sibling'
 
 # Should ALLOW — flag/path tokens that appear only inside a -m MESSAGE body.
 check 0 'git commit -m "fix: load .env before init"'
@@ -60,6 +66,12 @@ check 0 'git clean -n'
 check 0 'git status'
 check 0 'npm run main'
 check 0 'ls -la && echo done'
+check 0 'rm -rf node_modules'
+check 0 'rm -rf dist .next'
+check 0 'rm -rf .worktrees/feature-x'
+check 0 'rm -rf /tmp/claude-scratch'
+check 0 'rm -f config.local'
+check 0 'rm -rf ./build'
 
 if [ "$fail" = 0 ]; then
   echo "git-guard: all cases passed"

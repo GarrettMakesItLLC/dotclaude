@@ -20,8 +20,9 @@
 #     GIT_CONFIG_* env vars rather than `-c`. Same class as --no-verify.
 #   - `git add -A` / `git add .` that sweeps an unmentioned .env — left to
 #     project gitleaks/pre-commit.
-#   - Anything non-git (rm -rf, curl | sh, writes outside the repo) — entirely
-#     out of scope; bypassPermissions does not gate those either.
+#   - Other non-git footguns (curl | sh, writes outside the repo) — out of
+#     scope; bypassPermissions does not gate those either. (Reckless `rm -rf` of
+#     root/home/system/parent paths IS blocked below — the one non-git rule.)
 
 set -uo pipefail
 
@@ -55,7 +56,16 @@ block() {
 # quoted messages are universal.)
 scrubbed="$(printf '%s' "$cmd" | sed -E "s/'[^']*'/ /g; s/\"[^\"]*\"/ /g")"
 
-# Only inspect git invocations.
+# 0) Reckless recursive delete of a root / home / system / parent path. This is
+# the one non-git rule, so it runs before the git-only gate below. Requires a
+# recursive flag (a flag cluster containing 'r'). Allowed by design: relative
+# paths (node_modules, dist, .worktrees/x), /tmp/..., and deeper project paths —
+# only root/home/system/parent roots are blocked.
+if printf '%s' "$scrubbed" | grep -Eq 'rm[[:space:]]+-[a-zA-Z]*r[a-zA-Z]*[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*((/|~|\$HOME)([[:space:]]|$|\*)|(~|\$HOME)/|/(home|root|usr|etc|var|bin|sbin|lib|lib64|opt|boot|sys|proc|dev|Users)([[:space:]]|$|/)|\.\.([[:space:]]|$|/))'; then
+  block "recursive delete targeting a root / home / system / parent path. Delete specific project subpaths (relative, or under /tmp) explicitly instead."
+fi
+
+# Only inspect git invocations beyond this point.
 printf '%s' "$scrubbed" | grep -Eq '(^|[^[:alnum:]_./-])git([[:space:]]|$)' || exit 0
 
 # 1) Never bypass git hooks: --no-verify, commit -n, or -c core.hooksPath=...
