@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Self-test for git-guard.sh. Feeds commands through the hook and asserts the
+# exit code (2 = blocked, 0 = allowed). Run locally or in CI:
+#   bash hooks/git-guard.test.sh
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GUARD="$HERE/git-guard.sh"
+fail=0
+
+# wrap a raw command string as the PreToolUse stdin JSON, run the guard.
+check() {
+  local want="$1" cmd="$2"
+  local got
+  printf '%s' "$cmd" \
+    | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
+    | "$GUARD" >/dev/null 2>&1
+  got=$?
+  if [ "$got" != "$want" ]; then
+    echo "FAIL: want exit $want, got $got for: $cmd"
+    fail=1
+  fi
+}
+
+# Should BLOCK (exit 2)
+check 2 'git commit --no-verify -m "x"'
+check 2 'git commit -nm "x"'
+check 2 'git commit -n -m "x"'
+check 2 'git push --no-verify'
+check 2 'git push --force origin main'
+check 2 'git push -f origin main'
+check 2 'git push --force-with-lease origin master'
+check 2 'git add .env'
+check 2 'git add config/.env.production'
+check 2 'git commit .env -m "x"'
+check 2 'git -c core.hooksPath=/dev/null commit -m "x"'
+check 2 'git push --force origin refs/heads/main'
+check 2 'git push origin +main'
+check 2 'git push origin +HEAD:main'
+check 2 'rm -rf /'
+check 2 'rm -rf ~'
+check 2 'rm -rf $HOME'
+check 2 'rm -rf /usr/local/bin'
+check 2 'rm -rf /etc'
+check 2 'rm -rf ../sibling'
+# Quoted paths — quotes must not let the dangerous arg slip past the scrubber.
+check 2 'rm -rf "$HOME"'
+check 2 'rm -rf "/"'
+check 2 "rm -rf '/'"
+check 2 'rm -rf "/home/garrett"'
+check 2 'rm -rf ${HOME}'
+# Flag variants: capital -R, long --recursive, separated flags, -- separator.
+check 2 'rm -Rf /'
+check 2 'rm --recursive --force /'
+check 2 'rm -r --force /'
+check 2 'rm -f -r /'
+check 2 'rm -rf -- /'
+
+# Should ALLOW — flag/path tokens that appear only inside a -m MESSAGE body.
+check 0 'git commit -m "fix: load .env before init"'
+check 0 'git commit -am "chore: add .env to gitignore"'
+check 0 'git commit -m "stop using --no-verify in scripts"'
+check 0 'git commit -m "force-push to main is now blocked"'
+check 0 'git commit -m "document core.hooksPath bypass"'
+
+# Should ALLOW (exit 0)
+check 0 'git commit -m "feat: normal commit about main flow"'
+check 0 'git commit --amend -m "x"'
+check 0 'git commit --no-edit'
+check 0 'git commit -am "fix main"'
+check 0 'git push origin feature/foo'
+check 0 'git push --force origin feature/foo'
+check 0 'git push -n origin main'
+check 0 'git add .env.example'
+check 0 'git add src/app.ts'
+check 0 'git log -n 5'
+check 0 'git clean -n'
+check 0 'git status'
+check 0 'npm run main'
+check 0 'ls -la && echo done'
+check 0 'rm -rf node_modules'
+check 0 'rm -rf dist .next'
+check 0 'rm -rf .worktrees/feature-x'
+check 0 'rm -rf /tmp/claude-scratch'
+check 0 'rm -f config.local'
+check 0 'rm -rf ./build'
+# Quoted safe paths must still be allowed after quote-stripping.
+check 0 'rm -rf "node_modules"'
+check 0 'rm -rf "/tmp/x"'
+# Not a recursive delete, and not the `rm` command at all.
+check 0 'rm -f /etc/foo'
+check 0 'rrm -rf /'
+
+if [ "$fail" = 0 ]; then
+  echo "git-guard: all cases passed"
+fi
+exit "$fail"

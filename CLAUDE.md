@@ -7,7 +7,7 @@ Loaded from `~/.claude/CLAUDE.md` into **every** session — it's in context on 
 - **This file** — universal behavioral rules. Always loaded.
 - **`~/.claude/rules/*.md`** — stack conventions (TypeScript, frontend, data/API, testing, monorepo/hosting), **path-scoped** so each loads only when I open matching files.
 - **`~/.claude/skills/finishing-work`** — the finish-line procedure (definition of done, follow-ups, PR body, cleanup). Loads when wrapping up.
-- **`~/.claude/hooks/`** — deterministic guardrails. `guard-bash.sh` hard-**blocks** `--no-verify`, `.env` commits, force-push to `main`, and reckless `rm -rf`. These fire even under `bypassPermissions`, so treat a block as a hard limit — fix the underlying cause, never route around it.
+- **`~/.claude/hooks/`** — deterministic guardrails. `git-guard.sh` hard-**blocks** `--no-verify`, `.env` commits, force-push to `main`, and reckless `rm -rf`. These fire even under `bypassPermissions`, so treat a block as a hard limit — fix the underlying cause, never route around it.
 
 ---
 
@@ -51,6 +51,8 @@ When you defer something — out of scope, a leftover TODO, a "we should also…
 - **Escalation ladder** — match the tool to the scale: inline (small) → one subagent (token-heavy or needs context isolation) → parallel subagents / a `Workflow` (independent slices, fan-out review) → agent teams (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, ~7× tokens — reserve for exceptional parallel scale). Default to subagents/Workflow.
 - Built-in "review checkpoints" in skills (`executing-plans`, `requesting-code-review`, `finishing-a-development-branch`) are **pre-approved** for routine work. Run the review, address findings, continue — surface results in the summary, not as a gate.
 - `brainstorming` is for genuinely greenfield/ambiguous work. For a well-specified feature/bug, skip it.
+
+**Agent teams** (experimental, enabled via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in `settings.json`; needs Claude Code ≥ 2.1.32). These spawn *separate* Claude sessions that share a task list and message each other directly — heavier than subagents but they can challenge each other's findings. Don't reach for them by default. Use a team only when I explicitly ask, or for work where parallel *independent* exploration genuinely pays: multi-angle research/review, competing-hypothesis debugging, or features that split cleanly across frontend/backend/tests with one owner each. For everything else, subagents (report-back, cheaper) remain the default. Runtime state lives in `~/.claude/teams/` + `~/.claude/tasks/` (gitignored) — never pre-author or commit it.
 
 ### Worktree-first for code changes
 

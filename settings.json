@@ -1,4 +1,20 @@
 {
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/git-guard.sh"
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "defaultMode": "bypassPermissions",
     "allow": [
@@ -16,19 +32,6 @@
     ]
   },
   "skipDangerousModePermissionPrompt": true,
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.claude/hooks/guard-bash.sh"
-          }
-        ]
-      }
-    ]
-  },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
       "source": {
@@ -58,7 +61,6 @@
     "hookify@claude-plugins-official": true,
     "skill-creator@claude-plugins-official": true,
     "plugin-dev@claude-plugins-official": true,
-    "mcp-server-dev@claude-plugins-official": true,
-    "atomic-agents@claude-plugins-official": true
+    "mcp-server-dev@claude-plugins-official": true
   }
 }

@@ -1,6 +1,6 @@
 # Plugins
 
-22 plugins enabled, all from `anthropics/claude-plugins-official`. Declared in `settings.json` under `enabledPlugins` — Claude Code auto-installs them on first launch.
+21 plugins enabled, all from `anthropics/claude-plugins-official`. Declared in `settings.json` under `enabledPlugins` — Claude Code auto-installs them on first launch.
 
 ## Stack-specific (use what you actually deploy)
 
@@ -41,12 +41,15 @@
 | `skill-creator` | Create new skills, edit existing, run evals to measure performance |
 | `plugin-dev` | End-to-end plugin creation workflow |
 | `mcp-server-dev` | Build MCP servers (remote HTTP, MCPB, local stdio) + bundle as MCPB packages |
-| `atomic-agents` | Agent toolkit (TBD — investigate when needed) |
+
+> **Removed:** `atomic-agents` — investigated and dropped. It's tooling for the **Atomic Agents Python framework** (BrainBlend AI): scaffolding/auditing apps built on that specific framework. My stack is TS/Next.js/Vercel/Supabase, so it added skills + 2 subagents to every session for nothing. Re-add `"atomic-agents@claude-plugins-official": true` to `settings.json` if I ever pick up that framework.
 
 ## User-installed skills
 
-- `finishing-work` — my personal finish-line procedure (definition of done, follow-ups, PR body, cleanup). Lives in this repo under `skills/`; `bootstrap.sh` links it into `~/.claude/skills/`.
-- `find-skills` — skill discovery, not in any plugin and has no installer; manually drop it in `~/.claude/skills/find-skills/` if rebuilding from scratch.
+Both user skills are **vendored in this repo** under `skills/` and symlinked into `~/.claude/skills/` by `bootstrap.sh`, so a fresh machine gets them automatically:
+
+- `finishing-work` — my personal finish-line procedure (definition of done, follow-ups, PR body, cleanup).
+- `find-skills` — skill discovery; not in any plugin, so the repo is its source of truth.
 
 All domain skills (Supabase, etc.) come from plugins.
 
@@ -59,6 +62,7 @@ These run automatically once the plugin is installed and you've authenticated:
 | Supabase MCP | `supabase` | OAuth via `mcp__plugin_supabase_supabase__authenticate` |
 | Stripe MCP | `stripe` | OAuth via `mcp__plugin_stripe_stripe__authenticate` |
 | Prisma MCP | `prisma` | OAuth via `mcp__plugin_prisma_Prisma-Remote__authenticate` |
+| Railway MCP | `railway` | OAuth via `mcp__plugin_railway_railway__*` (read-only ops allowlisted in `settings.json`) |
 | Playwright MCP | `playwright` | None (local browser control) |
 
 Plus separately-configured top-level MCPs (Notion, Gmail, Calendar, Drive, PubMed, Spotify, Vercel) live in `~/.claude.json` and are NOT in this repo — they're per-machine OAuth state.
