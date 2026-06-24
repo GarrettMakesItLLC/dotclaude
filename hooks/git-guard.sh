@@ -23,6 +23,9 @@
 #   - Other non-git footguns (curl | sh, writes outside the repo) — out of
 #     scope; bypassPermissions does not gate those either. (Reckless `rm -rf` of
 #     root/home/system/parent paths IS blocked below — the one non-git rule.)
+#   - `rm -rf *` / `rm -rf .` whose danger depends on the current directory
+#     (e.g. `cd / && rm -rf *`) — we can't know CWD, so a bare glob/dot is not
+#     blocked. Only explicit dangerous path arguments are.
 
 set -uo pipefail
 
@@ -56,12 +59,18 @@ block() {
 # quoted messages are universal.)
 scrubbed="$(printf '%s' "$cmd" | sed -E "s/'[^']*'/ /g; s/\"[^\"]*\"/ /g")"
 
-# 0) Reckless recursive delete of a root / home / system / parent path. This is
-# the one non-git rule, so it runs before the git-only gate below. Requires a
-# recursive flag (a flag cluster containing 'r'). Allowed by design: relative
-# paths (node_modules, dist, .worktrees/x), /tmp/..., and deeper project paths —
-# only root/home/system/parent roots are blocked.
-if printf '%s' "$scrubbed" | grep -Eq 'rm[[:space:]]+-[a-zA-Z]*r[a-zA-Z]*[[:space:]]+(-[a-zA-Z]+[[:space:]]+)*((/|~|\$HOME)([[:space:]]|$|\*)|(~|\$HOME)/|/(home|root|usr|etc|var|bin|sbin|lib|lib64|opt|boot|sys|proc|dev|Users)([[:space:]]|$|/)|\.\.([[:space:]]|$|/))'; then
+# 0) Reckless recursive delete of a root / home / system / parent path. The one
+# non-git rule, so it runs before the git-only gate below. Matched against a
+# quote-STRIPPED copy of the raw command (quotes removed, content kept) — not
+# the message-scrubbed string — so a quoted argument like `rm -rf "$HOME"` is
+# still caught. Requires a recursive flag (-r/-R/-rf/... in any order, or
+# --recursive) AND a dangerous path argument. Allowed by design: relative paths
+# (node_modules, dist, .worktrees/x), /tmp/..., deeper project paths.
+# Trade-off: a commit MESSAGE that literally contains `rm -rf /` could trip this
+# (quote chars are stripped, not the whole span) — rare, and recoverable with
+# the ! prefix; blocking an accidental home/root wipe is worth that.
+nq="$(printf '%s' "$cmd" | tr -d "\"'")"
+if printf '%s' "$nq" | grep -Eq '(^|[^[:alnum:]_./-])rm[[:space:]]+((-[a-zA-Z]+|--[a-z-]+|--)[[:space:]]+)*(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)([[:space:]]+(-[a-zA-Z]+|--[a-z-]+|--))*[[:space:]]+(/([[:space:]]|$|\*)|/(home|root|usr|etc|var|bin|sbin|lib|lib64|opt|boot|sys|proc|dev|Users)([[:space:]/]|$)|~([[:space:]/*]|$)|\$\{?HOME\}?([[:space:]/*]|$)|\.\.([[:space:]/]|$))'; then
   block "recursive delete targeting a root / home / system / parent path. Delete specific project subpaths (relative, or under /tmp) explicitly instead."
 fi
 

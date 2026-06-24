@@ -7,7 +7,7 @@ Loaded from `~/.claude/CLAUDE.md` into **every** session — it's in context on 
 - **This file** — universal behavioral rules. Always loaded.
 - **`~/.claude/rules/*.md`** — stack conventions (TypeScript, frontend, data/API, testing, monorepo/hosting), **path-scoped** so each loads only when I open matching files.
 - **`~/.claude/skills/finishing-work`** — the finish-line procedure (definition of done, follow-ups, PR body, cleanup). Loads when wrapping up.
-- **`~/.claude/hooks/`** — deterministic guardrails. `guard-bash.sh` hard-**blocks** `--no-verify`, `.env` commits, force-push to `main`, and reckless `rm -rf`. These fire even under `bypassPermissions`, so treat a block as a hard limit — fix the underlying cause, never route around it.
+- **`~/.claude/hooks/`** — deterministic guardrails. `git-guard.sh` hard-**blocks** `--no-verify`, `.env` commits, force-push to `main`, and reckless `rm -rf`. These fire even under `bypassPermissions`, so treat a block as a hard limit — fix the underlying cause, never route around it.
 
 ---
 

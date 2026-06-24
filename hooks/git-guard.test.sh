@@ -43,6 +43,18 @@ check 2 'rm -rf $HOME'
 check 2 'rm -rf /usr/local/bin'
 check 2 'rm -rf /etc'
 check 2 'rm -rf ../sibling'
+# Quoted paths — quotes must not let the dangerous arg slip past the scrubber.
+check 2 'rm -rf "$HOME"'
+check 2 'rm -rf "/"'
+check 2 "rm -rf '/'"
+check 2 'rm -rf "/home/garrett"'
+check 2 'rm -rf ${HOME}'
+# Flag variants: capital -R, long --recursive, separated flags, -- separator.
+check 2 'rm -Rf /'
+check 2 'rm --recursive --force /'
+check 2 'rm -r --force /'
+check 2 'rm -f -r /'
+check 2 'rm -rf -- /'
 
 # Should ALLOW — flag/path tokens that appear only inside a -m MESSAGE body.
 check 0 'git commit -m "fix: load .env before init"'
@@ -72,6 +84,12 @@ check 0 'rm -rf .worktrees/feature-x'
 check 0 'rm -rf /tmp/claude-scratch'
 check 0 'rm -f config.local'
 check 0 'rm -rf ./build'
+# Quoted safe paths must still be allowed after quote-stripping.
+check 0 'rm -rf "node_modules"'
+check 0 'rm -rf "/tmp/x"'
+# Not a recursive delete, and not the `rm` command at all.
+check 0 'rm -f /etc/foo'
+check 0 'rrm -rf /'
 
 if [ "$fail" = 0 ]; then
   echo "git-guard: all cases passed"
