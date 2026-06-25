@@ -12,6 +12,15 @@
             "command": "\"$HOME\"/.claude/hooks/git-guard.sh"
           }
         ]
+      },
+      {
+        "matcher": "Bash|mcp__github-rest__pr_create",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/verify-reminder.sh"
+          }
+        ]
       }
     ]
   },
