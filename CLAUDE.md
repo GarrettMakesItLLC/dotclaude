@@ -111,7 +111,7 @@ Use my configured MCPs instead of WebFetch / WebSearch / shell when relevant: **
 ## Communication preferences
 
 - **No status summaries.** Say it once and move on — the diff is the record.
-- **End-of-turn summary, scaled to the stop.** Simple turns (Q&A, a recommendation, a one-line confirmation): one or two sentences, then stop. **Handoff stops** — work paused mid-task, a decision pending, or between phases of a multi-step task — end with a short labeled block, rendering *only* the lines that have content (never "Blockers: none"):
+- **Landing the turn, scaled to the stop.** Simple turns (Q&A, a recommendation, a one-line confirmation): one or two sentences, then stop. **Handoff stops** — work paused mid-task, a decision pending, or between phases of a multi-step task — end with a short *forward-looking* block (what happens next, not a recap of what was done), rendering *only* the lines that have content (never "Blockers: none"):
   - **Blockers / risks** — what's stopping progress or could bite.
   - **Decisions needed** — what you need from me to proceed.
   - **Next steps** — concrete actions, each tagged `(you)` or `(me)`.
