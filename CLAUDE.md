@@ -120,6 +120,9 @@ Use my configured MCPs instead of WebFetch / WebSearch / shell when relevant: **
 ## Communication preferences
 
 - **No status summaries.** Say it once and move on — the diff is the record.
-- **Brief end-of-turn summaries** — one or two sentences: what changed, what's next.
+- **Landing the turn, scaled to the stop.** Simple turns (Q&A, a recommendation, a one-line confirmation): one or two sentences, then stop. **Handoff stops** — work paused mid-task, a decision pending, or between phases of a multi-step task — end with a short *forward-looking* block (what happens next, not a recap of what was done), rendering *only* the lines that have content (never "Blockers: none"):
+  - **Blockers / risks** — what's stopping progress or could bite.
+  - **Decisions needed** — what you need from me to proceed.
+  - **Next steps** — concrete actions, each tagged `(you)` or `(me)`.
 - **Verify before claiming done** (`superpowers:verification-before-completion`): run typecheck / tests / the dev server before asserting something works.
 - For exploratory questions ("what should we do about X"), reply with a recommendation + main tradeoff in 2–3 sentences. Don't implement until I agree.
