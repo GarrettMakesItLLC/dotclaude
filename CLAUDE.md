@@ -7,7 +7,7 @@ Loaded from `~/.claude/CLAUDE.md` into **every** session — it's in context on 
 - **This file** — universal behavioral rules. Always loaded.
 - **`~/.claude/rules/*.md`** — stack conventions (TypeScript, frontend, data/API, testing, monorepo/hosting), **path-scoped** so each loads only when I open matching files.
 - **`~/.claude/skills/finishing-work`** — the finish-line procedure (definition of done, follow-ups, PR body, cleanup). Loads when wrapping up.
-- **`~/.claude/hooks/`** — deterministic guardrails. `git-guard.sh` hard-**blocks** `--no-verify`, `.env` commits, force-push to `main`, and reckless `rm -rf`. These fire even under `bypassPermissions`, so treat a block as a hard limit — fix the underlying cause, never route around it.
+- **`~/.claude/hooks/`** — deterministic guardrails. `git-guard.sh` hard-**blocks** `--no-verify`, `.env` commits, force-push to `main`, and reckless `rm -rf`; `verify-reminder.sh` (non-blocking) nudges you to verify before opening a PR. These fire even under `bypassPermissions`, so treat a block as a hard limit — fix the underlying cause, never route around it.
 
 ---
 
@@ -51,6 +51,7 @@ When you defer something — out of scope, a leftover TODO, a "we should also…
 - **Escalation ladder** — match the tool to the scale: inline (small) → one subagent (token-heavy or needs context isolation) → parallel subagents / a `Workflow` (independent slices, fan-out review) → agent teams (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, ~7× tokens — reserve for exceptional parallel scale). Default to subagents/Workflow.
 - Built-in "review checkpoints" in skills (`executing-plans`, `requesting-code-review`, `finishing-a-development-branch`) are **pre-approved** for routine work. Run the review, address findings, continue — surface results in the summary, not as a gate.
 - `brainstorming` is for genuinely greenfield/ambiguous work. For a well-specified feature/bug, skip it.
+- **Every dispatched subagent verifies before it reports "done."** Bake this into the dispatch prompt: the agent runs the checks relevant to its slice (typecheck + the affected tests) and includes the command output in its report. A subagent's "done" without evidence is a claim, not a fact — don't push or open a PR on top of it. This is structural, not ad hoc: put it in the prompt every time.
 
 **Agent teams** (experimental, enabled via `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` in `settings.json`; needs Claude Code ≥ 2.1.32). These spawn *separate* Claude sessions that share a task list and message each other directly — heavier than subagents but they can challenge each other's findings. Don't reach for them by default. Use a team only when I explicitly ask, or for work where parallel *independent* exploration genuinely pays: multi-angle research/review, competing-hypothesis debugging, or features that split cleanly across frontend/backend/tests with one owner each. For everything else, subagents (report-back, cheaper) remain the default. Runtime state lives in `~/.claude/teams/` + `~/.claude/tasks/` (gitignored) — never pre-author or commit it.
 
@@ -72,6 +73,14 @@ Branches drift behind `main` fast — stale bases cause avoidable conflicts and 
 - **Starting a new batch of work**: sync first — `git checkout main && git pull` — and cut your worktree/branch off the freshly-pulled `main`, never a days-old local copy.
 - **During longer work**: periodically pull the default branch into your feature branch (`git fetch origin && git rebase origin/main`, or merge) so the diff stays small and current. Don't let it fall many commits behind.
 - If a pull/rebase surfaces conflicts, resolve them as part of the work — don't defer them to merge time.
+
+### Verify before you push or open a PR
+
+A push and a PR are **handoffs** — never make them on unverified work. Before `git push` or opening a PR, run the checks relevant to *what you changed* and confirm they pass, then report the command output (`superpowers:verification-before-completion` — evidence before assertions):
+
+- **Always**: typecheck + the tests affected by your change.
+- **Only when relevant**: the build, if you touched build-affecting code (config, deps, codegen, bundler/route setup).
+- This is *your* fast, change-scoped local check — **not** a "run the whole suite on every push" gate. Local git hooks are deliberately fast (pre-commit = gitleaks + lint-staged, pre-push = typecheck only); full build/unit/e2e live in CI by design. Scope verification to the diff so you stay fast without pushing blind.
 
 ### Finishing a task
 

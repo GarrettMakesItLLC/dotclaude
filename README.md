@@ -9,7 +9,7 @@ My personal Claude Code configuration — synced across machines via git.
 | `CLAUDE.md` | Global instructions injected into **every** session. Lean by design — universal *behavioral* rules only. |
 | `rules/` | Path-scoped stack conventions (TypeScript, frontend, data/API, testing, monorepo/hosting). Each loads only when Claude opens a matching file. Symlinked to `~/.claude/rules/`. |
 | `skills/` | Personal/vendored skills (`finishing-work`, and the vendored `find-skills`). Load on demand when invoked or matched. Each linked into `~/.claude/skills/`. |
-| `hooks/` | Deterministic guardrails run by Claude Code. `git-guard.sh` blocks dangerous shell commands (`--no-verify`, force-push to `main`, `.env` commits, reckless `rm -rf`); `git-guard.test.sh` is its self-test. Symlinked to `~/.claude/hooks/`. |
+| `hooks/` | Deterministic guardrails run by Claude Code. `git-guard.sh` **blocks** dangerous shell commands (`--no-verify`, force-push to `main`, `.env` commits, reckless `rm -rf`); `verify-reminder.sh` **nudges** (non-blocking) the agent to run change-scoped verification when it opens a PR. Each has a `*.test.sh` self-test. Symlinked to `~/.claude/hooks/`. |
 | `mcp/` | Source for custom MCP servers I built (e.g. `mcp/github` — a REST wrapper for GitHub PR/issue/repo ops). `bootstrap.sh` builds and registers each with `claude mcp add`. See `plugins.md`. |
 | `settings.json` | User-scope settings: enabled plugins, the official marketplace, permission defaults, and the hooks wiring. |
 | `keybindings.json` | Custom keyboard shortcuts (e.g., shift+enter for newline in chat). |
@@ -34,6 +34,8 @@ Every Claude Code primitive differs in **when its content enters the model's con
 Keeping `CLAUDE.md` lean (Anthropic targets <200 lines) matters because it's re-read on every turn. Reference material and finish-time checklists were moved out to `rules/` and `skills/` so they only cost context when relevant.
 
 > **Hooks are the real guardrail here.** `settings.json` runs in `bypassPermissions` mode, where the allow/deny permission system is skipped — but hooks still fire. `git-guard.sh` hard-blocks `--no-verify` (and equivalent hook-bypasses like `commit -n` / `-c core.hooksPath=`), committing `.env`, force-push to `main`/`master`, and reckless `rm -rf` of root/home/parent paths, while leaving everyday commands (`rm -rf node_modules`, pushing feature branches) untouched. It's a *targeted* backstop for those rules, not a sandbox — it doesn't gate the rest of what `bypassPermissions` allows.
+>
+> A second hook, `verify-reminder.sh`, takes the opposite, *soft* tack for a rule that can't be a hard block: "verify before you hand off." When the agent opens a PR (`gh pr create` or the `pr_create` MCP tool) it injects a non-blocking reminder to run the change-scoped checks (typecheck + affected tests) and report the output. It fires only at PR-open — not on every push — so it never reintroduces per-push test/build cost or alarm fatigue, and it runs nothing itself: the agent does the fast, diff-scoped check. This makes the otherwise-probabilistic "verify before done" rule fire deterministically at the one handoff that matters.
 
 ## Setup on a new machine
 

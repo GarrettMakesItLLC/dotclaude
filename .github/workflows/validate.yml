@@ -38,8 +38,10 @@ jobs:
             shellcheck -S warning "$f"
           done
 
-      - name: Run git-guard self-test
-        run: bash hooks/git-guard.test.sh
+      - name: Run hook self-tests
+        run: |
+          bash hooks/git-guard.test.sh
+          bash hooks/verify-reminder.test.sh
 
   commitlint:
     # Lightweight conventional-commit check (no husky/node toolchain). Validates
