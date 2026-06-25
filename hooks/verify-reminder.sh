@@ -81,8 +81,12 @@ try:
     sys.stdout.write(json.load(sys.stdin).get("tool_input", {}).get("command", "") or "")
 except Exception:
     pass' 2>/dev/null)"
-    # Match `gh pr create` allowing flags/whitespace between the words.
-    if printf '%s' "$cmd" | grep -Eq 'gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)'; then
+    # Strip quoted spans first (like git-guard) so a `gh pr create` that only
+    # appears inside a commit message / echo string can't trip a false nudge.
+    cmd="$(printf '%s' "$cmd" | sed -E "s/'[^']*'/ /g; s/\"[^\"]*\"/ /g")"
+    # Match `gh pr create` as its own command segment (start of string, or after
+    # a separator / whitespace) so a substring like `foogh pr create` can't match.
+    if printf '%s' "$cmd" | grep -Eq '(^|[;&|[:space:](])gh[[:space:]]+pr[[:space:]]+create([[:space:]]|$)'; then
       nudge
     fi
     ;;

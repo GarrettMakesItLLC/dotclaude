@@ -21,9 +21,12 @@ check_bash() {
 }
 
 # Build the stdin JSON for an MCP tool call (no command field) and run the hook.
+# The tool name is piped via stdin (not interpolated into the python source) so
+# a name with a quote/backslash can't break the JSON the harness builds.
 check_tool() {
   local want="$1" tool="$2" out code
-  out="$(python3 -c "import json; print(json.dumps({'tool_name': '$tool', 'tool_input': {}}))" \
+  out="$(printf '%s' "$tool" \
+    | python3 -c 'import json,sys; print(json.dumps({"tool_name": sys.stdin.read(), "tool_input": {}}))' \
     | "$HOOK" 2>/dev/null)"
   code=$?
   assert "$want" "$code" "$out" "tool: $tool"
@@ -55,6 +58,9 @@ check_bash silent 'gh pr list'
 check_bash silent 'gh pr checks'
 check_bash silent 'git push origin feature/foo'
 check_bash silent 'git commit -m "feat: open a pr later"'
+# `gh pr create` only inside a quoted string must NOT nudge (quote-scrubbed).
+check_bash silent 'git commit -m "todo: gh pr create later"'
+check_bash silent 'echo "run gh pr create when ready"'
 check_bash silent 'ls -la && echo done'
 check_tool silent 'mcp__github-rest__pr_view'
 check_tool silent 'mcp__github-rest__pr_list'
