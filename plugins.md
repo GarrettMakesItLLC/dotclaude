@@ -1,6 +1,6 @@
 # Plugins
 
-21 plugins enabled, all from `anthropics/claude-plugins-official`. Declared in `settings.json` under `enabledPlugins` — Claude Code auto-installs them on first launch.
+26 plugins enabled, all from `anthropics/claude-plugins-official`. Declared in `settings.json` under `enabledPlugins` — Claude Code auto-installs them on first launch.
 
 ## Stack-specific (use what you actually deploy)
 
@@ -13,6 +13,9 @@
 | `prisma` | Prisma schema/client guidance. **Includes MCP server** | Every repo with a database |
 | `playwright` | Browser automation for E2E tests + UI verification. **Includes MCP server** with full browser control | E2E tests + verifying UI in dev |
 | `github` | GitHub operations beyond `gh` CLI | PRs, issues, repo management |
+| `sentry` | Error monitoring — SDK setup, feature config (AI/LLM tracing, alerts), and `/seer` workflow for fixing production issues with Sentry context. **Includes MCP server** | Deployed apps (error triage + SDK wiring) |
+| `resend` | Transactional email — Resend API, React Email, deliverability/compliance best practices, agent email inbox. **Includes MCP server** (needs `RESEND_API_KEY`) | Any app sending email |
+| `redis-development` | Redis best-practices skills — data structures, query engine, vector search, caching, clustering, observability, security. Skills only, no MCP | Caching / vector search layers |
 
 ## Workflow & process
 
@@ -42,6 +45,15 @@
 | `plugin-dev` | End-to-end plugin creation workflow |
 | `mcp-server-dev` | Build MCP servers (remote HTTP, MCPB, local stdio) + bundle as MCPB packages |
 
+## Business / GTM (launch-readiness for consuming products)
+
+Not dev-stack tooling — these support launching and growing the products the repos serve. Each is a hosted (HTTP) MCP server.
+
+| Plugin | Purpose |
+|--------|---------|
+| `legalzoom` | Business legal assistance — `/review-contract` (risk-scored contract analysis + redlines) and `/attorney-assist` (LegalZoom attorney with full conversation context). Not legal advice; AI output needs review by a qualified professional. |
+| `zoominfo` | B2B go-to-market intelligence — prospect lists, account/contact enrichment, buyer-intent signals, decision-maker lookup, TAM/ICP sizing, meeting prep. |
+
 > **Removed:** `atomic-agents` — investigated and dropped. It's tooling for the **Atomic Agents Python framework** (BrainBlend AI): scaffolding/auditing apps built on that specific framework. My stack is TS/Next.js/Vercel/Supabase, so it added skills + 2 subagents to every session for nothing. Re-add `"atomic-agents@claude-plugins-official": true` to `settings.json` if I ever pick up that framework.
 
 ## User-installed skills
@@ -64,6 +76,12 @@ These run automatically once the plugin is installed and you've authenticated:
 | Prisma MCP | `prisma` | OAuth via `mcp__plugin_prisma_Prisma-Remote__authenticate` |
 | Railway MCP | `railway` | OAuth via `mcp__plugin_railway_railway__*` (read-only ops allowlisted in `settings.json`) |
 | Playwright MCP | `playwright` | None (local browser control) |
+| Sentry MCP | `sentry` | OAuth (Sentry account) — used by `/seer` and the Sentry workflow skills |
+| Resend MCP | `resend` | HTTP — Bearer `RESEND_API_KEY` (set per-machine in the environment, **never committed**) |
+| LegalZoom MCP | `legalzoom` | HTTP — needs the LegalZoom connector enabled in Claude app settings (+ Business Attorney Plan for `/attorney-assist`) |
+| ZoomInfo MCP | `zoominfo` | HTTP (`mcp.zoominfo.com`) — ZoomInfo account auth |
+
+(`redis-development` ships skills only — no MCP server.)
 
 Plus separately-configured top-level MCPs (Notion, Gmail, Calendar, Drive, PubMed, Spotify, Vercel) live in `~/.claude.json` and are NOT in this repo — they're per-machine OAuth state.
 
