@@ -29,6 +29,22 @@ shown in the last column.
 > Note: Supabase also appears as a claude.ai connector in some setups, but the
 > repo's source of truth for Supabase is the **`supabase` plugin** (`plugins.md`).
 
+## Plugin MCP secrets (env vars — per-machine)
+
+Some plugin MCPs authenticate with an API key from the environment rather than
+OAuth. The key is a per-machine secret — set it in `~/.claude/settings.local.json`
+(gitignored, **not** the symlinked `settings.json`) under `env`, or export it in
+your shell. Never commit it.
+
+| Env var | Plugin MCP | Where to get it |
+|---------|-----------|-----------------|
+| `RESEND_API_KEY` | `resend` | Resend dashboard → API Keys (<https://resend.com/api-keys>) |
+
+```jsonc
+// ~/.claude/settings.local.json
+{ "env": { "RESEND_API_KEY": "re_…" } }
+```
+
 ## Why not committed
 
 `~/.claude.json` mixes these OAuth tokens with machine-local state (startup
