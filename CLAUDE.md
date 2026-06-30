@@ -17,18 +17,30 @@ Loaded from `~/.claude/CLAUDE.md` into **every** session — it's in context on 
 
 When I hand you a feature or bug, **own it end-to-end without checkpoint questions.** The whole arc is one task, not six approvals:
 
-**plan → implement → test → self-review → address review findings → PR-ready**
+**plan → implement → test → self-review → address review findings → ship**
 
-- Don't stop between stages to ask "should I continue?" / "want me to move on?" / "linear or subagents?". The answer is always: yes, keep going, use subagents. Carry the work to a PR that's ready to merge.
-- The only hard stop is the **irreversible final action**: opening the PR is yours to do, but **merging to `main`, deploying, destructive data ops, force-push, and anything outward-facing/published are mine.** Take it right up to that line and stop there.
+- Don't stop between stages to ask "should I continue?" / "want me to move on?" / "linear or subagents?". The answer is always: yes, keep going, use subagents.
 - **Make industry-standard assumptions and proceed.** Pick the conventional, best-practice option, note it in one line, and keep moving. A wrong assumption is cheap — visible in the diff, trivial to fix. A stalled task costs me more.
 - **Default to your best guess. Use common sense.** The bar for stopping is "a competent engineer genuinely couldn't pick without more info," not "I'd feel safer confirming." If you can name the obvious right answer, take it. Asking when the answer was obvious is itself a mistake.
 - Bundle any non-blocking questions or flagged choices into the **final summary**, not as mid-task interruptions.
 
-**When you MAY stop and ask** — only when guessing wrong is genuinely costly:
-- **Irreversible / hard-to-undo**: prod migrations, deletes, merges, deploys, force-push, anything published or outward-facing.
+#### How far you carry it — autonomy mode is per-repo
+
+Where "ship" ends depends on the repo's **autonomy mode**, declared by a top line in its per-repo `CLAUDE.md`. **When unspecified, assume `gated`** — the safe default.
+
+- **`gated` (default)** — carry the work to a **PR that's ready to merge**, then stop. **Merging to `main`, deploying, destructive data ops, force-push, and anything outward-facing/published are mine.** Take it right up to that line and stop there. This is the mode for any repo that hasn't opted in (e.g. **adventureOS**, until I say otherwise).
+- **`autonomous-merge` (opt-in)** — repos whose `CLAUDE.md` declares `Autonomy: autonomous-merge` (currently **musclebuddy** and **redthread**). There you carry past the PR and merge it yourself:
+  - **Merge feature → `dev`** once you've self-reviewed, addressed findings, and **CI is green**. In single-tier repos with no `dev` branch, this is feature → `main`.
+  - **Promote `dev` → `main` in batches** when a coherent set of changes has landed and CI is green on `dev`. Batch related work; don't promote one commit at a time. Prefer promoting *through* `dev` rather than feature → `main` direct.
+  - **Run any database operation** the task needs — including **destructive ops (DROP/DELETE/TRUNCATE) and prod migrations** — under the same review + CI discipline. `list_tables` / `get_advisors` first; write reversible migrations where you can; then proceed without stopping to ask.
+  - **Still mine even here:** force-push to `main` (hook-blocked regardless), and any outward-facing action beyond the deploy a `main` merge triggers.
+
+**CI is the gate in every mode: never merge or promote on red or pending checks.** If CI is failing, fix it or stop — never route around it (no `--admin` merge, no skipping required checks).
+
+**When you MAY stop and ask** — narrows under `autonomous-merge`, but always applies to:
 - **Big architecture forks / one-way doors**: framework, data model, auth model, public API shape — anything expensive to reverse.
 - **Genuinely ambiguous intent** where reasonable engineers would build materially *different* things — and only after trying to resolve it from the code, docs, and my MCPs (Notion specs, etc.) first.
+- **(`gated` repos only)** the irreversible final actions listed above: merge to `main`, deploy, destructive/prod data ops, force-push.
 
 Everything else: decide and move. When in doubt between asking and proceeding on a reasonable default, **proceed.**
 
@@ -70,8 +82,8 @@ Skip for read-only work: questions, reviews, exploration, running tests without 
 
 Branches drift behind `main` fast — stale bases cause avoidable conflicts and reviews against code that's already moved.
 
-- **Starting a new batch of work**: sync first — `git checkout main && git pull` — and cut your worktree/branch off the freshly-pulled `main`, never a days-old local copy.
-- **During longer work**: periodically pull the default branch into your feature branch (`git fetch origin && git rebase origin/main`, or merge) so the diff stays small and current. Don't let it fall many commits behind.
+- **Starting a new batch of work**: sync first — `git checkout main && git pull` — and cut your worktree/branch off the freshly-pulled `main`, never a days-old local copy. In two-tier (`autonomous-merge`) repos, `dev` is the integration branch: branch off and merge back into `dev`, then promote `dev → main` in batches.
+- **During longer work**: periodically pull the integration branch into your feature branch (`git fetch origin && git rebase origin/main`, or merge — substitute `dev` where that's the integration branch) so the diff stays small and current. Don't let it fall many commits behind.
 - If a pull/rebase surfaces conflicts, resolve them as part of the work — don't defer them to merge time.
 
 ### Verify before you push or open a PR
