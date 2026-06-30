@@ -16,7 +16,7 @@ My personal Claude Code configuration — synced across machines via git.
 | `commands/` | Personal slash commands, symlinked to `~/.claude/commands/` (e.g. `/dotclaude-sync`, which pulls the repo and runs the link doctor). |
 | `bootstrap.sh` | One-command installer for a fresh machine. Symlinks files + directories into `~/.claude/`; `--check` runs a link doctor. |
 | `plugins.md` | Notes on which plugins are installed and what each is for. |
-| `mcp-connectors.md` | Checklist of claude.ai OAuth connectors (Notion, Gmail, Vercel…) to reconnect on a fresh machine. |
+| `mcp-connectors.md` | Checklist of claude.ai OAuth connectors (Notion, Gmail, Vercel…) to reconnect on a fresh machine, plus API-key HTTP MCPs (`upload-post`) that `bootstrap.sh` registers and their per-machine secrets. |
 | `.gitignore` | Keeps machine-local cruft out of the repo (history, sessions, caches, credentials). |
 
 ## The context-economy model
@@ -49,7 +49,8 @@ The bootstrap script:
 2. Symlinks the `rules/`, `hooks/`, and `commands/` directories into `~/.claude/`
 3. Symlinks each vendored skill (`finishing-work`, `find-skills`) into `~/.claude/skills/` individually, so plugin/user skills there aren't clobbered
 4. Builds and registers vendored custom MCP servers (`mcp/github`) with `claude mcp add`
-5. Reports which plugins will auto-install on first `claude` launch
+5. Registers API-key HTTP MCPs (`upload-post`) user-scoped, with the key read from `$UPLOAD_POST_API_KEY`
+6. Reports which plugins will auto-install on first `claude` launch
 
 Existing real files in `~/.claude/` are backed up to `~/.claude.bak.<timestamp>/` (never overwritten). The script is idempotent — safe to re-run.
 
@@ -92,6 +93,6 @@ Each project repo has its own `CLAUDE.md` and optionally `.claude/rules/<rule>.m
 
 - **Per-project `.claude/` folders** — those live with each project (rules, commands, worktree state).
 - **Local-only files** — sessions, history, paste cache, credentials. Listed in `.gitignore`.
-- **Top-level MCP OAuth state** — Notion, Gmail, Vercel, etc. live in `~/.claude.json` per-machine.
+- **MCP credentials** — OAuth tokens (Notion, Gmail, Vercel, …) and API keys live in `~/.claude.json` / `settings.local.json` per-machine. The repo carries the *reproducible* parts: OAuth connectors as a re-add checklist, and API-key HTTP MCPs (`upload-post`) as a `bootstrap.sh` registration with the key sourced from env (see `mcp-connectors.md`).
 - **Vendored plugin source** — plugins are declared in `settings.json` and installed from the marketplace. Update with `/plugin update`. (Custom MCP servers I wrote *are* vendored, under `mcp/` — they have no marketplace to install from.)
 - **Vendored plugin skills** — domain skills come from plugins. The one standalone user skill, `find-skills`, *is* vendored here (`skills/find-skills/`) and symlinked into `~/.claude/skills/` by bootstrap — it's not in any plugin, so the repo is its source of truth.

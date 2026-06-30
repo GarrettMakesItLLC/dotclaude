@@ -29,20 +29,39 @@ shown in the last column.
 > Note: Supabase also appears as a claude.ai connector in some setups, but the
 > repo's source of truth for Supabase is the **`supabase` plugin** (`plugins.md`).
 
-## Plugin MCP secrets (env vars — per-machine)
+## Remote HTTP MCPs with an API key (registered by `bootstrap.sh`)
 
-Some plugin MCPs authenticate with an API key from the environment rather than
-OAuth. The key is a per-machine secret — set it in `~/.claude/settings.local.json`
+A third category: remote HTTP MCP servers that authenticate with a **static API
+key** rather than OAuth, and aren't marketplace plugins. Unlike the OAuth
+connectors above, these *are* reproducible from this repo — the server URL is
+fixed, so `bootstrap.sh` registers them with `claude mcp add --scope user`. Only
+the key is per-machine, supplied through the env var below (never committed).
+
+| Server | What I use it for | Tool prefix |
+|--------|-------------------|-------------|
+| **upload-post** | Publish/schedule/analyze social posts (TikTok, IG, YouTube, LinkedIn, X, …) | `mcp__upload-post__*` |
+
+The header is registered as `Authorization: ApiKey ${UPLOAD_POST_API_KEY}` — the
+literal placeholder is stored in `~/.claude.json`, and Claude Code expands it
+from the session env at runtime, so the JWT never lands in a tracked file. To
+re-register manually: `claude mcp add --scope user --transport http upload-post
+https://mcp.upload-post.com/mcp --header 'Authorization: ApiKey ${UPLOAD_POST_API_KEY}'`.
+
+## MCP secrets (env vars — per-machine)
+
+Some MCPs authenticate with an API key from the environment rather than OAuth.
+The key is a per-machine secret — set it in `~/.claude/settings.local.json`
 (gitignored, **not** the symlinked `settings.json`) under `env`, or export it in
 your shell. Never commit it.
 
-| Env var | Plugin MCP | Where to get it |
-|---------|-----------|-----------------|
-| `RESEND_API_KEY` | `resend` | Resend dashboard → API Keys (<https://resend.com/api-keys>) |
+| Env var | Used by | Where to get it |
+|---------|---------|-----------------|
+| `RESEND_API_KEY` | `resend` plugin | Resend dashboard → API Keys (<https://resend.com/api-keys>) |
+| `UPLOAD_POST_API_KEY` | `upload-post` MCP | Upload-Post dashboard → API key / JWT (<https://app.upload-post.com/>) |
 
 ```jsonc
 // ~/.claude/settings.local.json
-{ "env": { "RESEND_API_KEY": "re_…" } }
+{ "env": { "RESEND_API_KEY": "re_…", "UPLOAD_POST_API_KEY": "eyJ…" } }
 ```
 
 ## Why not committed

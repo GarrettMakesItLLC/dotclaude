@@ -212,6 +212,31 @@ if [ -f "$GITHUB_MCP_DIR/package.json" ]; then
 fi
 
 # --------------------------------------------------------------------------
+# Remote HTTP MCP servers that authenticate with a static API key (not OAuth,
+# not a marketplace plugin). The server URL is reproducible and lives here, but
+# the key is a per-machine secret kept out of this repo and supplied via
+# $UPLOAD_POST_API_KEY (set in ~/.claude/settings.local.json `env`; see
+# mcp-connectors.md). We register the header with the literal
+# ${UPLOAD_POST_API_KEY} placeholder, which Claude Code expands from the session
+# env at runtime — so no key is ever written to a version-controlled file.
+# --------------------------------------------------------------------------
+if command -v claude >/dev/null 2>&1; then
+  echo
+  echo "→ Registering upload-post MCP (Upload-Post social publishing, user scope)"
+  if claude mcp get upload-post >/dev/null 2>&1; then
+    echo "  already registered: upload-post (run \`claude mcp remove upload-post\` to re-add)"
+  else
+    claude mcp add --scope user --transport http upload-post \
+      https://mcp.upload-post.com/mcp \
+      --header 'Authorization: ApiKey ${UPLOAD_POST_API_KEY}'
+    echo "  registered: upload-post (user scope)"
+  fi
+  if [ -z "${UPLOAD_POST_API_KEY:-}" ]; then
+    echo "  NOTE: set UPLOAD_POST_API_KEY in ~/.claude/settings.local.json \`env\` — see mcp-connectors.md" >&2
+  fi
+fi
+
+# --------------------------------------------------------------------------
 # Plugins are declared in settings.json (enabledPlugins + extraKnownMarketplaces).
 # Claude Code auto-installs them on first launch from the official marketplace.
 # --------------------------------------------------------------------------
