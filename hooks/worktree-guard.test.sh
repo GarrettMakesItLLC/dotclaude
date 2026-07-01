@@ -81,9 +81,8 @@ check 0 Edit file_path "$TMP/external-wt/x.ts"
 # guard via a symlinked parent dir so readlink -f must resolve the chain to find
 # the real repo root. A regression here would silently block edits to ~/dotclaude.
 ln -s "$HERE" "$TMP/hooks-link"
-printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$HERE/../CLAUDE.md" \
-  | "$TMP/hooks-link/worktree-guard.sh" >/dev/null 2>&1
-if [ "$?" != 0 ]; then
+if ! printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$HERE/../CLAUDE.md" \
+     | "$TMP/hooks-link/worktree-guard.sh" >/dev/null 2>&1; then
   echo "FAIL: config-repo exemption did not fire through a symlinked hooks dir"
   fail=1
 fi
