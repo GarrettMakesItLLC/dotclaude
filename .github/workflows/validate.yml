@@ -41,6 +41,7 @@ jobs:
       - name: Run hook self-tests
         run: |
           bash hooks/git-guard.test.sh
+          bash hooks/worktree-guard.test.sh
           bash hooks/verify-reminder.test.sh
 
   commitlint:
