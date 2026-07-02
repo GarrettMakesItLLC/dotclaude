@@ -7,6 +7,7 @@ Loaded from `~/.claude/CLAUDE.md` into **every** session — it's in context on 
 - **This file** — universal behavioral rules. Always loaded.
 - **`~/.claude/rules/*.md`** — stack conventions (TypeScript, frontend, data/API, testing, monorepo/hosting), **path-scoped** so each loads only when I open matching files.
 - **`~/.claude/skills/finishing-work`** — the finish-line procedure (definition of done, follow-ups, PR body, cleanup). Loads when wrapping up.
+- **`~/.claude/skills/managing-work-with-issues`** — the GitHub-issue lifecycle (claim-on-begin, label taxonomy, follow-up discipline, feedback triage). Loads when starting/creating/finishing tracked work.
 - **`~/.claude/hooks/`** — deterministic guardrails. `git-guard.sh` hard-**blocks** `--no-verify`, `.env` commits, force-push to `main`, and reckless `rm -rf`; `worktree-guard.sh` hard-**blocks** file edits to the main working tree of a `.worktrees/`-convention repo (use a worktree instead; `WORKTREE_GUARD_OFF=1` overrides); `verify-reminder.sh` (non-blocking) nudges you to verify before opening a PR. These fire even under `bypassPermissions`, so treat a block as a hard limit — fix the underlying cause, never route around it.
 
 ---
@@ -44,17 +45,17 @@ Where "ship" ends depends on the repo's **autonomy mode**, declared by a top lin
 
 Everything else: decide and move. When in doubt between asking and proceeding on a reasonable default, **proceed.**
 
-### Fix what's relevant; track-and-tackle the rest
+### Issues are the tracker; finish in-scope work
 
-**Scope call first.** If something you notice is small and relevant to the task, just fix it inline — don't ask. If it's **big, risky, or unrelated**, don't sprawl the diff: capture it instead.
+**Scope call first.** If something you notice is small and relevant to the task, just fix it inline — don't ask, don't defer. **In-scope work gets finished, not filed.** Leaving a task half-done and opening a follow-up for the rest is a failure, not tidiness.
 
-When you defer something — out of scope, a leftover TODO, a "we should also…", a known limitation, a flagged risk — **open a GitHub issue** (`gh issue create`) instead of only mentioning it in the summary or dropping a bare `// TODO`. Follow-up work must not evaporate into chat history.
+GitHub Issues are the work-tracking substrate. The lifecycle — claim-on-begin (self-assign + `status:in-progress`), the `status:`/`type:`/`source:` taxonomy, close reasons, and feedback triage — lives in the **`managing-work-with-issues`** skill; load it when you start, create, or finish tracked work.
 
-- Title it clearly; short body (what + why + a `file:line` pointer); label it if the repo uses labels.
-- **Don't just file it and walk away** — dispatch a subagent (its own worktree, in parallel) to address it, unless it's genuinely blocked, needs my input, or belongs in a separate session.
-- Reference each issue from the PR (`Follow-up: #123`) and list them — with status — in the final summary.
-- Batch related follow-ups into one issue rather than many tiny ones.
-- Creating issues in my own repos is **pre-approved** — the one outward-facing action you may take without asking, since it's just bookkeeping in my tracker.
+- **Claim before you work.** The moment you begin an issue, `issue_claim` it (self-assign + `status:in-progress`). Don't work an unclaimed issue.
+- **A follow-up issue is only for** (a) a finding genuinely **out of scope**, or (b) a blocker needing a **human decision that totally halts** progress while you run autonomously. Not for in-scope work you could finish now.
+- Every issue you create carries full fields (type, status, `file:line` in the body, relationships/milestone where known) and **no assignee** until claimed. Reference issues from the PR (`Closes #N`) and list them — with status — in the final summary.
+- User-reported feedback (musclebuddy/redthread/adventureos) is filed `status:blocked` and **never auto-started** — it must be verified first.
+- Creating issues in my own repos is **pre-approved** — bookkeeping in my tracker.
 
 ### Default to parallel + subagents
 
