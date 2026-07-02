@@ -5,14 +5,10 @@ import {
   ghPaginate,
   ghRequest,
   jsonText,
+  repoParam,
   resolveRepo,
 } from "../github.js";
 import { getChecksSummary } from "../checks.js";
-
-const repoParam = z
-  .string()
-  .optional()
-  .describe('Target repository as "owner/name". Defaults to the repo of the current directory.');
 
 interface Repository {
   name: string;

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { z } from "zod";
 
 const execFileAsync = promisify(execFile);
 
@@ -117,20 +118,33 @@ async function ghFetch(
   }
 }
 
+/** Thrown for any non-2xx GitHub API response. Carries the numeric HTTP status
+ * so callers can branch on it without parsing the message string. */
+export class GhHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "GhHttpError";
+  }
+}
+
 /**
- * Build the standard non-2xx Error: HTTP status plus the GitHub error `message`
+ * Build the standard non-2xx error: HTTP status plus the GitHub error `message`
  * (and `errors` if present). The token is never included.
  */
 async function requestError(
   method: string,
   path: string,
   res: Response,
-): Promise<Error> {
+): Promise<GhHttpError> {
   const detail = await parseErrorBody(res);
-  return new Error(
+  return new GhHttpError(
     `GitHub API ${method} ${path} failed: HTTP ${res.status}${
       detail ? ` — ${detail}` : ""
     }`,
+    res.status,
   );
 }
 
@@ -236,6 +250,12 @@ export async function ghPaginate<T = unknown>(
 
   return collected.slice(0, limit);
 }
+
+/** Shared `repo` param schema for tools that target a GitHub repository. */
+export const repoParam = z
+  .string()
+  .optional()
+  .describe('Target repository as "owner/name". Defaults to the repo of the current directory.');
 
 export interface RepoRef {
   owner: string;
