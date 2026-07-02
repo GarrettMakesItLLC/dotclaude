@@ -8,7 +8,7 @@ import {
   jsonText,
   resolveRepo,
 } from "../github.js";
-import { typeLabel, nativeTypeName, type IssueType } from "../labels.js";
+import { typeLabel, nativeTypeName, STATUS_LABEL_NAMES, type IssueType } from "../labels.js";
 
 const repoParam = z
   .string()
@@ -329,6 +329,42 @@ export function registerIssueTools(server: McpServer): void {
         const data = await ghPaginate(`/repos/${owner}/${name}/issues/${number}/sub_issues`, {
           limit: 1000,
         });
+        return jsonText(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "issue_claim",
+    {
+      description:
+        "Claim an issue to begin work: self-assign the authenticated user and move status to in-progress (removing any other status:* label). Use this the moment you start an issue.",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Issue number."),
+      },
+    },
+    async ({ repo, number }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const me = await getViewerLogin();
+        await ghRequest(`/repos/${owner}/${name}/issues/${number}/assignees`, {
+          method: "POST",
+          body: { assignees: [me] },
+        });
+        const issue = await ghRequest<{ labels: { name: string }[] }>(
+          `/repos/${owner}/${name}/issues/${number}`,
+        );
+        const kept = issue.labels
+          .map((l) => l.name)
+          .filter((n) => !STATUS_LABEL_NAMES.includes(n));
+        const next = [...kept, "status:in-progress"];
+        const data = await ghRequest(
+          `/repos/${owner}/${name}/issues/${number}/labels`,
+          { method: "PUT", body: { labels: next } },
+        );
         return jsonText(data);
       } catch (err) {
         return errorResult(err);

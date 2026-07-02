@@ -190,3 +190,30 @@ describe("issue_set_type", () => {
     expect(res.isError).toBeFalsy();
   });
 });
+
+describe("issue_claim", () => {
+  it("assigns @me and swaps any status:* label for status:in-progress", async () => {
+    let assigned = false;
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
+      if (init.method === "POST" && url.endsWith("/assignees")) {
+        assigned = true;
+        return makeResponse({ status: 201, body: {} });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/8")) {
+        return makeResponse({ status: 200, body: { labels: [{ name: "status:ready" }, { name: "type:bug" }] } });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        const sent = JSON.parse(init.body as string).labels as string[];
+        expect(sent).toEqual(expect.arrayContaining(["type:bug", "status:in-progress"]));
+        expect(sent).not.toContain("status:ready");
+        return makeResponse({ status: 200, body: { number: 8 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8 });
+    expect(res.isError).toBeFalsy();
+    expect(assigned).toBe(true);
+  });
+});
