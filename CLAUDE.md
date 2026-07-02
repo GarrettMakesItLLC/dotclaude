@@ -30,11 +30,13 @@ When I hand you a feature or bug, **own it end-to-end without checkpoint questio
 Where "ship" ends depends on the repo's **autonomy mode**, declared by a top line in its per-repo `CLAUDE.md`. **When unspecified, assume `gated`** — the safe default.
 
 - **`gated` (default)** — carry the work to a **PR that's ready to merge**, then stop. **Merging to `main`, deploying, destructive data ops, force-push, and anything outward-facing/published are mine.** Take it right up to that line and stop there. This is the mode for any repo that hasn't opted in (e.g. **adventureOS**, until I say otherwise).
-- **`autonomous-merge` (opt-in)** — repos whose `CLAUDE.md` declares `Autonomy: autonomous-merge` (currently **musclebuddy** and **redthread**). There you carry past the PR and merge it yourself:
+- **`autonomous-merge` (opt-in)** — repos whose `CLAUDE.md` declares `Autonomy: autonomous-merge` (currently **musclebuddy**, **redthread**, and **dotclaude** itself — dotclaude is single-tier, so feature → `main`). There you carry past the PR and merge it yourself:
   - **Merge feature → `dev`** once you've self-reviewed, addressed findings, and **CI is green**. In single-tier repos with no `dev` branch, this is feature → `main`.
   - **Promote `dev` → `main` in batches** when a coherent set of changes has landed and CI is green on `dev`. Batch related work; don't promote one commit at a time. Prefer promoting *through* `dev` rather than feature → `main` direct.
   - **Run any database operation** the task needs — including **destructive ops (DROP/DELETE/TRUNCATE) and prod migrations** — under the same review + CI discipline. `list_tables` / `get_advisors` first; write reversible migrations where you can; then proceed without stopping to ask.
   - **Still mine even here:** force-push to `main` (hook-blocked regardless), and any outward-facing action beyond the deploy a `main` merge triggers.
+
+**Reviewed + fixed + CI green ⇒ merge it.** In an `autonomous-merge` repo, once a PR has been reviewed, its findings addressed, and CI is green, merge it yourself — don't park a green, reviewed PR waiting on me. This is what lets the `extending-the-github-mcp` self-heal loop close without a human in the loop.
 
 **CI is the gate in every mode: never merge or promote on red or pending checks.** If CI is failing, fix it or stop — never route around it (no `--admin` merge, no skipping required checks).
 
