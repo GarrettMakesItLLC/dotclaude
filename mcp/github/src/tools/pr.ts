@@ -285,7 +285,7 @@ export function registerPrTools(server: McpServer): void {
           {
             method: "PUT",
             body: {
-              merge_method: method ?? "squash",
+              merge_method: method,
               commit_title,
               commit_message,
             },
