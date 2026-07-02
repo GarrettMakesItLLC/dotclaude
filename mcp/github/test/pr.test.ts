@@ -199,3 +199,115 @@ describe("pr_open_for_issue", () => {
     expect(res.isError).toBeFalsy();
   });
 });
+
+describe("pr_merge", () => {
+  it("merges with the default squash method", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "PUT" && url.endsWith("/pulls/42/merge")) {
+        expect(init.body).toContain('"merge_method":"squash"');
+        return makeResponse({ status: 200, body: { merged: true, sha: "abc123" } });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    // The stub harness invokes the handler directly, bypassing zod schema parsing, so the
+    // schema's `.default("squash")` isn't applied here — pass it explicitly to simulate what
+    // a real MCP client omitting `method` would resolve to.
+    const handler = await getPrHandler("pr_merge");
+    const res = await handler({ repo: "octo/repo", number: 42, method: "squash" });
+
+    expect(res.isError).toBeFalsy();
+    const body = JSON.parse(res.content[0].text) as { merged: boolean; sha: string };
+    expect(body.merged).toBe(true);
+    expect(body.sha).toBe("abc123");
+  });
+
+  it("deletes the head branch after a successful merge when delete_branch is true", async () => {
+    let deletedPath: string | undefined;
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "PUT" && url.endsWith("/pulls/42/merge")) {
+        return makeResponse({ status: 200, body: { merged: true, sha: "abc123" } });
+      }
+      if (init.method === "GET" && url.endsWith("/pulls/42")) {
+        return makeResponse({
+          status: 200,
+          body: { head: { ref: "feature/x", sha: "abc123" }, base: { ref: "main" } },
+        });
+      }
+      if (init.method === "DELETE" && url.includes("/git/refs/heads/")) {
+        deletedPath = url;
+        return makeResponse({ status: 204 });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getPrHandler("pr_merge");
+    const res = await handler({ repo: "octo/repo", number: 42, delete_branch: true });
+
+    expect(res.isError).toBeFalsy();
+    expect(deletedPath).toContain("/git/refs/heads/feature/x");
+    const body = JSON.parse(res.content[0].text) as { _warnings?: string[] };
+    expect(body._warnings).toBeUndefined();
+  });
+
+  it("warns (without failing the call) when the merge succeeds but branch deletion fails", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "PUT" && url.endsWith("/pulls/42/merge")) {
+        return makeResponse({ status: 200, body: { merged: true, sha: "abc123" } });
+      }
+      if (init.method === "GET" && url.endsWith("/pulls/42")) {
+        return makeResponse({
+          status: 200,
+          body: { head: { ref: "feature/x", sha: "abc123" }, base: { ref: "main" } },
+        });
+      }
+      if (init.method === "DELETE" && url.endsWith("/git/refs/heads/feature/x")) {
+        return makeResponse({ status: 500, body: { message: "server error" } });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getPrHandler("pr_merge");
+    const res = await handler({ repo: "octo/repo", number: 42, delete_branch: true });
+
+    expect(res.isError).toBeFalsy();
+    const body = JSON.parse(res.content[0].text) as {
+      merged: boolean;
+      sha: string;
+      _warnings?: string[];
+    };
+    expect(body.merged).toBe(true);
+    expect(body.sha).toBe("abc123");
+    expect(body._warnings).toHaveLength(1);
+    expect(body._warnings?.[0]).toContain("feature/x");
+  });
+
+  it("refuses to delete the branch when the head ref is main, and warns", async () => {
+    let deleteCalled = false;
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "PUT" && url.endsWith("/pulls/42/merge")) {
+        return makeResponse({ status: 200, body: { merged: true, sha: "abc123" } });
+      }
+      if (init.method === "GET" && url.endsWith("/pulls/42")) {
+        return makeResponse({
+          status: 200,
+          body: { head: { ref: "main", sha: "abc123" }, base: { ref: "main" } },
+        });
+      }
+      if (init.method === "DELETE" && url.includes("/git/refs/heads/")) {
+        deleteCalled = true;
+        return makeResponse({ status: 204 });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getPrHandler("pr_merge");
+    const res = await handler({ repo: "octo/repo", number: 42, delete_branch: true });
+
+    expect(res.isError).toBeFalsy();
+    expect(deleteCalled).toBe(false);
+    const body = JSON.parse(res.content[0].text) as { _warnings?: string[] };
+    expect(body._warnings).toHaveLength(1);
+    expect(body._warnings?.[0]).toContain("main");
+  });
+});

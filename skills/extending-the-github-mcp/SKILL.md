@@ -8,7 +8,7 @@ description: Use when you need a GitHub operation the github-rest MCP does not e
 The `github-rest` MCP (source: `mcp/github/` in this repo) is the sanctioned, REST-only way agents drive GitHub. When you hit a capability gap — an operation no tool exposes — do not just work around it silently. Close the loop.
 
 ## 1. Unblock now (fallback)
-Use a raw `gh` command to finish your immediate task. REST-only paths — never `gh api graphql` (the MCP is REST-only precisely to avoid the deprecated GraphQL `projectCards` path). **State in your summary that you fell back and why** — a fallback is the signal that the MCP has a gap.
+Use a raw `gh` command to finish your immediate task. REST-only paths — never `gh api graphql` (the MCP is REST-only precisely to avoid the deprecated GraphQL `projectCards` path). Note that `gh`'s convenience subcommands (e.g. `gh pr edit`, `gh pr merge`) can themselves silently route through GraphQL and hit that same deprecated path — so prefer the MCP REST tools (`pr_update`, `pr_merge`, etc.) as the primary path, and when you must fall back to `gh`, prefer `gh api` (REST) over the convenience subcommands. **State in your summary that you fell back and why** — a fallback is the signal that the MCP has a gap.
 
 ## 2. Capture the gap — always file an issue
 File an issue in `GarrettMakesItLLC/dotclaude` describing the missing capability: the operation, why it was needed, and the REST endpoint that would back it. `type:task`. Use `issue_open` if the tool is available; otherwise `gh issue create`. This guarantees the gap is never lost, even if you do not fix it now.
