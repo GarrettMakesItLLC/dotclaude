@@ -17,7 +17,7 @@ File an issue in `GarrettMakesItLLC/dotclaude` describing the missing capability
 Most missing tools wrap a single REST endpoint — small and clear. For those, do not stop at filing; add the tool:
 - Worktree off `main`; TDD in `mcp/github` (test → red → implement → green), following the existing tool style (zod schema, `ghRequest`, `jsonText`/`errorResult`, `.js` specifiers, no `any` in `src/`).
 - Verify: `npm run typecheck && npm test && npm run build`.
-- Get it reviewed (dispatch a reviewer subagent), open a PR with `Closes #<gap issue>`, and once **CI is green and review is clean, merge it** — growing the shared tooling is autonomous-merge work: agents own the full process including the merge. CI is the gate (never merge on red/pending); force-push to `main` stays off-limits.
+- Get it reviewed (dispatch a reviewer subagent) and open a PR with `Closes #<gap issue>`. Then follow **the target repo's autonomy mode** (the autonomy rules in the global CLAUDE.md): in an `autonomous-merge` repo, merge it once **CI is green and review is clean**; in a `gated` repo, take it to a merge-ready PR and hand the merge to Garrett. CI is the gate either way (never merge on red/pending); force-push to `main` stays off-limits.
 - After merge the running MCP server serves the new tool only after a rebuild + reload: `npm run build` in `mcp/github`, then restart Claude Code.
 
 ## When to file and NOT build
