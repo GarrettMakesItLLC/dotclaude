@@ -52,6 +52,15 @@ check_bash nudge 'gh pr create -t "feat: x" -b "body" --base main'
 check_bash nudge 'git push origin HEAD && gh pr create --fill'
 check_tool nudge 'mcp__github-rest__pr_create'
 
+# --- issue linkage: pr_create nudge mentions issue linking ---
+out="$(printf '%s' '{"tool_name":"mcp__github-rest__pr_create","tool_input":{}}' | "$HOOK")"
+if printf '%s' "$out" | grep -q "Closes #"; then
+  :
+else
+  echo "FAIL: pr_create nudge should mention 'Closes #'"
+  fail=1
+fi
+
 # Should stay SILENT — not a PR-creation action.
 check_bash silent 'gh pr view 7'
 check_bash silent 'gh pr list'
