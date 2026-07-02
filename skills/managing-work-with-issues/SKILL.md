@@ -26,9 +26,9 @@ If a label is missing in a repo, run `labels_ensure` once to provision the full 
 
 **Beginning work:** call `issue_claim` the moment you start — it self-assigns you and moves the issue to `status:in-progress`. Never work an issue without claiming it first.
 
-**Opening the PR:** set `status:in-review` (swap it in via `issue_set_labels`, dropping `in-progress`) and reference the issue in the PR body (`Closes #N`).
+**Opening the PR:** set `status:in-review` with `issue_set_status` (preserves `type:*`/`source:*` labels) and reference the issue in the PR body (`Closes #N`).
 
-**Finishing:** the merged `Closes #N` PR closes the issue as `completed` automatically. If you close an issue *without* implementing it (won't/didn't do), close it with `issue_update` `state: closed`, `state_reason: not_planned`, and remove the `status:*` label first.
+**Finishing:** the merged `Closes #N` PR closes the issue as `completed` automatically. If you close an issue *without* implementing it (won't/didn't do), close it with `issue_update` `state: closed`, `state_reason: not_planned`, and clear it with `issue_set_status` (call with no status) first.
 
 ## User-reported feedback (musclebuddy / redthread / adventureos)
 

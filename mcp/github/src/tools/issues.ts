@@ -8,7 +8,14 @@ import {
   jsonText,
   resolveRepo,
 } from "../github.js";
-import { typeLabel, nativeTypeName, STATUS_LABEL_NAMES, type IssueType } from "../labels.js";
+import {
+  typeLabel,
+  nativeTypeName,
+  statusLabel,
+  STATUS_LABEL_NAMES,
+  type IssueType,
+  type IssueStatus,
+} from "../labels.js";
 
 const repoParam = z
   .string()
@@ -360,7 +367,43 @@ export function registerIssueTools(server: McpServer): void {
         const kept = issue.labels
           .map((l) => l.name)
           .filter((n) => !STATUS_LABEL_NAMES.includes(n));
-        const next = [...kept, "status:in-progress"];
+        const next = [...kept, statusLabel("in-progress")];
+        const data = await ghRequest(
+          `/repos/${owner}/${name}/issues/${number}/labels`,
+          { method: "PUT", body: { labels: next } },
+        );
+        return jsonText(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "issue_set_status",
+    {
+      description:
+        "Set the single status:* label on an issue, preserving all other labels (type:*, source:*, etc). " +
+        "Omit `status` to clear it entirely (e.g. before closing an issue).",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Issue number."),
+        status: z
+          .enum(["backlog", "ready", "blocked", "in-progress", "in-review"])
+          .optional()
+          .describe("New status. Omit to clear the status:* label without setting a new one."),
+      },
+    },
+    async ({ repo, number, status }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const issue = await ghRequest<{ labels: { name: string }[] }>(
+          `/repos/${owner}/${name}/issues/${number}`,
+        );
+        const kept = issue.labels
+          .map((l) => l.name)
+          .filter((n) => !STATUS_LABEL_NAMES.includes(n));
+        const next = status ? [...kept, statusLabel(status as IssueStatus)] : kept;
         const data = await ghRequest(
           `/repos/${owner}/${name}/issues/${number}/labels`,
           { method: "PUT", body: { labels: next } },

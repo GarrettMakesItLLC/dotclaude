@@ -30,6 +30,13 @@ export function typeLabel(type: IssueType): string {
   return `type:${type}`;
 }
 
+export type IssueStatus = "backlog" | "ready" | "blocked" | "in-progress" | "in-review";
+
+/** The `status:*` label name for a status value. */
+export function statusLabel(status: IssueStatus): string {
+  return `status:${status}`;
+}
+
 /** GitHub native issue-type name (title-cased) for a given type label value. */
 export function nativeTypeName(type: IssueType): string {
   return { bug: "Bug", feature: "Feature", task: "Task" }[type];

@@ -217,3 +217,55 @@ describe("issue_claim", () => {
     expect(assigned).toBe(true);
   });
 });
+
+describe("issue_set_status", () => {
+  it("swaps the status:* label, preserving type:*/source:* labels", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "GET" && url.endsWith("/issues/11")) {
+        return makeResponse({
+          status: 200,
+          body: {
+            labels: [
+              { name: "status:in-progress" },
+              { name: "type:bug" },
+              { name: "source:redthread" },
+            ],
+          },
+        });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        const sent = JSON.parse(init.body as string).labels as string[];
+        expect(sent).toEqual(
+          expect.arrayContaining(["status:in-review", "type:bug", "source:redthread"]),
+        );
+        expect(sent).not.toContain("status:in-progress");
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_set_status");
+    const res = await handler({ repo: "octo/repo", number: 11, status: "in-review" });
+    expect(res.isError).toBeFalsy();
+  });
+
+  it("clears the status:* label when called with no status", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "GET" && url.endsWith("/issues/11")) {
+        return makeResponse({
+          status: 200,
+          body: { labels: [{ name: "status:in-progress" }, { name: "type:bug" }] },
+        });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        const sent = JSON.parse(init.body as string).labels as string[];
+        expect(sent).toContain("type:bug");
+        expect(sent.some((n) => n.startsWith("status:"))).toBe(false);
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_set_status");
+    const res = await handler({ repo: "octo/repo", number: 11 });
+    expect(res.isError).toBeFalsy();
+  });
+});

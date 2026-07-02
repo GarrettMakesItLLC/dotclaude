@@ -66,6 +66,7 @@ Issues:
   `@me`.
 - `issue_claim` — self-assign `@me` and set `status:in-progress`, removing any
   other `status:*` label. Use when starting work on an issue.
+- `issue_set_status` — set the single `status:*` label (or clear it), preserving all other labels.
 - `issue_set_type` — set bug/feature/task as the native issue type
   (best-effort) plus a `type:*` label.
 - `issue_set_milestone` / `milestone_ensure` — attach an issue to a milestone,
