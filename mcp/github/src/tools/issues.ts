@@ -468,7 +468,9 @@ export function registerIssueTools(server: McpServer): void {
         "Create a fully-formed issue in one call: composes status/type/source labels, sets the " +
         "native issue type (best-effort), finds-or-creates and attaches a milestone by title, and " +
         "nests it under a parent as a sub-issue — instead of hand-composing across several tool calls. " +
-        "Status defaults to `ready`, or `blocked` when a `source` is set (unverified feedback).",
+        "Status defaults to `ready`, or `blocked` when a `source` is set (unverified feedback). " +
+        "The issue itself is always created first; milestone/sub-issue enrichment is best-effort — " +
+        "on partial failure the created issue is still returned, annotated with a `_warnings` array.",
       inputSchema: {
         repo: repoParam,
         title: z.string().describe("Issue title."),
@@ -523,6 +525,7 @@ export function registerIssueTools(server: McpServer): void {
           },
         );
         const { number, id } = created;
+        const warnings: string[] = [];
 
         if (t) {
           // Native issue type — org-configured, may not exist on this owner. Best-effort.
@@ -536,24 +539,40 @@ export function registerIssueTools(server: McpServer): void {
           }
         }
 
+        // The issue is already created at this point — enrichment failures below must not
+        // hide that creation behind an errorResult, or a retry would create a duplicate.
         if (milestone) {
-          const milestoneNumber = await ensureMilestone(owner, name, milestone);
-          await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
-            method: "PATCH",
-            body: { milestone: milestoneNumber },
-          });
+          try {
+            const milestoneNumber = await ensureMilestone(owner, name, milestone);
+            await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
+              method: "PATCH",
+              body: { milestone: milestoneNumber },
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            warnings.push(`milestone "${milestone}" not attached: ${msg}`);
+          }
         }
 
         if (parent) {
-          // The sub_issues endpoint takes the child's database id, already captured above.
-          await ghRequest(`/repos/${owner}/${name}/issues/${parent}/sub_issues`, {
-            method: "POST",
-            body: { sub_issue_id: id },
-          });
+          try {
+            // The sub_issues endpoint takes the child's database id, already captured above.
+            await ghRequest(`/repos/${owner}/${name}/issues/${parent}/sub_issues`, {
+              method: "POST",
+              body: { sub_issue_id: id },
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            warnings.push(`parent #${parent} not linked: ${msg}`);
+          }
         }
 
-        const final = await ghRequest(`/repos/${owner}/${name}/issues/${number}`);
-        return jsonText(final);
+        const final = await ghRequest<Record<string, unknown>>(
+          `/repos/${owner}/${name}/issues/${number}`,
+        );
+        return jsonText(
+          warnings.length ? { ...final, _warnings: warnings } : final,
+        );
       } catch (err) {
         return errorResult(err);
       }
