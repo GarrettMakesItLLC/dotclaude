@@ -73,6 +73,11 @@ Issues:
   finding or creating it by title.
 - `issue_add_sub_issue` / `issue_list_sub_issues` — manage parent/child issue
   relationships.
+- `issue_open` — create a fully-formed issue in one call: composes
+  `status:*`/`type:*`/`source:*` labels, sets the native issue type
+  (best-effort), finds-or-creates and attaches a milestone by title, and
+  nests it under a `parent` as a sub-issue. Composes the granular tools above
+  so agents don't have to hand-compose fields across several calls.
 
 Labels:
 

@@ -30,6 +30,30 @@ async function resolveAssignees(assignees: string[]): Promise<string[]> {
   return out;
 }
 
+/**
+ * Find a milestone by exact title, or create it. Returns the milestone number.
+ * Shared by the `milestone_ensure` tool and `issue_open`.
+ */
+async function ensureMilestone(
+  owner: string,
+  name: string,
+  title: string,
+  description?: string,
+  due_on?: string,
+): Promise<number> {
+  const existing = await ghPaginate<{ number: number; title: string }>(
+    `/repos/${owner}/${name}/milestones`,
+    { query: { state: "all" }, limit: 1000 },
+  );
+  const match = existing.find((m) => m.title === title);
+  if (match) return match.number;
+  const created = await ghRequest<{ number: number; title: string }>(
+    `/repos/${owner}/${name}/milestones`,
+    { method: "POST", body: { title, description, due_on } },
+  );
+  return created.number;
+}
+
 export function registerIssueTools(server: McpServer): void {
   server.registerTool(
     "issue_list",
@@ -426,17 +450,8 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, title, description, due_on }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const existing = await ghPaginate<{ number: number; title: string }>(
-          `/repos/${owner}/${name}/milestones`,
-          { query: { state: "all" }, limit: 1000 },
-        );
-        const match = existing.find((m) => m.title === title);
-        if (match) return jsonText({ number: match.number, title: match.title });
-        const created = await ghRequest<{ number: number; title: string }>(
-          `/repos/${owner}/${name}/milestones`,
-          { method: "POST", body: { title, description, due_on } },
-        );
-        return jsonText({ number: created.number, title: created.title });
+        const number = await ensureMilestone(owner, name, title, description, due_on);
+        return jsonText({ number, title });
       } catch (err) {
         return errorResult(err);
       }
@@ -461,6 +476,102 @@ export function registerIssueTools(server: McpServer): void {
           body: { milestone },
         });
         return jsonText(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "issue_open",
+    {
+      description:
+        "Create a fully-formed issue in one call: composes status/type/source labels, sets the " +
+        "native issue type (best-effort), finds-or-creates and attaches a milestone by title, and " +
+        "nests it under a parent as a sub-issue — instead of hand-composing across several tool calls.",
+      inputSchema: {
+        repo: repoParam,
+        title: z.string().describe("Issue title."),
+        body: z.string().optional().describe("Issue body (markdown)."),
+        type: z.enum(["bug", "feature", "task"]).optional().describe("Issue type."),
+        status: z
+          .enum(["backlog", "ready", "blocked", "in-progress", "in-review"])
+          .default("ready")
+          .describe("Initial status."),
+        source: z
+          .enum(["musclebuddy", "redthread", "adventureos"])
+          .optional()
+          .describe("Feedback source, if this issue originated from user feedback."),
+        milestone: z
+          .string()
+          .optional()
+          .describe("Milestone title; found or created by exact title match, then attached."),
+        parent: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Parent issue number; nests the new issue as its sub-issue."),
+        assignees: z
+          .array(z.string())
+          .optional()
+          .describe('Usernames to assign, or "@me". Default: unassigned.'),
+      },
+    },
+    async ({ repo, title, body, type, status, source, milestone, parent, assignees }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const t = type as IssueType | undefined;
+        const s = (status ?? "ready") as IssueStatus;
+
+        const labels = [statusLabel(s)];
+        if (t) labels.push(typeLabel(t));
+        if (source) labels.push(`source:${source}`);
+
+        const created = await ghRequest<{ number: number; id: number }>(
+          `/repos/${owner}/${name}/issues`,
+          {
+            method: "POST",
+            body: {
+              title,
+              body,
+              labels,
+              assignees: assignees ? await resolveAssignees(assignees) : undefined,
+            },
+          },
+        );
+        const { number, id } = created;
+
+        if (t) {
+          // Native issue type — org-configured, may not exist on this owner. Best-effort.
+          try {
+            await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
+              method: "PATCH",
+              body: { type: nativeTypeName(t) },
+            });
+          } catch {
+            // Owner lacks native issue types; the type:* label already applied is the fallback.
+          }
+        }
+
+        if (milestone) {
+          const milestoneNumber = await ensureMilestone(owner, name, milestone);
+          await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
+            method: "PATCH",
+            body: { milestone: milestoneNumber },
+          });
+        }
+
+        if (parent) {
+          // The sub_issues endpoint takes the child's database id, already captured above.
+          await ghRequest(`/repos/${owner}/${name}/issues/${parent}/sub_issues`, {
+            method: "POST",
+            body: { sub_issue_id: id },
+          });
+        }
+
+        const final = await ghRequest(`/repos/${owner}/${name}/issues/${number}`);
+        return jsonText(final);
       } catch (err) {
         return errorResult(err);
       }
