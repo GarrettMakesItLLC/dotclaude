@@ -130,3 +130,28 @@ describe("issue_add_assignees", () => {
     expect(issue.assignees[0].login).toBe("GarrettMakesIt");
   });
 });
+
+describe("issue_set_type", () => {
+  it("PATCHes native type then replaces type:* labels, preserving non-type labels", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "PATCH" && /\/issues\/7$/.test(url)) {
+        expect(init.body).toContain('"type":"Bug"');
+        return makeResponse({ status: 200, body: {} });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/7")) {
+        return makeResponse({ status: 200, body: { labels: [{ name: "type:feature" }, { name: "status:ready" }] } });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        const sent = JSON.parse((init.body as string)).labels as string[];
+        expect(sent).toContain("type:bug");
+        expect(sent).toContain("status:ready");
+        expect(sent).not.toContain("type:feature");
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_set_type");
+    const res = await handler({ repo: "octo/repo", number: 7, type: "bug" });
+    expect(res.isError).toBeFalsy();
+  });
+});

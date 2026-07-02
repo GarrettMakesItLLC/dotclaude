@@ -8,6 +8,7 @@ import {
   jsonText,
   resolveRepo,
 } from "../github.js";
+import { typeLabel, nativeTypeName, type IssueType } from "../labels.js";
 
 const repoParam = z
   .string()
@@ -231,6 +232,51 @@ export function registerIssueTools(server: McpServer): void {
         const data = await ghRequest(
           `/repos/${owner}/${name}/issues/${number}/assignees`,
           { method: "DELETE", body: { assignees: resolved } },
+        );
+        return jsonText(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "issue_set_type",
+    {
+      description:
+        "Set an issue's type (bug/feature/task): applies the native GitHub issue type (best-effort) and the matching type:* label, replacing any existing type:* label.",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Issue number."),
+        type: z.enum(["bug", "feature", "task"]).describe("Issue type."),
+      },
+    },
+    async ({ repo, number, type }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const t = type as IssueType;
+
+        // Native issue type — org-configured, may not exist on this owner. Best-effort.
+        try {
+          await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
+            method: "PATCH",
+            body: { type: nativeTypeName(t) },
+          });
+        } catch {
+          // Owner lacks native issue types; the label below is the universal fallback.
+        }
+
+        // Replace any existing type:* label, preserving all others.
+        const issue = await ghRequest<{ labels: { name: string }[] }>(
+          `/repos/${owner}/${name}/issues/${number}`,
+        );
+        const kept = issue.labels
+          .map((l) => l.name)
+          .filter((n) => !n.startsWith("type:"));
+        const next = [...kept, typeLabel(t)];
+        const data = await ghRequest(
+          `/repos/${owner}/${name}/issues/${number}/labels`,
+          { method: "PUT", body: { labels: next } },
         );
         return jsonText(data);
       } catch (err) {
