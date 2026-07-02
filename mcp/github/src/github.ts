@@ -9,6 +9,7 @@ const API_VERSION = "2022-11-28";
 
 let cachedToken: string | null = null;
 let cachedRepo: string | null = null;
+let cachedViewer: string | null = null;
 
 /**
  * Fetch the GitHub token by spawning `gh auth token`.
@@ -286,6 +287,14 @@ export async function resolveRepo(repo?: string): Promise<RepoRef> {
 
   const [owner, name] = nameWithOwner.split("/");
   return { owner, name };
+}
+
+/** Resolve and cache the authenticated user's login (for the `@me` sentinel). */
+export async function getViewerLogin(): Promise<string> {
+  if (cachedViewer) return cachedViewer;
+  const user = await ghRequest<{ login: string }>("/user");
+  cachedViewer = user.login;
+  return cachedViewer;
 }
 
 const DEFAULT_LIMIT = 30;

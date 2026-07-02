@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
   errorResult,
+  getViewerLogin,
   ghPaginate,
   ghRequest,
   jsonText,
@@ -17,6 +18,12 @@ interface IssueLike {
   number: number;
   // Present only on items that are actually pull requests.
   pull_request?: unknown;
+}
+
+async function resolveAssignees(assignees: string[]): Promise<string[]> {
+  const out: string[] = [];
+  for (const a of assignees) out.push(a === "@me" ? await getViewerLogin() : a);
+  return out;
 }
 
 export function registerIssueTools(server: McpServer): void {
@@ -170,6 +177,56 @@ export function registerIssueTools(server: McpServer): void {
         const data = await ghRequest(
           `/repos/${owner}/${name}/issues/${number}/labels`,
           { method: "PUT", body: { labels } },
+        );
+        return jsonText(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "issue_add_assignees",
+    {
+      description: 'Assign users to an issue. Accepts the sentinel "@me" for the authenticated user.',
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Issue number."),
+        assignees: z.array(z.string()).describe('Usernames, or "@me".'),
+      },
+    },
+    async ({ repo, number, assignees }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const resolved = await resolveAssignees(assignees);
+        const data = await ghRequest(
+          `/repos/${owner}/${name}/issues/${number}/assignees`,
+          { method: "POST", body: { assignees: resolved } },
+        );
+        return jsonText(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "issue_remove_assignees",
+    {
+      description: 'Unassign users from an issue. Accepts the sentinel "@me".',
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Issue number."),
+        assignees: z.array(z.string()).describe('Usernames, or "@me".'),
+      },
+    },
+    async ({ repo, number, assignees }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const resolved = await resolveAssignees(assignees);
+        const data = await ghRequest(
+          `/repos/${owner}/${name}/issues/${number}/assignees`,
+          { method: "DELETE", body: { assignees: resolved } },
         );
         return jsonText(data);
       } catch (err) {

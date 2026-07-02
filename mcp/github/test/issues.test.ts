@@ -28,20 +28,20 @@ type ToolHandler = (args: Record<string, unknown>) => Promise<{
 
 /**
  * Register the issue tools against a stub MCP server and return the captured
- * `issue_list` handler so it can be invoked directly.
+ * handler for the named tool so it can be invoked directly.
  */
-async function getIssueListHandler(): Promise<ToolHandler> {
+async function getIssueHandler(name: string): Promise<ToolHandler> {
   const { registerIssueTools } = await import("../src/tools/issues.js");
   const handlers = new Map<string, ToolHandler>();
   const stubServer = {
-    registerTool: (name: string, _def: unknown, handler: ToolHandler) => {
-      handlers.set(name, handler);
+    registerTool: (toolName: string, _def: unknown, handler: ToolHandler) => {
+      handlers.set(toolName, handler);
     },
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerIssueTools(stubServer as any);
-  const handler = handlers.get("issue_list");
-  if (!handler) throw new Error("issue_list was not registered");
+  const handler = handlers.get(name);
+  if (!handler) throw new Error(`${name} was not registered`);
   return handler;
 }
 
@@ -85,7 +85,7 @@ describe("issue_list — PR filtering across pages", () => {
         }),
       );
 
-    const handler = await getIssueListHandler();
+    const handler = await getIssueHandler("issue_list");
     const res = await handler({ repo: "octo/repo", state: "open", limit: 4 });
 
     expect(res.isError).toBeFalsy();
@@ -95,5 +95,25 @@ describe("issue_list — PR filtering across pages", () => {
     // PRs (2, 4, 6) excluded; real issues from both pages; capped at limit=4.
     expect(numbers).toEqual([1, 3, 5, 7]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("issue_add_assignees", () => {
+  it("resolves @me via GET /user and POSTs the resolved login", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
+      if (init.method === "POST" && url.includes("/assignees")) {
+        expect(init.body).toContain("GarrettMakesIt");
+        return makeResponse({ status: 201, body: { number: 5, assignees: [{ login: "GarrettMakesIt" }] } });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getIssueHandler("issue_add_assignees");
+    const res = await handler({ repo: "octo/repo", number: 5, assignees: ["@me"] });
+
+    expect(res.isError).toBeFalsy();
+    const issue = JSON.parse(res.content[0].text) as { assignees: { login: string }[] };
+    expect(issue.assignees[0].login).toBe("GarrettMakesIt");
   });
 });
