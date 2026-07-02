@@ -114,21 +114,25 @@ export function registerIssueTools(server: McpServer): void {
   server.registerTool(
     "issue_update",
     {
-      description: "Update an issue (title, body, or open/closed state).",
+      description: "Update an issue (title, body, open/closed state, or the state_reason for a close).",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number."),
         title: z.string().optional(),
         body: z.string().optional(),
         state: z.enum(["open", "closed"]).optional(),
+        state_reason: z
+          .enum(["completed", "not_planned", "reopened"])
+          .optional()
+          .describe("Reason when changing state: completed vs not_planned (won't/didn't do), or reopened."),
       },
     },
-    async ({ repo, number, title, body, state }) => {
+    async ({ repo, number, title, body, state, state_reason }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
         const data = await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
           method: "PATCH",
-          body: { title, body, state },
+          body: { title, body, state, state_reason },
         });
         return jsonText(data);
       } catch (err) {

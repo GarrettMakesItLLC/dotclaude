@@ -98,6 +98,19 @@ describe("issue_list — PR filtering across pages", () => {
   });
 });
 
+describe("issue_update state_reason", () => {
+  it("forwards state_reason in the PATCH body when closing", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      expect(init.method).toBe("PATCH");
+      expect(init.body).toContain('"state_reason":"not_planned"');
+      return makeResponse({ status: 200, body: { number: 9, state: "closed", state_reason: "not_planned" } });
+    });
+    const handler = await getIssueHandler("issue_update");
+    const res = await handler({ repo: "octo/repo", number: 9, state: "closed", state_reason: "not_planned" });
+    expect(res.isError).toBeFalsy();
+  });
+});
+
 describe("issue_add_assignees", () => {
   it("resolves @me via GET /user and POSTs the resolved login", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
