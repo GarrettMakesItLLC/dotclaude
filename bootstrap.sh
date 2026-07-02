@@ -32,8 +32,9 @@ SHARED_DIRS=(
 # Skills are linked individually into ~/.claude/skills/<name> (NOT a whole-dir
 # link) so they coexist with skills sourced elsewhere (e.g. ~/.agents).
 SHARED_SKILLS=(
-  "finishing-work"   # my personal finish-line procedure (definition of done, PR body, cleanup)
-  "find-skills"      # skill discovery — the one user-level skill not in a plugin
+  "finishing-work"             # my personal finish-line procedure (definition of done, PR body, cleanup)
+  "find-skills"                # skill discovery — the one user-level skill not in a plugin
+  "managing-work-with-issues"  # GitHub-issue lifecycle: claim-on-begin, label taxonomy, follow-up discipline
 )
 
 MODE="install"
@@ -244,6 +245,16 @@ echo
 echo "→ Plugins declared in settings.json (auto-install on next \`claude\` launch):"
 grep -E '@claude-plugins-official' "$REPO_DIR/settings.json" | sed -E 's/[[:space:]]*"([^"]+)".*/    \1/'
 
+# --------------------------------------------------------------------------
+# GitHub issue label taxonomy (status:*/type:*/source:*, see
+# skills/managing-work-with-issues). This is per-repo, not per-machine — it
+# needs a repo checkout and network access, so it doesn't belong in this
+# script's symlink/build work. Provision it once per project repo instead,
+# via the github-rest MCP's `labels_ensure` tool (idempotent, safe to re-run).
+# --------------------------------------------------------------------------
+echo
+echo "→ Issue label taxonomy: run the 'labels_ensure' MCP tool (github-rest) once in each project repo to provision status:/type:/source: labels."
+
 echo
 echo "✓ Bootstrap complete."
 echo
@@ -252,6 +263,7 @@ echo "  1. Launch Claude Code: \`claude\`"
 echo "  2. Trust the marketplace when prompted (anthropics/claude-plugins-official)"
 echo "  3. Plugins will install automatically; verify with \`/plugin\`"
 echo "  4. Sanity-check anytime with: bash $REPO_DIR/bootstrap.sh --check"
+echo "  5. In each project repo, run the 'labels_ensure' MCP tool once to provision issue labels"
 echo
 if [ -d "$BACKUP_DIR" ]; then
   echo "Existing files backed up to: $BACKUP_DIR"
