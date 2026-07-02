@@ -313,6 +313,68 @@ describe("issue_open", () => {
     const res = await handler({ repo: "octo/repo", title: "Sub task", parent: 4 });
     expect(res.isError).toBeFalsy();
   });
+
+  it("returns the created issue with no _warnings on a fully successful run", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        return makeResponse({ status: 201, body: { number: 50, id: 8010 } });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/50")) {
+        return makeResponse({ status: 200, body: { number: 50, id: 8010 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({ repo: "octo/repo", title: "Plain task" });
+    expect(res.isError).toBeFalsy();
+    const issue = JSON.parse(res.content[0].text) as Record<string, unknown>;
+    expect(issue.number).toBe(50);
+    expect(issue._warnings).toBeUndefined();
+  });
+
+  it("still returns the created issue (not an error) when the sub-issue link fails, with a _warnings entry", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        return makeResponse({ status: 201, body: { number: 51, id: 8011 } });
+      }
+      if (init.method === "POST" && url.endsWith("/issues/4/sub_issues")) {
+        return makeResponse({ status: 500, body: { message: "server error" } });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/51")) {
+        return makeResponse({ status: 200, body: { number: 51, id: 8011 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({ repo: "octo/repo", title: "Sub task", parent: 4 });
+    expect(res.isError).toBeFalsy();
+    const issue = JSON.parse(res.content[0].text) as { number: number; _warnings: string[] };
+    expect(issue.number).toBe(51);
+    expect(issue._warnings).toHaveLength(1);
+    expect(issue._warnings[0]).toContain("parent #4");
+  });
+
+  it("still returns the created issue (not an error) when the milestone step fails, with a _warnings entry", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        return makeResponse({ status: 201, body: { number: 52, id: 8012 } });
+      }
+      if (init.method === "GET" && url.includes("/milestones")) {
+        return makeResponse({ status: 500, body: { message: "server error" } });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/52")) {
+        return makeResponse({ status: 200, body: { number: 52, id: 8012 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({ repo: "octo/repo", title: "Ship v2", milestone: "v2" });
+    expect(res.isError).toBeFalsy();
+    const issue = JSON.parse(res.content[0].text) as { number: number; _warnings: string[] };
+    expect(issue.number).toBe(52);
+    expect(issue._warnings).toHaveLength(1);
+    expect(issue._warnings[0]).toContain('milestone "v2"');
+  });
 });
 
 describe("issue_set_status", () => {

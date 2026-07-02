@@ -205,7 +205,9 @@ export function registerPrTools(server: McpServer): void {
       description:
         "Open a PR and move its issue to in-review in one call: ensures the PR body closes " +
         "`issue_number` (appending `Closes #N` if not already present) so merging auto-closes it, " +
-        "creates the PR, then sets the issue's status to `in-review`.",
+        "creates the PR, then sets the issue's status to `in-review`. The PR itself is always " +
+        "created first; the status move is best-effort — on failure the created PR is still " +
+        "returned, annotated with a `_warnings` array.",
       inputSchema: {
         repo: repoParam,
         issue_number: z.number().int().positive().describe("Issue number this PR resolves."),
@@ -231,14 +233,22 @@ export function registerPrTools(server: McpServer): void {
             ? `${base_}\n\n${closesRef}`
             : closesRef;
 
-        const pr = await ghRequest(`/repos/${owner}/${name}/pulls`, {
+        const pr = await ghRequest<Record<string, unknown>>(`/repos/${owner}/${name}/pulls`, {
           method: "POST",
           body: { title, head, base, body: finalBody, draft },
         });
 
-        await setIssueStatus(owner, name, issue_number, "in-review");
+        // The PR is already created at this point — a status-move failure below must not
+        // hide that creation behind an errorResult, or a retry would hit a 422 (branch in use).
+        const warnings: string[] = [];
+        try {
+          await setIssueStatus(owner, name, issue_number, "in-review");
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          warnings.push(`issue #${issue_number} not moved to in-review: ${msg}`);
+        }
 
-        return jsonText(pr);
+        return jsonText(warnings.length ? { ...pr, _warnings: warnings } : pr);
       } catch (err) {
         return errorResult(err);
       }

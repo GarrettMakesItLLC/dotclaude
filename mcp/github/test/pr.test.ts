@@ -101,9 +101,41 @@ describe("pr_open_for_issue", () => {
     });
 
     expect(res.isError).toBeFalsy();
-    const pr = JSON.parse(res.content[0].text) as { number: number };
+    const pr = JSON.parse(res.content[0].text) as { number: number; _warnings?: string[] };
     expect(pr.number).toBe(100);
     expect(putBody).toBeDefined();
+    expect(pr._warnings).toBeUndefined();
+  });
+
+  it("still returns the created PR (not an error) when moving the issue to in-review fails, with a _warnings entry", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/pulls")) {
+        return makeResponse({
+          status: 201,
+          body: { number: 103, title: "Add thing", html_url: "https://example.com/pr/103" },
+        });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/9")) {
+        return makeResponse({ status: 500, body: { message: "server error" } });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getPrHandler("pr_open_for_issue");
+    const res = await handler({
+      repo: "octo/repo",
+      issue_number: 9,
+      head: "feature/x",
+      base: "main",
+      title: "Add thing",
+      body: "Some description.",
+    });
+
+    expect(res.isError).toBeFalsy();
+    const pr = JSON.parse(res.content[0].text) as { number: number; _warnings: string[] };
+    expect(pr.number).toBe(103);
+    expect(pr._warnings).toHaveLength(1);
+    expect(pr._warnings[0]).toContain("in-review");
   });
 
   it("does not duplicate Closes #N when the body already contains it", async () => {
