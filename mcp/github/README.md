@@ -58,9 +58,25 @@ Issues:
 - `issue_list` — list issues (PRs filtered out; `state`, `labels`, `limit`).
 - `issue_view` — view one issue.
 - `issue_create` — create an issue (`title`, `body?`, `labels?`, `assignees?`).
-- `issue_update` — update an issue (`title?`, `body?`, `state?`).
+- `issue_update` — update an issue (`title?`, `body?`, `state?`, `state_reason?`
+  — `completed` / `not_planned` / `reopened`).
 - `issue_comment` — comment on an issue.
 - `issue_set_labels` — replace all labels on an issue.
+- `issue_add_assignees` / `issue_remove_assignees` — (un)assign users; accepts
+  `@me`.
+- `issue_claim` — self-assign `@me` and set `status:in-progress`, removing any
+  other `status:*` label. Use when starting work on an issue.
+- `issue_set_type` — set bug/feature/task as the native issue type
+  (best-effort) plus a `type:*` label.
+- `issue_set_milestone` / `milestone_ensure` — attach an issue to a milestone,
+  finding or creating it by title.
+- `issue_add_sub_issue` / `issue_list_sub_issues` — manage parent/child issue
+  relationships.
+
+Labels:
+
+- `labels_ensure` — idempotently provision the standard `status:*` / `type:*`
+  / `source:*` label taxonomy into a repo.
 
 Repo:
 
