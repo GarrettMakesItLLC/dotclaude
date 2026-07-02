@@ -57,8 +57,11 @@ Provisioned into every repo by automation (`labels_ensure`, below). Exactly one
 - `status:in-progress` — an agent has claimed it and is actively working
 - `status:in-review` — PR open, awaiting review/merge
 
-*Done is represented by closing the issue* — there is no `status:done`. A merged
-PR that says `Closes #N` closes the issue automatically.
+*Done is represented by closing the issue* — there is no `status:done`. The
+`status:*` label is **removed on close** (status only describes open work).
+Whether the work was done vs. abandoned is captured by the native GitHub **close
+reason**: `completed` (implemented) vs `not_planned` (won't/didn't do). A merged
+PR that says `Closes #N` closes the issue as `completed` automatically.
 
 **type:** applied as a label **and** set as the native GitHub issue type
 (best-effort native; the label is the universal fallback for owners without
@@ -86,9 +89,10 @@ another; exact hex values fixed in `labels_ensure`.
    `@me` + set `status:in-progress` + remove `ready`/`blocked`/`backlog`.
 4. **PR opened**: set `status:in-review`; PR body references the issue
    (`Closes #N`).
-5. **Done**: issue closed. `gated` repos end at in-review → Garrett merges →
-   closed; `autonomous-merge` repos, the agent merges → issue closes via
-   `Closes #N`.
+5. **Done**: strip the `status:*` label and close the issue with a close
+   reason — `completed` when implemented, `not_planned` when abandoned. `gated`
+   repos end at in-review → Garrett merges → closed as `completed`;
+   `autonomous-merge` repos, the agent merges → issue closes via `Closes #N`.
 
 ## Follow-up discipline (revises current CLAUDE.md)
 
@@ -105,11 +109,14 @@ today over-encourages filing.
 
 ## PR templates (project repos)
 
-- Ship a canonical `PULL_REQUEST_TEMPLATE.md` asset in `dotclaude` with an
-  issue-link section (`Closes #`), a short summary, and a verification section.
-- Provision it into a project repo via a `pr_template_ensure` MCP tool
-  (`PUT /repos/{o}/{r}/contents/.github/PULL_REQUEST_TEMPLATE.md` when absent),
-  run alongside `labels_ensure` in `bootstrap.sh`.
+- Author a canonical `.github/PULL_REQUEST_TEMPLATE.md` (issue-link section with
+  `Closes #`, a short summary, a verification section) and keep the canonical
+  copy in `dotclaude` for reference.
+- **Stand up one PR per project repo** adding the template:
+  `musclebuddy`, `redthread`, `adventureos`. Identical content, except
+  `adventureos` may get a build/verification tweak if its setup differs. Each PR
+  follows that repo's autonomy mode (musclebuddy/redthread = autonomous-merge;
+  adventureos = gated → merge-ready PR only).
 - The skill always fills `Closes #N` into `pr_create` bodies regardless of the
   template; the template is the GitHub-UI-facing reinforcement for the same
   linkage the hook nudges about.
@@ -125,10 +132,11 @@ today over-encourages filing.
 - `issue_add_sub_issue` / `issue_list_sub_issues` —
   `/issues/{n}/sub_issues` (the REST relationships primitive)
 - `labels_ensure` — idempotently sync the full taxonomy into a repo
-- `pr_template_ensure` — write the standard PR template if absent
 - `issue_claim` — convenience: self-assign `@me` + swap status to
   `in-progress` + strip `ready`/`blocked`/`backlog` in one call, so the claim
   transition can't be done partially
+- Extend `issue_update` to accept `state_reason` (`completed` /
+  `not_planned` / `reopened`) so closes carry the done-vs-won't-do distinction
 
 All new tools ship with vitest coverage following the existing mocked-network
 test pattern (`gh` + `fetch` mocked, no live network).
@@ -147,9 +155,10 @@ test pattern (`gh` + `fetch` mocked, no live network).
 1. Edit global `CLAUDE.md` — issue-tracking triggers + rewritten follow-up rule.
 2. New skill `skills/managing-work-with-issues/SKILL.md`.
 3. Extend `mcp/github` with the tools above + vitest coverage.
-4. Add `PULL_REQUEST_TEMPLATE.md` asset + `pr_template_ensure` tool.
+4. Author the canonical `PULL_REQUEST_TEMPLATE.md` and stand up one PR per
+   project repo (`musclebuddy`, `redthread`, `adventureos`) adding it.
 5. Extend `hooks/verify-reminder.sh` (+ its test) for issue-linkage nudge.
-6. Wire `labels_ensure` + `pr_template_ensure` into `bootstrap.sh`.
+6. Wire `labels_ensure` into `bootstrap.sh`.
 7. Update `README.md` and `mcp/github/README.md` for the new tools/skill.
 
 ## Out of scope
