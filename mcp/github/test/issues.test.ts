@@ -218,6 +218,103 @@ describe("issue_claim", () => {
   });
 });
 
+describe("issue_open", () => {
+  it("composes type/source labels on create, defaults feedback (source set, no status) to status:blocked, and sends the native-type PATCH", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        const sent = JSON.parse(init.body as string) as { labels: string[] };
+        expect(sent.labels).toEqual(
+          expect.arrayContaining(["status:blocked", "type:bug", "source:redthread"]),
+        );
+        expect(sent.labels).not.toContain("status:ready");
+        return makeResponse({ status: 201, body: { number: 42, id: 8001, labels: sent.labels } });
+      }
+      if (init.method === "PATCH" && url.endsWith("/issues/42")) {
+        expect(init.body).toContain('"type":"Bug"');
+        return makeResponse({ status: 200, body: {} });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/42")) {
+        return makeResponse({ status: 200, body: { number: 42, id: 8001 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({
+      repo: "octo/repo",
+      title: "Something broke",
+      type: "bug",
+      source: "redthread",
+    });
+    expect(res.isError).toBeFalsy();
+    const issue = JSON.parse(res.content[0].text) as { number: number };
+    expect(issue.number).toBe(42);
+  });
+
+  it("defaults to status:ready when neither status nor source is given", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        const sent = JSON.parse(init.body as string) as { labels: string[] };
+        expect(sent.labels).toEqual(expect.arrayContaining(["status:ready"]));
+        return makeResponse({ status: 201, body: { number: 45, id: 8004, labels: sent.labels } });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/45")) {
+        return makeResponse({ status: 200, body: { number: 45, id: 8004 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({ repo: "octo/repo", title: "Plain task" });
+    expect(res.isError).toBeFalsy();
+  });
+
+  it("attaches an existing milestone by title without creating a duplicate", async () => {
+    let milestonePatched = false;
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        return makeResponse({ status: 201, body: { number: 43, id: 8002 } });
+      }
+      if (init.method === "GET" && url.includes("/milestones")) {
+        return makeResponse({ status: 200, body: [{ number: 3, title: "v1" }, { number: 4, title: "v2" }] });
+      }
+      if (init.method === "POST" && url.includes("/milestones")) {
+        return makeResponse({ status: 500, body: { message: "should not create" } });
+      }
+      if (init.method === "PATCH" && url.endsWith("/issues/43")) {
+        expect(init.body).toContain('"milestone":4');
+        milestonePatched = true;
+        return makeResponse({ status: 200, body: {} });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/43")) {
+        return makeResponse({ status: 200, body: { number: 43, id: 8002 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({ repo: "octo/repo", title: "Ship v2", milestone: "v2" });
+    expect(res.isError).toBeFalsy();
+    expect(milestonePatched).toBe(true);
+  });
+
+  it("nests the new issue under a parent via sub_issues, using the new issue's id", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        return makeResponse({ status: 201, body: { number: 44, id: 8003 } });
+      }
+      if (init.method === "POST" && url.endsWith("/issues/4/sub_issues")) {
+        expect(init.body).toContain('"sub_issue_id":8003');
+        return makeResponse({ status: 201, body: {} });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/44")) {
+        return makeResponse({ status: 200, body: { number: 44, id: 8003 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({ repo: "octo/repo", title: "Sub task", parent: 4 });
+    expect(res.isError).toBeFalsy();
+  });
+});
+
 describe("issue_set_status", () => {
   it("swaps the status:* label, preserving type:*/source:* labels", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {

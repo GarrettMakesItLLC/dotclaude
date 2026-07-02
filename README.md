@@ -8,7 +8,7 @@ My personal Claude Code configuration — synced across machines via git.
 |------|---------|
 | `CLAUDE.md` | Global instructions injected into **every** session. Lean by design — universal *behavioral* rules only. |
 | `rules/` | Path-scoped stack conventions (TypeScript, frontend, data/API, testing, monorepo/hosting). Each loads only when Claude opens a matching file. Symlinked to `~/.claude/rules/`. |
-| `skills/` | Personal/vendored skills (`finishing-work`; `managing-work-with-issues`, the GitHub-issue lifecycle — claim-on-begin, label taxonomy, follow-up discipline; and the vendored `find-skills`). Load on demand when invoked or matched. Each linked into `~/.claude/skills/`. |
+| `skills/` | Personal/vendored skills (`finishing-work`; `managing-work-with-issues`, the GitHub-issue lifecycle — claim-on-begin, label taxonomy, follow-up discipline; `extending-the-github-mcp`, the self-healing loop for closing github-rest MCP capability gaps; and the vendored `find-skills`). Load on demand when invoked or matched. Each linked into `~/.claude/skills/`. |
 | `hooks/` | Deterministic guardrails run by Claude Code. `git-guard.sh` **blocks** dangerous shell commands (`--no-verify`, force-push to `main`, `.env` commits, reckless `rm -rf`); `worktree-guard.sh` **blocks** file edits to the main working tree of a `.worktrees/`-convention repo (keeps parallel agents in isolated worktrees; `WORKTREE_GUARD_OFF=1` overrides); `verify-reminder.sh` **nudges** (non-blocking) the agent to run change-scoped verification and link the issue (`Closes #N`) when it opens a PR. Each has a `*.test.sh` self-test. Symlinked to `~/.claude/hooks/`. |
 | `mcp/` | Source for custom MCP servers I built — `mcp/github`, a REST wrapper for GitHub PR/repo ops plus the full issue lifecycle (`issue_create`, `issue_claim`, `issue_set_type`, `issue_set_milestone`, `issue_add_sub_issue`, `issue_add_assignees`, …) and label provisioning (`labels_ensure`). `bootstrap.sh` builds and registers it with `claude mcp add`. See `plugins.md` and `mcp/github/README.md` for the full tool list. |
 | `settings.json` | User-scope settings: enabled plugins, the official marketplace, permission defaults, and the hooks wiring. |
@@ -50,7 +50,7 @@ bash ~/dotclaude/bootstrap.sh
 The bootstrap script:
 1. Symlinks `CLAUDE.md`, `settings.json`, `keybindings.json` into `~/.claude/`
 2. Symlinks the `rules/`, `hooks/`, and `commands/` directories into `~/.claude/`
-3. Symlinks each vendored skill (`finishing-work`, `managing-work-with-issues`, `find-skills`) into `~/.claude/skills/` individually, so plugin/user skills there aren't clobbered
+3. Symlinks each vendored skill (`finishing-work`, `managing-work-with-issues`, `extending-the-github-mcp`, `find-skills`) into `~/.claude/skills/` individually, so plugin/user skills there aren't clobbered
 4. Builds and registers vendored custom MCP servers (`mcp/github`) with `claude mcp add`
 5. Registers API-key HTTP MCPs (`upload-post`) user-scoped, with the key read from `$UPLOAD_POST_API_KEY`
 6. Reports which plugins will auto-install on first `claude` launch

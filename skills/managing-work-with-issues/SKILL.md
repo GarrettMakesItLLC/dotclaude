@@ -7,7 +7,9 @@ description: Use when starting, creating, or finishing any tracked unit of work 
 
 GitHub Issues are the high-level tracker for all agent work. Every unit of work is
 an issue with exactly one `status:*` label. Use the REST-only `github-rest` MCP
-tools (never `gh` GraphQL paths) for every mutation below.
+tools (never `gh` GraphQL paths) for every mutation below. Hit an operation the
+MCP does not expose? See the **extending-the-github-mcp** skill — don't just
+work around it silently.
 
 ## The label taxonomy
 

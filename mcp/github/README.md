@@ -52,6 +52,10 @@ Pull requests:
 - `pr_request_review` — request `reviewers` and/or `team_reviewers`.
 - `pr_checks` — resolve the PR head sha, then merge combined commit status +
   check-runs into one overall state with per-check detail.
+- `pr_open_for_issue` — open a PR and move its issue to in-review in one
+  call: ensures the body closes `issue_number` (appending `Closes #N` if not
+  already present), creates the PR, then sets the issue's status to
+  `in-review`.
 
 Issues:
 
@@ -73,6 +77,11 @@ Issues:
   finding or creating it by title.
 - `issue_add_sub_issue` / `issue_list_sub_issues` — manage parent/child issue
   relationships.
+- `issue_open` — create a fully-formed issue in one call: composes
+  `status:*`/`type:*`/`source:*` labels, sets the native issue type
+  (best-effort), finds-or-creates and attaches a milestone by title, and
+  nests it under a `parent` as a sub-issue. Composes the granular tools above
+  so agents don't have to hand-compose fields across several calls.
 
 Labels:
 
