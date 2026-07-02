@@ -284,4 +284,60 @@ export function registerIssueTools(server: McpServer): void {
       }
     },
   );
+
+  server.registerTool(
+    "milestone_ensure",
+    {
+      description:
+        "Find an open milestone by exact title, or create it. Returns the milestone number and title.",
+      inputSchema: {
+        repo: repoParam,
+        title: z.string().describe("Milestone title (exact match)."),
+        description: z.string().optional(),
+        due_on: z.string().optional().describe("ISO 8601 due date."),
+      },
+    },
+    async ({ repo, title, description, due_on }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const existing = await ghPaginate<{ number: number; title: string }>(
+          `/repos/${owner}/${name}/milestones`,
+          { query: { state: "all" }, limit: 1000 },
+        );
+        const match = existing.find((m) => m.title === title);
+        if (match) return jsonText({ number: match.number, title: match.title });
+        const created = await ghRequest<{ number: number; title: string }>(
+          `/repos/${owner}/${name}/milestones`,
+          { method: "POST", body: { title, description, due_on } },
+        );
+        return jsonText({ number: created.number, title: created.title });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "issue_set_milestone",
+    {
+      description: "Attach an issue to a milestone by milestone number (use milestone_ensure to get it).",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Issue number."),
+        milestone: z.number().int().positive().describe("Milestone number."),
+      },
+    },
+    async ({ repo, number, milestone }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const data = await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
+          method: "PATCH",
+          body: { milestone },
+        });
+        return jsonText(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
 }

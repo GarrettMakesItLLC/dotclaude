@@ -131,6 +131,23 @@ describe("issue_add_assignees", () => {
   });
 });
 
+describe("milestone_ensure", () => {
+  it("returns an existing milestone by title without creating a duplicate", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+      if (init.method === "GET" && url.includes("/milestones")) {
+        return makeResponse({ status: 200, body: [{ number: 3, title: "v1" }, { number: 4, title: "v2" }] });
+      }
+      // A POST here would mean it wrongly tried to create — fail loudly.
+      return makeResponse({ status: 500, body: { message: "should not create" } });
+    });
+    const handler = await getIssueHandler("milestone_ensure");
+    const res = await handler({ repo: "octo/repo", title: "v2" });
+    expect(res.isError).toBeFalsy();
+    const ms = JSON.parse(res.content[0].text) as { number: number };
+    expect(ms.number).toBe(4);
+  });
+});
+
 describe("issue_set_type", () => {
   it("PATCHes native type then replaces type:* labels, preserving non-type labels", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
