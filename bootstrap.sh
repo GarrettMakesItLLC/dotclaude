@@ -32,9 +32,10 @@ SHARED_DIRS=(
 # Skills are linked individually into ~/.claude/skills/<name> (NOT a whole-dir
 # link) so they coexist with skills sourced elsewhere (e.g. ~/.agents).
 SHARED_SKILLS=(
-  "finishing-work"             # my personal finish-line procedure (definition of done, PR body, cleanup)
-  "find-skills"                # skill discovery — the one user-level skill not in a plugin
-  "managing-work-with-issues"  # GitHub-issue lifecycle: claim-on-begin, label taxonomy, follow-up discipline
+  "finishing-work"              # my personal finish-line procedure (definition of done, PR body, cleanup)
+  "find-skills"                 # skill discovery — the one user-level skill not in a plugin
+  "managing-work-with-issues"   # GitHub-issue lifecycle: claim-on-begin, label taxonomy, follow-up discipline
+  "extending-the-github-mcp"    # self-healing: unblock, file, and grow the github-rest MCP on capability gaps
 )
 
 MODE="install"
