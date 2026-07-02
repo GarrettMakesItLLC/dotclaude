@@ -256,6 +256,68 @@ export function registerPrTools(server: McpServer): void {
   );
 
   server.registerTool(
+    "pr_merge",
+    {
+      description:
+        "Merge a pull request. Optionally deletes the head branch afterward (skipped, with a " +
+        "`_warnings` note, for `main`/`master` or if the delete fails — the merge itself is not " +
+        "rolled back).",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Pull request number."),
+        method: z
+          .enum(["merge", "squash", "rebase"])
+          .default("squash")
+          .describe("Merge method."),
+        commit_title: z.string().optional().describe("Title for the merge commit."),
+        commit_message: z.string().optional().describe("Extra detail for the merge commit."),
+        delete_branch: z
+          .boolean()
+          .default(false)
+          .describe("Delete the head branch after a successful merge."),
+      },
+    },
+    async ({ repo, number, method, commit_title, commit_message, delete_branch }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const result = await ghRequest<{ merged: boolean; sha?: string; message?: string }>(
+          `/repos/${owner}/${name}/pulls/${number}/merge`,
+          {
+            method: "PUT",
+            body: {
+              merge_method: method ?? "squash",
+              commit_title,
+              commit_message,
+            },
+          },
+        );
+
+        const warnings: string[] = [];
+        if (delete_branch && result.merged) {
+          const pr = await fetchPr(repo, number);
+          const ref = pr.head.ref;
+          if (ref === "main" || ref === "master") {
+            warnings.push(`refused to delete protected branch "${ref}"`);
+          } else {
+            try {
+              await ghRequest(`/repos/${owner}/${name}/git/refs/heads/${ref}`, {
+                method: "DELETE",
+              });
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              warnings.push(`branch "${ref}" not deleted: ${msg}`);
+            }
+          }
+        }
+
+        return jsonText(warnings.length ? { ...result, _warnings: warnings } : result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
     "pr_checks",
     {
       description:

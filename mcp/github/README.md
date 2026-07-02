@@ -56,6 +56,9 @@ Pull requests:
   call: ensures the body closes `issue_number` (appending `Closes #N` if not
   already present), creates the PR, then sets the issue's status to
   `in-review`.
+- `pr_merge` — merge a PR (`method?` merge/squash/rebase, default `squash`,
+  `commit_title?`, `commit_message?`), optionally deleting the head branch
+  afterward (`delete_branch?`; refuses `main`/`master`).
 
 Issues:
 
