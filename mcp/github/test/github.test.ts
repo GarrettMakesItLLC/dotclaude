@@ -115,6 +115,25 @@ describe("ghRequest — error surfacing", () => {
     expect(caught!.message).toContain("missing");
     expect(caught!.message).not.toContain("ghs_secrettoken123");
   });
+
+  it("rejects with a GhHttpError carrying the numeric status", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({
+        status: 422,
+        body: { message: "Validation Failed" },
+      }),
+    );
+
+    let caught: unknown;
+    try {
+      await mod.ghRequest("/repos/o/r/labels");
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(mod.GhHttpError);
+    expect((caught as InstanceType<typeof mod.GhHttpError>).status).toBe(422);
+  });
 });
 
 describe("resolveRepo", () => {

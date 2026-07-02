@@ -1,12 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
-import { errorResult, ghRequest, jsonText, resolveRepo } from "../github.js";
+import {
+  errorResult,
+  GhHttpError,
+  ghRequest,
+  jsonText,
+  repoParam,
+  resolveRepo,
+} from "../github.js";
 import { ISSUE_LABELS } from "../labels.js";
-
-const repoParam = z
-  .string()
-  .optional()
-  .describe('Target repository as "owner/name". Defaults to the repo of the current directory.');
 
 export function registerLabelTools(server: McpServer): void {
   server.registerTool(
@@ -30,8 +31,7 @@ export function registerLabelTools(server: McpServer): void {
             created += 1;
           } catch (err) {
             // 422 => label already exists; update its color/description instead.
-            const msg = err instanceof Error ? err.message : String(err);
-            if (!msg.includes("422")) throw err;
+            if (!(err instanceof GhHttpError && err.status === 422)) throw err;
             await ghRequest(
               `/repos/${owner}/${name}/labels/${encodeURIComponent(label.name)}`,
               { method: "PATCH", body: { color: label.color, description: label.description } },
