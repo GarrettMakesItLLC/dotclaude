@@ -289,7 +289,7 @@ export function registerIssueTools(server: McpServer): void {
     "milestone_ensure",
     {
       description:
-        "Find an open milestone by exact title, or create it. Returns the milestone number and title.",
+        "Find a milestone by exact title, or create it. Returns the milestone number and title.",
       inputSchema: {
         repo: repoParam,
         title: z.string().describe("Milestone title (exact match)."),
