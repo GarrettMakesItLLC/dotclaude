@@ -221,7 +221,11 @@ export function registerPrTools(server: McpServer): void {
         const { owner, name } = await resolveRepo(repo);
         const closesRef = `Closes #${issue_number}`;
         const base_ = body ?? "";
-        const finalBody = base_.includes(closesRef) ? base_ : `${base_}\n\n${closesRef}`;
+        const finalBody = base_.includes(closesRef)
+          ? base_
+          : base_
+            ? `${base_}\n\n${closesRef}`
+            : closesRef;
 
         const pr = await ghRequest(`/repos/${owner}/${name}/pulls`, {
           method: "POST",
