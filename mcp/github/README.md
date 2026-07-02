@@ -52,6 +52,10 @@ Pull requests:
 - `pr_request_review` — request `reviewers` and/or `team_reviewers`.
 - `pr_checks` — resolve the PR head sha, then merge combined commit status +
   check-runs into one overall state with per-check detail.
+- `pr_open_for_issue` — open a PR and move its issue to in-review in one
+  call: ensures the body closes `issue_number` (appending `Closes #N` if not
+  already present), creates the PR, then sets the issue's status to
+  `in-review`.
 
 Issues:
 

@@ -13,10 +13,10 @@ import {
   typeLabel,
   nativeTypeName,
   statusLabel,
-  STATUS_LABEL_NAMES,
   type IssueType,
   type IssueStatus,
 } from "../labels.js";
+import { setIssueStatus } from "../issue-status.js";
 
 interface IssueLike {
   number: number;
@@ -381,18 +381,7 @@ export function registerIssueTools(server: McpServer): void {
           method: "POST",
           body: { assignees: [me] },
         });
-        const issue = await ghRequest<{ labels: { name: string }[] }>(
-          `/repos/${owner}/${name}/issues/${number}`,
-        );
-        const kept = issue.labels
-          .map((l) => l.name)
-          .filter((n) => !STATUS_LABEL_NAMES.includes(n));
-        const next = [...kept, statusLabel("in-progress")];
-        const data = await ghRequest(
-          `/repos/${owner}/${name}/issues/${number}/labels`,
-          { method: "PUT", body: { labels: next } },
-        );
-        return jsonText(data);
+        return jsonText(await setIssueStatus(owner, name, number, "in-progress"));
       } catch (err) {
         return errorResult(err);
       }
@@ -417,18 +406,7 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, number, status }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const issue = await ghRequest<{ labels: { name: string }[] }>(
-          `/repos/${owner}/${name}/issues/${number}`,
-        );
-        const kept = issue.labels
-          .map((l) => l.name)
-          .filter((n) => !STATUS_LABEL_NAMES.includes(n));
-        const next = status ? [...kept, statusLabel(status as IssueStatus)] : kept;
-        const data = await ghRequest(
-          `/repos/${owner}/${name}/issues/${number}/labels`,
-          { method: "PUT", body: { labels: next } },
-        );
-        return jsonText(data);
+        return jsonText(await setIssueStatus(owner, name, number, status as IssueStatus | undefined));
       } catch (err) {
         return errorResult(err);
       }

@@ -9,6 +9,7 @@ import {
   resolveRepo,
 } from "../github.js";
 import { getChecksSummary } from "../checks.js";
+import { setIssueStatus } from "../issue-status.js";
 
 interface PullRequest {
   number: number;
@@ -192,6 +193,44 @@ export function registerPrTools(server: McpServer): void {
           { method: "POST", body: { reviewers, team_reviewers } },
         );
         return jsonText(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "pr_open_for_issue",
+    {
+      description:
+        "Open a PR and move its issue to in-review in one call: ensures the PR body closes " +
+        "`issue_number` (appending `Closes #N` if not already present) so merging auto-closes it, " +
+        "creates the PR, then sets the issue's status to `in-review`.",
+      inputSchema: {
+        repo: repoParam,
+        issue_number: z.number().int().positive().describe("Issue number this PR resolves."),
+        head: z.string().describe("Branch with your changes."),
+        base: z.string().describe("Branch you want to merge into."),
+        title: z.string().describe("PR title."),
+        body: z.string().optional().describe("PR description (markdown)."),
+        draft: z.boolean().optional().describe("Open as a draft PR."),
+      },
+    },
+    async ({ repo, issue_number, head, base, title, body, draft }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const closesRef = `Closes #${issue_number}`;
+        const base_ = body ?? "";
+        const finalBody = base_.includes(closesRef) ? base_ : `${base_}\n\n${closesRef}`;
+
+        const pr = await ghRequest(`/repos/${owner}/${name}/pulls`, {
+          method: "POST",
+          body: { title, head, base, body: finalBody, draft },
+        });
+
+        await setIssueStatus(owner, name, issue_number, "in-review");
+
+        return jsonText(pr);
       } catch (err) {
         return errorResult(err);
       }
