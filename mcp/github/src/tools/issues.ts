@@ -13,6 +13,7 @@ import {
   typeLabel,
   nativeTypeName,
   statusLabel,
+  sourceLabel,
   type IssueType,
   type IssueStatus,
 } from "../labels.js";
@@ -466,7 +467,8 @@ export function registerIssueTools(server: McpServer): void {
       description:
         "Create a fully-formed issue in one call: composes status/type/source labels, sets the " +
         "native issue type (best-effort), finds-or-creates and attaches a milestone by title, and " +
-        "nests it under a parent as a sub-issue — instead of hand-composing across several tool calls.",
+        "nests it under a parent as a sub-issue — instead of hand-composing across several tool calls. " +
+        "Status defaults to `ready`, or `blocked` when a `source` is set (unverified feedback).",
       inputSchema: {
         repo: repoParam,
         title: z.string().describe("Issue title."),
@@ -474,8 +476,10 @@ export function registerIssueTools(server: McpServer): void {
         type: z.enum(["bug", "feature", "task"]).optional().describe("Issue type."),
         status: z
           .enum(["backlog", "ready", "blocked", "in-progress", "in-review"])
-          .default("ready")
-          .describe("Initial status."),
+          .optional()
+          .describe(
+            "Initial status. Defaults to `ready`, or `blocked` when `source` is set (unverified feedback).",
+          ),
         source: z
           .enum(["musclebuddy", "redthread", "adventureos"])
           .optional()
@@ -500,11 +504,11 @@ export function registerIssueTools(server: McpServer): void {
       try {
         const { owner, name } = await resolveRepo(repo);
         const t = type as IssueType | undefined;
-        const s = (status ?? "ready") as IssueStatus;
+        const effectiveStatus = (status ?? (source ? "blocked" : "ready")) as IssueStatus;
 
-        const labels = [statusLabel(s)];
+        const labels = [statusLabel(effectiveStatus)];
         if (t) labels.push(typeLabel(t));
-        if (source) labels.push(`source:${source}`);
+        if (source) labels.push(sourceLabel(source));
 
         const created = await ghRequest<{ number: number; id: number }>(
           `/repos/${owner}/${name}/issues`,

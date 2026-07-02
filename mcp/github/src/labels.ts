@@ -37,6 +37,13 @@ export function statusLabel(status: IssueStatus): string {
   return `status:${status}`;
 }
 
+export type IssueSource = "musclebuddy" | "redthread" | "adventureos";
+
+/** The `source:*` label name for a feedback source value. */
+export function sourceLabel(source: IssueSource): string {
+  return `source:${source}`;
+}
+
 /** GitHub native issue-type name (title-cased) for a given type label value. */
 export function nativeTypeName(type: IssueType): string {
   return { bug: "Bug", feature: "Feature", task: "Task" }[type];

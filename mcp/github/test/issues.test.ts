@@ -219,13 +219,14 @@ describe("issue_claim", () => {
 });
 
 describe("issue_open", () => {
-  it("composes status/type/source labels on create and sends the native-type PATCH", async () => {
+  it("composes type/source labels on create, defaults feedback (source set, no status) to status:blocked, and sends the native-type PATCH", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
       if (init.method === "POST" && url.endsWith("/issues")) {
         const sent = JSON.parse(init.body as string) as { labels: string[] };
         expect(sent.labels).toEqual(
-          expect.arrayContaining(["status:ready", "type:bug", "source:redthread"]),
+          expect.arrayContaining(["status:blocked", "type:bug", "source:redthread"]),
         );
+        expect(sent.labels).not.toContain("status:ready");
         return makeResponse({ status: 201, body: { number: 42, id: 8001, labels: sent.labels } });
       }
       if (init.method === "PATCH" && url.endsWith("/issues/42")) {
@@ -247,6 +248,23 @@ describe("issue_open", () => {
     expect(res.isError).toBeFalsy();
     const issue = JSON.parse(res.content[0].text) as { number: number };
     expect(issue.number).toBe(42);
+  });
+
+  it("defaults to status:ready when neither status nor source is given", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        const sent = JSON.parse(init.body as string) as { labels: string[] };
+        expect(sent.labels).toEqual(expect.arrayContaining(["status:ready"]));
+        return makeResponse({ status: 201, body: { number: 45, id: 8004, labels: sent.labels } });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/45")) {
+        return makeResponse({ status: 200, body: { number: 45, id: 8004 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({ repo: "octo/repo", title: "Plain task" });
+    expect(res.isError).toBeFalsy();
   });
 
   it("attaches an existing milestone by title without creating a duplicate", async () => {

@@ -135,4 +135,35 @@ describe("pr_open_for_issue", () => {
 
     expect(res.isError).toBeFalsy();
   });
+
+  it("appends Closes #1 even when the body already contains Closes #12 (no substring false-positive)", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/pulls")) {
+        expect(init.body).toContain("Closes #1");
+        const sent = JSON.parse(init.body as string) as { body: string };
+        // Must be a real standalone append, not just a substring match against "Closes #12".
+        expect(/Closes #1(?!\d)/.test(sent.body)).toBe(true);
+        return makeResponse({ status: 201, body: { number: 102 } });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/1")) {
+        return makeResponse({ status: 200, body: { labels: [] } });
+      }
+      if (init.method === "PUT" && url.endsWith("/issues/1/labels")) {
+        return makeResponse({ status: 200, body: [] });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getPrHandler("pr_open_for_issue");
+    const res = await handler({
+      repo: "octo/repo",
+      issue_number: 1,
+      head: "feature/y",
+      base: "main",
+      title: "Add other thing",
+      body: "Related to #1.\n\nCloses #12",
+    });
+
+    expect(res.isError).toBeFalsy();
+  });
 });

@@ -221,7 +221,11 @@ export function registerPrTools(server: McpServer): void {
         const { owner, name } = await resolveRepo(repo);
         const closesRef = `Closes #${issue_number}`;
         const base_ = body ?? "";
-        const finalBody = base_.includes(closesRef)
+        const alreadyLinked = new RegExp(
+          `(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+#${issue_number}(?![0-9])`,
+          "i",
+        ).test(base_);
+        const finalBody = alreadyLinked
           ? base_
           : base_
             ? `${base_}\n\n${closesRef}`
