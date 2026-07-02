@@ -148,6 +148,24 @@ describe("milestone_ensure", () => {
   });
 });
 
+describe("issue_add_sub_issue", () => {
+  it("resolves the sub-issue number to its id, then POSTs sub_issue_id", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "GET" && url.endsWith("/issues/12")) {
+        return makeResponse({ status: 200, body: { number: 12, id: 999001 } });
+      }
+      if (init.method === "POST" && url.endsWith("/issues/4/sub_issues")) {
+        expect(init.body).toContain('"sub_issue_id":999001');
+        return makeResponse({ status: 201, body: { number: 4, id: 500 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_add_sub_issue");
+    const res = await handler({ repo: "octo/repo", number: 4, sub_number: 12 });
+    expect(res.isError).toBeFalsy();
+  });
+});
+
 describe("issue_set_type", () => {
   it("PATCHes native type then replaces type:* labels, preserving non-type labels", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {

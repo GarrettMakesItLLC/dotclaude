@@ -286,6 +286,57 @@ export function registerIssueTools(server: McpServer): void {
   );
 
   server.registerTool(
+    "issue_add_sub_issue",
+    {
+      description:
+        "Link an existing issue as a sub-issue (child) of another. Both are issue numbers in the same repo.",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Parent issue number."),
+        sub_number: z.number().int().positive().describe("Child issue number to nest under the parent."),
+      },
+    },
+    async ({ repo, number, sub_number }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        // The sub_issues endpoint takes the child's database id, not its number.
+        const child = await ghRequest<{ id: number }>(
+          `/repos/${owner}/${name}/issues/${sub_number}`,
+        );
+        const data = await ghRequest(
+          `/repos/${owner}/${name}/issues/${number}/sub_issues`,
+          { method: "POST", body: { sub_issue_id: child.id } },
+        );
+        return jsonText(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "issue_list_sub_issues",
+    {
+      description: "List the sub-issues (children) of an issue.",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Parent issue number."),
+      },
+    },
+    async ({ repo, number }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const data = await ghPaginate(`/repos/${owner}/${name}/issues/${number}/sub_issues`, {
+          limit: 1000,
+        });
+        return jsonText(data);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
     "milestone_ensure",
     {
       description:
