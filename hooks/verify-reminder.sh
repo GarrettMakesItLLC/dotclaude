@@ -56,7 +56,9 @@ msg = (
     "  - Only if you touched build-affecting code (config, deps, codegen, bundler/routes): the build.\n"
     "If you have not run them yet, run them now and report the command output. "
     "If anything fails, fix it (or open the PR as a draft) before calling this done. "
-    "Scope to your diff — this is a fast local check, not the full suite."
+    "Scope to your diff — this is a fast local check, not the full suite.\n"
+    "Before this PR hands off, also confirm issue linkage: the PR body references the issue it resolves (\"Closes #N\"), and that issue is set to status:in-review. "
+    "If no issue tracks this work, create one (see the managing-work-with-issues skill) and link it."
 )
 print(json.dumps({
     "hookSpecificOutput": {

@@ -8,13 +8,14 @@ My personal Claude Code configuration — synced across machines via git.
 |------|---------|
 | `CLAUDE.md` | Global instructions injected into **every** session. Lean by design — universal *behavioral* rules only. |
 | `rules/` | Path-scoped stack conventions (TypeScript, frontend, data/API, testing, monorepo/hosting). Each loads only when Claude opens a matching file. Symlinked to `~/.claude/rules/`. |
-| `skills/` | Personal/vendored skills (`finishing-work`, and the vendored `find-skills`). Load on demand when invoked or matched. Each linked into `~/.claude/skills/`. |
-| `hooks/` | Deterministic guardrails run by Claude Code. `git-guard.sh` **blocks** dangerous shell commands (`--no-verify`, force-push to `main`, `.env` commits, reckless `rm -rf`); `worktree-guard.sh` **blocks** file edits to the main working tree of a `.worktrees/`-convention repo (keeps parallel agents in isolated worktrees; `WORKTREE_GUARD_OFF=1` overrides); `verify-reminder.sh` **nudges** (non-blocking) the agent to run change-scoped verification when it opens a PR. Each has a `*.test.sh` self-test. Symlinked to `~/.claude/hooks/`. |
-| `mcp/` | Source for custom MCP servers I built (e.g. `mcp/github` — a REST wrapper for GitHub PR/issue/repo ops). `bootstrap.sh` builds and registers each with `claude mcp add`. See `plugins.md`. |
+| `skills/` | Personal/vendored skills (`finishing-work`; `managing-work-with-issues`, the GitHub-issue lifecycle — claim-on-begin, label taxonomy, follow-up discipline; and the vendored `find-skills`). Load on demand when invoked or matched. Each linked into `~/.claude/skills/`. |
+| `hooks/` | Deterministic guardrails run by Claude Code. `git-guard.sh` **blocks** dangerous shell commands (`--no-verify`, force-push to `main`, `.env` commits, reckless `rm -rf`); `worktree-guard.sh` **blocks** file edits to the main working tree of a `.worktrees/`-convention repo (keeps parallel agents in isolated worktrees; `WORKTREE_GUARD_OFF=1` overrides); `verify-reminder.sh` **nudges** (non-blocking) the agent to run change-scoped verification and link the issue (`Closes #N`) when it opens a PR. Each has a `*.test.sh` self-test. Symlinked to `~/.claude/hooks/`. |
+| `mcp/` | Source for custom MCP servers I built — `mcp/github`, a REST wrapper for GitHub PR/repo ops plus the full issue lifecycle (`issue_create`, `issue_claim`, `issue_set_type`, `issue_set_milestone`, `issue_add_sub_issue`, `issue_add_assignees`, …) and label provisioning (`labels_ensure`). `bootstrap.sh` builds and registers it with `claude mcp add`. See `plugins.md` and `mcp/github/README.md` for the full tool list. |
 | `settings.json` | User-scope settings: enabled plugins, the official marketplace, permission defaults, and the hooks wiring. |
 | `keybindings.json` | Custom keyboard shortcuts (e.g., shift+enter for newline in chat). |
 | `commands/` | Personal slash commands, symlinked to `~/.claude/commands/` (e.g. `/dotclaude-sync`, which pulls the repo and runs the link doctor). |
-| `bootstrap.sh` | One-command installer for a fresh machine. Symlinks files + directories into `~/.claude/`; `--check` runs a link doctor. |
+| `bootstrap.sh` | One-command installer for a fresh machine. Symlinks files + directories into `~/.claude/`; `--check` runs a link doctor; also points at per-repo issue-label provisioning (`labels_ensure`). |
+| `templates/PULL_REQUEST_TEMPLATE.md` | Canonical PR template (summary, `Closes #` issue link, verification section) — copied into each project repo's `.github/PULL_REQUEST_TEMPLATE.md` so GitHub's PR-open UI reinforces issue linkage. |
 | `plugins.md` | Notes on which plugins are installed and what each is for. |
 | `mcp-connectors.md` | Checklist of claude.ai OAuth connectors (Notion, Gmail, Vercel…) to reconnect on a fresh machine, plus API-key HTTP MCPs (`upload-post`) that `bootstrap.sh` registers and their per-machine secrets. |
 | `.gitignore` | Keeps machine-local cruft out of the repo (history, sessions, caches, credentials). |
@@ -49,10 +50,11 @@ bash ~/dotclaude/bootstrap.sh
 The bootstrap script:
 1. Symlinks `CLAUDE.md`, `settings.json`, `keybindings.json` into `~/.claude/`
 2. Symlinks the `rules/`, `hooks/`, and `commands/` directories into `~/.claude/`
-3. Symlinks each vendored skill (`finishing-work`, `find-skills`) into `~/.claude/skills/` individually, so plugin/user skills there aren't clobbered
+3. Symlinks each vendored skill (`finishing-work`, `managing-work-with-issues`, `find-skills`) into `~/.claude/skills/` individually, so plugin/user skills there aren't clobbered
 4. Builds and registers vendored custom MCP servers (`mcp/github`) with `claude mcp add`
 5. Registers API-key HTTP MCPs (`upload-post`) user-scoped, with the key read from `$UPLOAD_POST_API_KEY`
 6. Reports which plugins will auto-install on first `claude` launch
+7. Points at per-repo issue-label provisioning: run the `labels_ensure` MCP tool once in each project repo (not looped here — it needs a repo checkout, which this machine-setup script doesn't have)
 
 Existing real files in `~/.claude/` are backed up to `~/.claude.bak.<timestamp>/` (never overwritten). The script is idempotent — safe to re-run.
 
