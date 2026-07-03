@@ -8,12 +8,16 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
 jobs:
   validate:
+    # Skip draft PRs — CI minutes are metered, and a draft hasn't been
+    # self-reviewed yet. Runs once the PR is marked ready_for_review.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +51,8 @@ jobs:
   commitlint:
     # Lightweight conventional-commit check (no husky/node toolchain). Validates
     # PR commit subjects against the prefixes CLAUDE.md requires.
-    if: github.event_name == 'pull_request'
+    # Skip draft PRs — see validate job for why.
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
