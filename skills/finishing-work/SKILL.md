@@ -39,6 +39,8 @@ A PR body worth merging has:
 - **Screenshots / notes** for UI or otherwise reviewer-visible changes.
 - Conventional-commit-style title. Keep it tight.
 
+The canonical PR-body and issue-form shapes live in `~/dotclaude/templates/` (`PULL_REQUEST_TEMPLATE.md`, `ISSUE_TEMPLATE/`) — roll them into each repo's `.github/` so the structure is enforced there too.
+
 ## 4. Leave the workspace clean and ready
 
 A task is done when the checkout is ready for the next one — not at "PR opened."

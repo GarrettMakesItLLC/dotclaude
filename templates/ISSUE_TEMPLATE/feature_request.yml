@@ -1,0 +1,29 @@
+# Generic maintainer feature template. Copy into a repo's .github/ISSUE_TEMPLATE/
+# and customize (e.g. add an "Area" dropdown for the repo's domains).
+name: 💡 Feature request
+description: Propose a new feature or enhancement.
+labels: ['type:feature', 'status:backlog']
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What's missing or painful today? Who is affected?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: input
+    id: area
+    attributes:
+      label: Area / component
+      placeholder: e.g. auth, billing, infra/CI, engine
