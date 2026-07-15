@@ -126,6 +126,7 @@ Docs, PR descriptions, comments, and code describe **what is** — never the his
 - **PR descriptions / docs**: write the final state once. Don't narrate incremental progress ("first I tried X, then switched to Y"), and don't keep editing the description as a running diary as you work — it reflects the merged result.
 - **Code comments**: only ones that earn their place — explain *why* something non-obvious exists, a gotcha, an invariant. Never "what changed" / "removed the old version" / "previously this did X", and never leave commented-out code as a tombstone.
 - **Delete dead code.** Deprecated, legacy, unused, or superseded code goes — don't keep it "just in case." It's bloat and a maintenance trap; git history holds anything you'd ever need back.
+- **One source of truth for machine-checkable facts.** Don't hand-maintain a second copy of something code already defines (a pricing/feature/config table, a tier matrix, an API surface) — generate or tag-link the derivatives from the source and CI-guard the drift. A duplicated fact silently goes stale.
 
 ---
 
