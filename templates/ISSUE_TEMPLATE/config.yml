@@ -1,0 +1,3 @@
+# Copy into a repo's .github/ISSUE_TEMPLATE/. Forces choosing a template rather
+# than a blank issue. Add contact_links (e.g. an in-app feedback button) per repo.
+blank_issues_enabled: false
