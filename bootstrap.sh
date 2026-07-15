@@ -36,6 +36,7 @@ SHARED_SKILLS=(
   "find-skills"                 # skill discovery — the one user-level skill not in a plugin
   "managing-work-with-issues"   # GitHub-issue lifecycle: claim-on-begin, label taxonomy, follow-up discipline
   "extending-the-github-mcp"    # self-healing: unblock, file, and grow the github-rest MCP on capability gaps
+  "operating-production"        # incident/rollback posture, health checks, alerting for deployed services
 )
 
 MODE="install"
