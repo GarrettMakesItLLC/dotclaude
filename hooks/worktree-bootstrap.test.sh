@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Self-test for worktree-bootstrap.sh. Feeds PostToolUse payloads through the
+# hook and asserts it (a) always exits 0 (fail-open) and (b) runs the repo's
+# bin/setup-worktree.sh with the correct target only on a `git worktree add`.
+# Run locally or in CI:  bash hooks/worktree-bootstrap.test.sh
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOOK="$HERE/worktree-bootstrap.sh"
+fail=0
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+# A fake project with an instrumented bin/setup-worktree.sh that records its arg.
+PROJ="$TMP/proj"
+mkdir -p "$PROJ/bin" "$PROJ/.worktrees/wt"
+RECORD="$TMP/record"
+cat > "$PROJ/bin/setup-worktree.sh" <<EOF
+#!/usr/bin/env bash
+printf '%s' "\$1" > "$RECORD"
+EOF
+chmod +x "$PROJ/bin/setup-worktree.sh"
+
+# Run the hook with a payload built from a command string. Asserts exit 0 and
+# (if expect_target non-empty) that setup-worktree.sh recorded that target.
+run() {
+  local desc="$1" cmd="$2" expect_target="$3" got
+  rm -f "$RECORD"
+  CLAUDE_PROJECT_DIR="$PROJ" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))
+' "$cmd" | CLAUDE_PROJECT_DIR="$PROJ" "$HOOK" >/dev/null 2>&1
+  got=$?
+  if [ "$got" != 0 ]; then
+    echo "FAIL ($desc): hook exited $got, must always be 0"; fail=1; return
+  fi
+  local recorded=""; [ -f "$RECORD" ] && recorded="$(cat "$RECORD")"
+  if [ "$recorded" != "$expect_target" ]; then
+    echo "FAIL ($desc): setup ran with '$recorded', wanted '$expect_target'"; fail=1
+  fi
+}
+
+# Matches -> setup runs with absolute target, both flag orderings.
+run "path then -b"  "git worktree add .worktrees/wt -b feat/x"  "$PROJ/.worktrees/wt"
+run "-b then path"  "git worktree add -b feat/x .worktrees/wt"  "$PROJ/.worktrees/wt"
+run "absolute path" "git worktree add $PROJ/.worktrees/wt -b feat/x"  "$PROJ/.worktrees/wt"
+
+# Non-matches -> no-op (setup must NOT run), still exit 0.
+run "unrelated cmd" "git status"                         ""
+run "worktree list" "git worktree list"                  ""
+run "target missing" "git worktree add .worktrees/nope -b feat/y"  ""
+
+# No opt-in script -> no-op even on a real add.
+PROJ2="$TMP/proj2"; mkdir -p "$PROJ2/.worktrees/wt"
+rm -f "$RECORD"
+CLAUDE_PROJECT_DIR="$PROJ2" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))
+' "git worktree add .worktrees/wt -b feat/z" | CLAUDE_PROJECT_DIR="$PROJ2" "$HOOK" >/dev/null 2>&1
+[ $? = 0 ] || { echo "FAIL (no script): non-zero exit"; fail=1; }
+
+# Garbage input -> fail open (exit 0).
+printf 'not json' | "$HOOK" >/dev/null 2>&1
+[ $? = 0 ] || { echo "FAIL (garbage input): non-zero exit"; fail=1; }
+
+if [ "$fail" = 0 ]; then
+  echo "worktree-bootstrap: all cases passed"
+fi
+exit "$fail"
