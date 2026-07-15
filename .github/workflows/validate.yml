@@ -13,6 +13,12 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs on the same ref so a rapid push sequence only pays for
+# the last one. This workflow is read-only/idempotent, so cancel is safe.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     # Skip draft PRs — CI minutes are metered, and a draft hasn't been
@@ -46,6 +52,7 @@ jobs:
         run: |
           bash hooks/git-guard.test.sh
           bash hooks/worktree-guard.test.sh
+          bash hooks/worktree-bootstrap.test.sh
           bash hooks/verify-reminder.test.sh
 
   commitlint:
@@ -74,3 +81,32 @@ jobs:
             fi
           done < <(git rev-list --no-merges "$base..$head")
           exit $fail
+
+  mcp-github:
+    # Build, typecheck, and test the vendored github-rest MCP — the server we
+    # prefer over `gh` for PR/issue ops. A broken build here would slip past the
+    # other jobs and break bootstrap.sh on the next machine that pulls.
+    # Only runs when mcp/github changed (change-detection keeps other PRs cheap).
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            mcp:
+              - 'mcp/github/**'
+      - if: steps.changes.outputs.mcp == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mcp/github/package-lock.json
+      - if: steps.changes.outputs.mcp == 'true'
+        working-directory: mcp/github
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
