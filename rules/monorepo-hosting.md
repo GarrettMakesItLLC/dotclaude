@@ -23,3 +23,9 @@ paths:
 - **Vercel** for frontends (Next.js + Vite both deploy here).
 - **Railway** for separate backend services (Fastify) when not deployable on Vercel.
 - Postgres + Redis usually via Vercel Marketplace (Neon + Upstash) or Supabase.
+
+## Merge model & releases
+
+- **Squash-merge repos: lint the PR title, not the commits.** On a squash merge, GitHub uses the **PR title** verbatim as the commit subject — so the PR title is what lands on `main`. Enforce conventional-commit format on it (e.g. `amannn/action-semantic-pull-request`); a breaking change uses `!`.
+- That keeps `main` a clean conventional-commit log that **`semantic-release`** can parse to derive the version bump and changelog automatically. Curated release notes are prepended to the generated ones.
+- (Repos that don't squash keep commit-level commitlint instead.)
