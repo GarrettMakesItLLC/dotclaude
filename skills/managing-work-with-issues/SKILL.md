@@ -5,47 +5,39 @@ description: Use when starting, creating, or finishing any tracked unit of work 
 
 # Managing work with GitHub issues
 
-GitHub Issues are the high-level tracker for all agent work. Every unit of work is
-an issue with exactly one `status:*` label. Use the REST-only `github-rest` MCP
-tools (never `gh` GraphQL paths) for every mutation below. Hit an operation the
-MCP does not expose? See the **extending-the-github-mcp** skill — don't just
-work around it silently.
+Every unit of work is a GitHub issue with **exactly one `status:*` label**. Done = the issue is **closed** (there is no `status:done`).
+
+## Quick reference — the lifecycle
+
+1. **Claim before you touch it.** Self-assign + set `status:in-progress` the moment you start. Never work an unclaimed issue.
+2. **Work it.** Finish in-scope work — don't file a follow-up for something you could complete now.
+3. **Open the PR** → set `status:in-review`; put `Closes #N` in the PR body.
+4. **Merge** auto-closes it as `completed`. Closing something you *won't* do → close with reason `not_planned` and clear its `status:*` label.
+
+## Tooling — MCP first, `gh` fallback (don't get stuck here)
+
+Prefer the REST-only **`github-rest` MCP** tools (`issue_claim`, `issue_set_status`, `issue_set_type`, `labels_ensure`, `milestone_ensure`, `issue_set_milestone`, `issue_add_sub_issue`, `issue_update`) — they encode the taxonomy correctly and avoid the `gh` GraphQL `projectCards` breakage.
+
+**But if those MCP tools aren't loaded in your session, do NOT stall or churn** — fall back to `gh` with an explicit `--repo` flag (`gh issue edit N --repo <owner/repo> --add-label ... --add-assignee @me`, `gh issue create`, `gh issue close --reason`). Search for the MCP tools once (ToolSearch `select:issue_claim,...`); if they don't resolve, use `gh` and move on. The lifecycle is what matters, not which tool applies the label. If the MCP is *missing a capability* you need, see **extending-the-github-mcp**.
 
 ## The label taxonomy
 
-- **status:** `backlog` → `ready` → `in-progress` → `in-review`; `blocked` from any state. Exactly one at a time. **Done = the issue is closed** (no `status:done`).
-- **type:** `bug` / `feature` / `task` — set with `issue_set_type` (applies the native type + `type:*` label).
-- **source:** `musclebuddy` / `redthread` / `adventureos` — origin of user-reported feedback.
+- **status:** `backlog` → `ready` → `in-progress` → `in-review`; `blocked` from any state. Exactly one at a time.
+- **type:** `bug` / `feature` / `task`.
+- **source:** `musclebuddy` / `redthread` / `adventureos` — origin of user-reported feedback only.
 
-If a label is missing in a repo, run `labels_ensure` once to provision the full set.
+If labels are missing in a repo, provision the full set once (`labels_ensure`, or `gh label create`). New repos also want the issue/PR templates in `templates/` (copy them into `.github/`).
 
-## Lifecycle — the rules
+## Creating an issue (finding, follow-up, triaged feedback)
 
-**Creating an issue** (investigation finding, follow-up, or triaged feedback):
-- Always fill full fields: clear title; body with *what + why + a `file:line` pointer*; `issue_set_type`; milestone (`milestone_ensure` + `issue_set_milestone`) and relationships (`issue_add_sub_issue`) where known.
-- Set status `ready` when fully scoped, `blocked` only when a genuine decision/info is outstanding. Gather enough at creation that issues rarely start blocked.
-- **Do not assign anyone at creation.** Issues stay unassigned until claimed.
-
-**Beginning work:** call `issue_claim` the moment you start — it self-assigns you and moves the issue to `status:in-progress`. Never work an issue without claiming it first.
-
-**Opening the PR:** set `status:in-review` with `issue_set_status` (preserves `type:*`/`source:*` labels) and reference the issue in the PR body (`Closes #N`).
-
-**Finishing:** the merged `Closes #N` PR closes the issue as `completed` automatically. If you close an issue *without* implementing it (won't/didn't do), close it with `issue_update` `state: closed`, `state_reason: not_planned`, and clear it with `issue_set_status` (call with no status) first.
+- Full fields: clear title; body with **what + why + a `file:line` pointer**; set type; milestone + relationships where known.
+- Status `ready` when fully scoped; `blocked` only when a real decision/info is genuinely outstanding. **No assignee at creation** — issues stay unassigned until claimed.
+- Closing multiple issues from one PR: GitHub's auto-close needs the keyword before **each** number — `Closes #1, closes #2` (a bare `Closes #1, #2` closes only #1).
 
 ## User-reported feedback (musclebuddy / redthread / adventureos)
 
-Feedback from these apps becomes an issue with the matching `type:*` and
-`source:*` labels — and **`status:blocked`**, never `ready`. User reports MUST be
-verified by Garrett before implementation; agents do not auto-start them. Garrett
-flips verified reports to `ready`.
+Files as an issue with the matching `type:*` + `source:*` labels and **`status:blocked`**, never `ready`. User reports MUST be verified by Garrett before implementation — agents never auto-start them. Garrett flips verified reports to `ready`.
 
-## Follow-up discipline — this is the part agents get wrong
+## Follow-up discipline — the part agents get wrong
 
-A follow-up issue is **only** for:
-- **(a)** a finding genuinely **out of scope** of your current task, or
-- **(b)** a blocker needing a **human decision that totally halts** forward progress while you run autonomously and Garrett is away.
-
-**Finish in-scope work — do not defer it.** Leaving a task partially done and
-filing a follow-up for the rest is a failure. If you can complete it now, complete
-it. Follow-ups are for genuinely-separate or genuinely-blocked work, not a
-to-do dump for things you could have finished.
+A follow-up issue is **only** for **(a)** a finding genuinely **out of scope** of the current task, or **(b)** a blocker needing a **human decision that totally halts** progress while you run autonomously. Leaving a task half-done and filing a follow-up for the rest is a failure — if you can finish it now, finish it.
