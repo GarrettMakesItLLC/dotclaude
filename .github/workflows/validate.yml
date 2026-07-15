@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read   # dorny/paths-filter queries the PR Files API on pull_request events
 
 # Cancel superseded runs on the same ref so a rapid push sequence only pays for
 # the last one. This workflow is read-only/idempotent, so cancel is safe.
