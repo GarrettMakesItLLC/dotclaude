@@ -94,6 +94,11 @@ Docs, PR descriptions, comments, and code describe **what is** — never how it 
 
 - **PR descriptions / docs**: write the final state once — no incremental narration ("first I tried X"), no running-diary edits as you work.
 - **Code comments**: only ones that earn their place (why something non-obvious exists, a gotcha, an invariant). Never "what changed" / "previously this did X"; no commented-out tombstones.
+- **Keep the WHY, drop the WHEN/WHO.** The rule above and "explain why non-obvious things exist" pull against each other, and the tie is broken toward the war story every time — that's how a doc rots into an incident log. A constraint is what *is* true and must stay true; the incident that taught it is history. State the constraint, then stop. If a reader would behave identically without a clause, it's journey — cut it.
+  - ✅ "The exercise pool self-heals on boot when the DB is populated-but-partial: a partial table silently shadows the KB, making those exercises unreachable and earning zero rank credit."
+  - ❌ "…it shipped that way twice (#1426 at 48-vs-138, #1522 at 138-vs-314) before the self-heal landed."
+  - An issue ref is fine as a *pointer* (`see #123`), never as the explanation. If the constraint only makes sense as a story, you haven't found the constraint yet.
+  - Runbook steps ("run AFTER the new server is live") are instructions, not narration — keep them.
 - **Delete dead code** — deprecated/legacy/unused/superseded goes; git history holds anything you'd need back.
 - **One source of truth for machine-checkable facts** — don't hand-maintain a second copy of what code already defines (pricing/tier/config table, API surface); generate or tag-link derivatives and CI-guard the drift.
 - Never create ephemeral summary docs (`INTEGRATION_SUMMARY.md`, `CHANGES.md`, `WHAT_I_DID.md`) — the diff and commit message are the record. Permanent docs (architecture, runbooks) belong in the existing docs tree.
