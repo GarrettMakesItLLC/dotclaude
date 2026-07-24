@@ -31,13 +31,10 @@ jobs:
 
       - name: Validate JSON files
         run: |
-          for f in settings.json keybindings.json; do
-            python3 -c "import json,sys; json.load(open('$f')); print('$f: valid JSON')"
-          done
-          # Any other *.json that may appear (e.g. mcp-servers.example.json).
           for f in $(git ls-files '*.json'); do
             python3 -c "import json,sys; json.load(open('$f'))" \
               || { echo "INVALID JSON: $f"; exit 1; }
+            echo "✓ $f"
           done
 
       - name: Lint shell scripts
@@ -50,15 +47,81 @@ jobs:
           done
 
       - name: Run hook self-tests
+        # Globbed, not enumerated, so a new hook's tests can never be forgotten.
         run: |
-          bash hooks/git-guard.test.sh
-          bash hooks/worktree-guard.test.sh
-          bash hooks/worktree-bootstrap.test.sh
-          bash hooks/verify-reminder.test.sh
+          shopt -s nullglob
+          tests=(hooks/*.test.sh)
+          [ ${#tests[@]} -gt 0 ] || { echo "no hook self-tests found"; exit 1; }
+          for f in "${tests[@]}"; do
+            echo "→ $f"
+            bash "$f"
+          done
+
+  config-drift:
+    # The repo's own rule: never hand-maintain a second copy of a machine-checkable
+    # fact. These are the couplings that have silently rotted before.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every hook wired in settings.json exists and is executable
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys
+          fail = []
+          cfg = json.load(open("settings.json"))
+          for event, groups in cfg.get("hooks", {}).items():
+              for group in groups:
+                  for hook in group.get("hooks", []):
+                      cmd = hook.get("command", "")
+                      m = re.search(r'/\.claude/hooks/([A-Za-z0-9._-]+\.sh)', cmd)
+                      if not m:
+                          continue
+                      path = os.path.join("hooks", m.group(1))
+                      if not os.path.exists(path):
+                          fail.append(f"{event}: settings.json references missing {path}")
+                      elif not os.access(path, os.X_OK):
+                          fail.append(f"{event}: {path} is not executable")
+          print("\n".join(fail) if fail else "✓ hook wiring resolves")
+          sys.exit(1 if fail else 0)
+          PY
+
+      - name: Every hook has a self-test
+        run: |
+          fail=0
+          for f in hooks/*.sh; do
+            case "$f" in *.test.sh) continue ;; esac
+            t="${f%.sh}.test.sh"
+            [ -f "$t" ] || { echo "✗ $f has no $t"; fail=1; }
+          done
+          [ $fail -eq 0 ] && echo "✓ every hook has a self-test"
+          exit $fail
+
+      - name: bootstrap.sh links exactly the skills that exist
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          src = open("bootstrap.sh").read()
+          # Anchor on the closing paren at line start: the per-entry trailing
+          # comments contain their own parens, so a [^)]* capture truncates.
+          m = re.search(r'SHARED_SKILLS=\((.*?)\n\)', src, re.S)
+          if not m:
+              print("could not find SHARED_SKILLS in bootstrap.sh"); sys.exit(1)
+          # Quoted entries only — the array's trailing `# comment` on each line
+          # would otherwise be scraped in as skill names.
+          listed = set(re.findall(r'"([\w-]+)"', m.group(1)))
+          on_disk = {d for d in os.listdir("skills") if os.path.isdir(os.path.join("skills", d))}
+          missing, extra = on_disk - listed, listed - on_disk
+          for s in sorted(missing): print(f"✗ skills/{s} exists but bootstrap.sh does not link it")
+          for s in sorted(extra):   print(f"✗ bootstrap.sh links skills/{s} which does not exist")
+          if not (missing or extra): print("✓ SHARED_SKILLS matches skills/")
+          sys.exit(1 if (missing or extra) else 0)
+          PY
 
   commitlint:
-    # Lightweight conventional-commit check (no husky/node toolchain). Validates
-    # PR commit subjects against the prefixes CLAUDE.md requires.
+    # This job is the enforcement boundary for conventional commits — which is why
+    # CLAUDE.md does not restate the prefix list.
     # Skip draft PRs — see validate job for why.
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
@@ -111,3 +174,27 @@ jobs:
           npm run typecheck
           npm test
           npm run build
+
+  ci-success:
+    # The single required check. A *skipped* job satisfies a required status check
+    # of the same name, so gating on the individual jobs would let a PR merge
+    # unverified. This job needs them all and fails on any non-success result,
+    # and adding or splitting a job never means editing the branch ruleset.
+    if: always() && github.event_name == 'pull_request'
+    needs: [validate, config-drift, commitlint, mcp-github]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert every upstream job succeeded
+        run: |
+          echo "$RESULTS"
+          python3 - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ["RESULTS"])
+          bad = {j: m["result"] for j, m in needs.items() if m["result"] != "success"}
+          for j, r in sorted(bad.items()):
+              print(f"✗ {j}: {r}")
+          print("✓ all jobs succeeded" if not bad else "")
+          sys.exit(1 if bad else 0)
+          PY
+        env:
+          RESULTS: ${{ toJSON(needs) }}

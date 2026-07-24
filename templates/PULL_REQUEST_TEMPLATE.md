@@ -1,13 +1,13 @@
 ## Summary
 
-<!-- What this PR does, in the final state. One or two sentences. -->
+<!-- What this PR does, in its final state. One or two sentences. -->
 
 ## Linked issue
 
 Closes #
 
-<!-- If this is follow-up work that doesn't close the issue, use "Follow-up: #N" instead. -->
+<!-- Repeat the keyword per issue: "Closes #1, closes #2". Use "Follow-up: #N" if this doesn't close it. -->
 
 ## Verification
 
-<!-- The change-scoped checks you ran and their result: typecheck, affected tests, build if relevant. Paste command output. -->
+<!-- Paste the output of the checks you ran. -->

@@ -33,8 +33,7 @@ SHARED_DIRS=(
 # link) so they coexist with skills sourced elsewhere (e.g. ~/.agents).
 SHARED_SKILLS=(
   "finishing-work"              # my personal finish-line procedure (definition of done, PR body, cleanup)
-  "find-skills"                 # skill discovery — the one user-level skill not in a plugin
-  "managing-work-with-issues"   # GitHub-issue lifecycle: claim-on-begin, label taxonomy, follow-up discipline
+  "managing-work-with-issues"   # cross-machine claim protocol, label taxonomy, issue lifecycle
   "extending-the-github-mcp"    # self-healing: unblock, file, and grow the github-rest MCP on capability gaps
   "operating-production"        # incident/rollback posture, health checks, alerting for deployed services
 )
@@ -87,6 +86,18 @@ doctor() {
       echo "  ✗ skills/$name — not linked to repo. Run bootstrap to fix."
       problems=$((problems + 1))
     fi
+  done
+  # A skill dropped from SHARED_SKILLS leaves a dangling link behind, which
+  # Claude Code surfaces as a broken skill rather than as an absent one.
+  for dst in "$CLAUDE_DIR"/skills/*; do
+    [ -L "$dst" ] || continue
+    tgt="$(readlink "$dst")"
+    case "$tgt" in
+      "$REPO_DIR"/skills/*) [ -e "$tgt" ] || {
+        echo "  ✗ skills/$(basename "$dst") — dangling link to a removed skill. Run bootstrap to prune."
+        problems=$((problems + 1))
+      } ;;
+    esac
   done
   if [ "$problems" -eq 0 ]; then
     echo "✓ All symlinks healthy."
@@ -177,6 +188,13 @@ if [ "${#SHARED_SKILLS[@]}" -gt 0 ]; then
     ln -s "$src" "$dst"
     echo "  linked: skills/$s"
   done
+  for dst in "$CLAUDE_DIR"/skills/*; do
+    [ -L "$dst" ] || continue
+    tgt="$(readlink "$dst")"
+    case "$tgt" in
+      "$REPO_DIR"/skills/*) [ -e "$tgt" ] || { rm "$dst"; echo "  pruned: skills/$(basename "$dst") (removed from repo)"; } ;;
+    esac
+  done
 fi
 
 # --------------------------------------------------------------------------
@@ -219,7 +237,7 @@ fi
 # not a marketplace plugin). The server URL is reproducible and lives here, but
 # the key is a per-machine secret kept out of this repo and supplied via
 # $UPLOAD_POST_API_KEY (set in ~/.claude/settings.local.json `env`; see
-# mcp-connectors.md). We register the header with the literal
+# integrations.md). We register the header with the literal
 # ${UPLOAD_POST_API_KEY} placeholder, which Claude Code expands from the session
 # env at runtime — so no key is ever written to a version-controlled file.
 # --------------------------------------------------------------------------
@@ -235,7 +253,7 @@ if command -v claude >/dev/null 2>&1; then
     echo "  registered: upload-post (user scope)"
   fi
   if [ -z "${UPLOAD_POST_API_KEY:-}" ]; then
-    echo "  NOTE: set UPLOAD_POST_API_KEY in ~/.claude/settings.local.json \`env\` — see mcp-connectors.md" >&2
+    echo "  NOTE: set UPLOAD_POST_API_KEY in ~/.claude/settings.local.json \`env\` — see integrations.md" >&2
   fi
 fi
 
