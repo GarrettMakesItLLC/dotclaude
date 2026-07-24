@@ -32,7 +32,7 @@ paths:
 
 Three distinct kinds — keep them distinct:
 
-- **Unreleased-feature gates** — default *off*; merge dark, flip on when ready. Money-moving features stay off by default.
+- **Unreleased-feature gates** — the exception, not the habit. A finished feature ships on; add a gate only when release genuinely has to be decoupled from merge (a coordinated launch, money movement, a migration that lands first). Every gate is something to remember to flip and then delete, and gating by default is what lets half-built work merge and sit.
 - **Ops kill switches** — default *on*; flip to disable a subsystem (e.g. return 503) without a redeploy. The kill-switch read must not itself depend on the thing it guards.
 - **Capability gates** — a feature self-appears once all its required env is present.
 

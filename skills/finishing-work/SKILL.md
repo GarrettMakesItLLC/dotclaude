@@ -17,7 +17,14 @@ Verification itself is covered by CLAUDE.md and `verify-reminder.sh`. What this 
 - [ ] No unrelated / scope-creep changes in the diff.
 - [ ] No secrets; `.env` not staged.
 
-Any box you can't check goes in the summary explicitly. Never present unverified work as done.
+**For a feature, all four layers land in the same PR** — a feature with any of them deferred is unfinished, not shipped:
+
+- [ ] **Tests** — unit *and* integration covering the new paths, not a smoke test that only proves it imports.
+- [ ] **Docs** — README / architecture / runbook updated in this change, not filed as a follow-up.
+- [ ] **Seed / fixture data** — the feature is exercisable in staging with realistic data, and you exercised it there.
+- [ ] **Observability** — failures surface somewhere Garrett would actually see them (logs, error tracker), and errors are handled rather than swallowed. Add a kill switch only if the feature genuinely warrants one; don't gate it dark by default (see `rules/data-api.md`).
+
+Any box you can't check goes in the summary explicitly. Never present unverified work as done, and never describe a feature as complete while a layer is outstanding — say which layer is missing and why.
 
 ## 2. Follow-ups
 

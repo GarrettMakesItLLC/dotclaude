@@ -36,6 +36,12 @@ GitHub Issues are the tracker. The lifecycle is in the **`managing-work-with-iss
 - **Worktree-first**: in any repo with `.worktrees/`, work in an isolated worktree — concurrent sessions in one checkout conflict. Read-only work is exempt. Enforced by `worktree-guard.sh`.
 - Branch off freshly-pulled `main`/`dev`; rebase on it during longer work so the diff stays small.
 
+## Ship whole features
+
+A feature is one cohesive deliverable, not a v1 with pieces bolted on afterward. Plan every layer before writing code, build in stages internally, and land it as **one PR** — code, tests, docs, seed/fixture data, and staging verification together. Stacked branches are for a change that genuinely can't be reviewed whole: plan the whole thing up front, chain them in sequence, never fan them out in parallel.
+
+**Don't dark-ship by default.** A finished feature ships on. Flags are for genuine ops kill switches and coordinated launches — not a habit that lets half-built work merge and sit behind a switch nobody flips.
+
 ## Verify before a handoff
 
 A push and a PR are handoffs — never make them on unverified work. Run typecheck + the tests your change touches, plus the build if you touched build-affecting code, and report the output.
