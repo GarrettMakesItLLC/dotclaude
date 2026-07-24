@@ -192,29 +192,156 @@ describe("issue_set_type", () => {
 });
 
 describe("issue_claim", () => {
-  it("assigns @me and swaps any status:* label for status:in-progress", async () => {
-    let assigned = false;
-    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+  /**
+   * Mock the full happy path. `refStatus` drives the outcome of the atomic
+   * `POST /git/refs` that acquires the lock; `calls` records the request order
+   * so the lock-before-assign sequence can be asserted.
+   */
+  function mockClaim(opts: {
+    refStatus: number;
+    calls: string[];
+    assigneesStatus?: number;
+    branchBody?: unknown;
+    prsBody?: unknown;
+  }) {
+    return async (url: string, init: { method?: string; body?: string }) => {
+      const method = init.method ?? "GET";
+      opts.calls.push(`${method} ${new URL(url).pathname}`);
       if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
-      if (init.method === "POST" && url.endsWith("/assignees")) {
-        assigned = true;
-        return makeResponse({ status: 201, body: {} });
+      if (method === "GET" && /\/repos\/octo\/repo$/.test(new URL(url).pathname)) {
+        return makeResponse({ status: 200, body: { default_branch: "main" } });
       }
-      if (init.method === "GET" && url.endsWith("/issues/8")) {
-        return makeResponse({ status: 200, body: { labels: [{ name: "status:ready" }, { name: "type:bug" }] } });
+      if (method === "GET" && url.endsWith("/git/ref/heads/main")) {
+        return makeResponse({ status: 200, body: { object: { sha: "basesha" } } });
       }
-      if (init.method === "PUT" && url.endsWith("/labels")) {
+      if (method === "POST" && url.endsWith("/git/refs")) {
+        if (opts.refStatus !== 201) {
+          return makeResponse({ status: opts.refStatus, body: { message: "Reference already exists" } });
+        }
+        return makeResponse({ status: 201, body: { ref: JSON.parse(init.body as string).ref } });
+      }
+      if (method === "GET" && url.includes("/branches/")) {
+        return makeResponse({ status: 200, body: opts.branchBody ?? { commit: { sha: "x" } } });
+      }
+      if (method === "GET" && url.includes("/pulls")) {
+        return makeResponse({ status: 200, body: opts.prsBody ?? [] });
+      }
+      if (method === "POST" && url.endsWith("/assignees")) {
+        return makeResponse({ status: opts.assigneesStatus ?? 201, body: {} });
+      }
+      if (method === "GET" && url.endsWith("/issues/8")) {
+        return makeResponse({
+          status: 200,
+          body: { number: 8, title: "Fix the thing!", labels: [{ name: "status:ready" }, { name: "type:bug" }] },
+        });
+      }
+      if (method === "PUT" && url.endsWith("/labels")) {
         const sent = JSON.parse(init.body as string).labels as string[];
         expect(sent).toEqual(expect.arrayContaining(["type:bug", "status:in-progress"]));
         expect(sent).not.toContain("status:ready");
         return makeResponse({ status: 200, body: { number: 8 } });
       }
       return makeResponse({ status: 500 });
-    });
+    };
+  }
+
+  it("creates the lock ref BEFORE assigning, then assigns @me and sets status:in-progress", async () => {
+    const calls: string[] = [];
+    fetchMock.mockImplementation(mockClaim({ refStatus: 201, calls }));
+
     const handler = await getIssueHandler("issue_claim");
     const res = await handler({ repo: "octo/repo", number: 8 });
+
     expect(res.isError).toBeFalsy();
-    expect(assigned).toBe(true);
+    const out = JSON.parse(res.content[0].text) as {
+      claimed: boolean;
+      branch: string;
+      base: string;
+      status: string | null;
+      assignee: string | null;
+    };
+    expect(out.claimed).toBe(true);
+    expect(out.branch).toBe("issue-8-fix-the-thing");
+    expect(out.base).toBe("main");
+    expect(out.assignee).toBe("GarrettMakesIt");
+    expect(out.status).toBe("in-progress");
+
+    const refIndex = calls.findIndex((c) => c === "POST /repos/octo/repo/git/refs");
+    const assignIndex = calls.findIndex((c) => c.endsWith("/assignees"));
+    expect(refIndex).toBeGreaterThanOrEqual(0);
+    expect(assignIndex).toBeGreaterThan(refIndex);
+  });
+
+  it("returns a structured already-claimed failure on a 422 from the ref POST, and never assigns", async () => {
+    const calls: string[] = [];
+    fetchMock.mockImplementation(
+      mockClaim({
+        refStatus: 422,
+        calls,
+        branchBody: {
+          commit: {
+            sha: "deadbeef",
+            commit: { author: { name: "Ada", date: "2026-07-20T00:00:00Z" }, message: "wip\n\nbody" },
+          },
+        },
+        prsBody: [{ number: 77, html_url: "https://gh/pr/77", state: "open", draft: false, title: "WIP" }],
+      }),
+    );
+
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8 });
+
+    expect(res.isError).toBe(true);
+    const out = JSON.parse(res.content[0].text) as {
+      claimed: boolean;
+      reason: string;
+      issue: number;
+      branch: string;
+      last_commit: { sha: string; author: string | null; date: string | null } | null;
+      pull_request: { number: number } | null;
+    };
+    expect(out.claimed).toBe(false);
+    expect(out.reason).toBe("already-claimed");
+    expect(out.issue).toBe(8);
+    expect(out.branch).toBe("issue-8-fix-the-thing");
+    expect(out.last_commit?.sha).toBe("deadbeef");
+    expect(out.last_commit?.author).toBe("Ada");
+    expect(out.last_commit?.date).toBe("2026-07-20T00:00:00Z");
+    expect(out.pull_request?.number).toBe(77);
+    expect(calls.some((c) => c.endsWith("/assignees"))).toBe(false);
+  });
+
+  it("keeps the lock and reports a _warnings entry when the self-assign fails", async () => {
+    const calls: string[] = [];
+    fetchMock.mockImplementation(mockClaim({ refStatus: 201, calls, assigneesStatus: 500 }));
+
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8 });
+
+    expect(res.isError).toBeFalsy();
+    const out = JSON.parse(res.content[0].text) as {
+      claimed: boolean;
+      assignee: string | null;
+      _warnings: string[];
+    };
+    expect(out.claimed).toBe(true);
+    expect(out.assignee).toBeNull();
+    expect(out._warnings).toHaveLength(1);
+    expect(out._warnings[0]).toContain("self-assign");
+    // The ref is the lock — it must NOT be rolled back when assignment fails.
+    expect(calls.some((c) => c.startsWith("DELETE"))).toBe(false);
+  });
+
+  it("uses an explicit branch override instead of deriving one from the title", async () => {
+    const calls: string[] = [];
+    fetchMock.mockImplementation(mockClaim({ refStatus: 201, calls }));
+
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8, branch: "issue-8-custom" });
+
+    expect(res.isError).toBeFalsy();
+    const out = JSON.parse(res.content[0].text) as { branch: string };
+    expect(out.branch).toBe("issue-8-custom");
   });
 });
 

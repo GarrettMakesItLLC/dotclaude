@@ -18,6 +18,12 @@ import {
   type IssueStatus,
 } from "../labels.js";
 import { setIssueStatus } from "../issue-status.js";
+import {
+  acquireClaimLock,
+  ClaimConflictError,
+  resolveClaimBranch,
+  structuredError,
+} from "../claim-lock.js";
 
 interface IssueLike {
   number: number;
@@ -368,22 +374,74 @@ export function registerIssueTools(server: McpServer): void {
     "issue_claim",
     {
       description:
-        "Claim an issue to begin work: self-assign the authenticated user and move status to in-progress (removing any other status:* label). Use this the moment you start an issue.",
+        "Claim an issue to begin work, taking a distributed lock first: creates the remote branch " +
+        "`issue-<N>-<slug>` at the default-branch head via an atomic ref create, then self-assigns " +
+        "the authenticated user and moves status to in-progress. If the branch already exists the " +
+        "issue is ALREADY CLAIMED (typically by another machine) — the call fails with the holder's " +
+        "branch, last commit and any open PR, and you must pick different work. Assignee alone " +
+        "cannot arbitrate this: every machine authenticates as the same user. Check out the " +
+        "returned branch instead of creating your own.",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number."),
+        branch: z
+          .string()
+          .optional()
+          .describe("Override the derived lock branch name (default `issue-<N>-<title-slug>`)."),
       },
     },
-    async ({ repo, number }) => {
+    async ({ repo, number, branch }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const me = await getViewerLogin();
-        await ghRequest(`/repos/${owner}/${name}/issues/${number}/assignees`, {
-          method: "POST",
-          body: { assignees: [me] },
-        });
-        return jsonText(await setIssueStatus(owner, name, number, "in-progress"));
+        const target = await resolveClaimBranch(owner, name, number, branch);
+        const lock = await acquireClaimLock(owner, name, target, number);
+
+        // The ref IS the lock. Once it exists the claim is held, so a failure in
+        // either step below is reported as a warning and never rolls the ref back.
+        const warnings: string[] = [];
+        let assignee: string | null = null;
+        try {
+          assignee = await getViewerLogin();
+          await ghRequest(`/repos/${owner}/${name}/issues/${number}/assignees`, {
+            method: "POST",
+            body: { assignees: [assignee] },
+          });
+        } catch (err) {
+          assignee = null;
+          const msg = err instanceof Error ? err.message : String(err);
+          warnings.push(`self-assign failed (the branch lock is held regardless): ${msg}`);
+        }
+
+        let status: string | null = "in-progress";
+        try {
+          await setIssueStatus(owner, name, number, "in-progress");
+        } catch (err) {
+          status = null;
+          const msg = err instanceof Error ? err.message : String(err);
+          warnings.push(`status:in-progress not set (the branch lock is held regardless): ${msg}`);
+        }
+
+        const result = {
+          claimed: true,
+          issue: number,
+          branch: target,
+          base: lock.base,
+          sha: lock.sha,
+          assignee,
+          status,
+          checkout: `git fetch origin && git checkout ${target}`,
+        };
+        return jsonText(warnings.length ? { ...result, _warnings: warnings } : result);
       } catch (err) {
+        if (err instanceof ClaimConflictError) {
+          return structuredError({
+            claimed: false,
+            reason: "already-claimed",
+            issue: number,
+            ...err.holder,
+            message: err.message,
+          });
+        }
         return errorResult(err);
       }
     },

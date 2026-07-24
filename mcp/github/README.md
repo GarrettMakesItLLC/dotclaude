@@ -71,8 +71,8 @@ Issues:
 - `issue_set_labels` — replace all labels on an issue.
 - `issue_add_assignees` / `issue_remove_assignees` — (un)assign users; accepts
   `@me`.
-- `issue_claim` — self-assign `@me` and set `status:in-progress`, removing any
-  other `status:*` label. Use when starting work on an issue.
+- `issue_claim` — take the distributed lock for an issue, then self-assign `@me`
+  and set `status:in-progress`. See [Claiming work](#claiming-work).
 - `issue_set_status` — set the single `status:*` label (or clear it), preserving all other labels.
 - `issue_set_type` — set bug/feature/task as the native issue type
   (best-effort) plus a `type:*` label.
@@ -85,6 +85,15 @@ Issues:
   (best-effort), finds-or-creates and attaches a milestone by title, and
   nests it under a `parent` as a sub-issue. Composes the granular tools above
   so agents don't have to hand-compose fields across several calls.
+
+Claims:
+
+- `issue_claim` — acquire the lock and start work (listed under Issues above).
+- `claim_release` — delete an issue's lock branch, returning the issue to
+  `status:ready` and unassigning `@me`. Refuses when the branch holds commits
+  that landed nowhere, unless `force`.
+- `work_in_flight` — every `issue-*` lock branch on the remote with its last
+  commit (author + time) and any open PR.
 
 Labels:
 
@@ -104,6 +113,36 @@ across pages of 100. For `issue_list` the GitHub `/issues` endpoint mixes in
 pull requests; those are filtered out and pages are followed until `limit` real
 issues are collected, so PR-heavy repos still return a full result. Pagination
 is bounded to 10 pages per call.
+
+## Claiming work
+
+Agents run against these repos from more than one machine, all authenticating as
+the same GitHub user — so the assignee field cannot arbitrate who owns an issue,
+and in-flight work sitting in a local worktree is invisible to the other machine.
+
+The lock is a **remote branch ref**. `POST /git/refs` is atomic and server-side:
+it returns `422` when the ref already exists, which makes it a true distributed
+mutex, and the pushed branch simultaneously advertises the work.
+
+`issue_claim` therefore, in order:
+
+1. resolves the branch `issue-<N>-<title-slug>` (override with `branch`),
+2. creates that ref at the default-branch head — a `422` here means **already
+   claimed**, and the call fails with the holder's branch, last commit
+   author/date and any open PR, so a live claim is distinguishable from an
+   abandoned one,
+3. only then self-assigns and sets `status:in-progress` — failures there are
+   reported in `_warnings` and never roll back the ref, because the ref is the
+   lock,
+4. returns the branch to `git fetch && git checkout` rather than creating your own.
+
+Before picking up work, call `work_in_flight` to see what the other machine
+already holds. To drop a dead claim, `claim_release` deletes the ref — refusing
+when the branch carries commits not merged anywhere unless `force: true`.
+
+The `claim-guard.sh` PreToolUse hook enforces the protocol at the first edit:
+on a branch named `issue-<N>-*` whose issue is not assigned with
+`status:in-progress`, the edit is blocked.
 
 ## Build
 
