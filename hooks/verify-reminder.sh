@@ -115,7 +115,9 @@ msg = (
     "Each bug, stale doc, or rough edge you hit this session is either fixed in this diff or has an issue number — there is no third bucket. "
     "State the count in the PR body: N found, M fixed here, K filed. Anything you could fix now, fix now instead of filing it."
 )
-loose = os.environ.get("DOTCLAUDE_LOOSE_ENDS", "").strip()
+# Strip newlines only — a bare .strip() would eat the first entry'\''s indent and
+# break its alignment with the rest of the list.
+loose = os.environ.get("DOTCLAUDE_LOOSE_ENDS", "").strip("\n")
 if loose:
     msg += (
         "\nThis branch ADDS the following deferred-work markers. For each one: fix it in this diff, "

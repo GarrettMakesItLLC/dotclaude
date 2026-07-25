@@ -98,8 +98,10 @@ scan_repo="$(mktemp -d)"
 scan_out="$(cd "$scan_repo" && printf '%s' '{"tool_name":"mcp__github-rest__pr_create","tool_input":{}}' | "$HOOK")"
 scan_code=$?
 [ "$scan_code" = 0 ] || { echo "FAIL: hook must exit 0 with a marker scan, got $scan_code"; fail=1; }
-printf '%s' "$scan_out" | grep -q 'added.py:2' \
-  || { echo "FAIL: scan should report the added FIXME as added.py:2"; fail=1; }
+# Indented, so entries line up: a bare .strip() on the marker block would eat the
+# first one's indent.
+printf '%s' "$scan_out" | grep -q '  added.py:2' \
+  || { echo "FAIL: scan should report the added FIXME as an indented added.py:2"; fail=1; }
 printf '%s' "$scan_out" | grep -q 'added.test.js:1' \
   || { echo "FAIL: scan should report the added .skip( as added.test.js:1"; fail=1; }
 printf '%s' "$scan_out" | grep -q 'pre-existing' \
