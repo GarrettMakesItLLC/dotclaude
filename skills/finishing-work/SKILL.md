@@ -26,9 +26,16 @@ Verification itself is covered by CLAUDE.md and `verify-reminder.sh`. What this 
 
 Any box you can't check goes in the summary explicitly. Never present unverified work as done, and never describe a feature as complete while a layer is outstanding — say which layer is missing and why.
 
-## 2. Follow-ups
+## 2. Account for every finding
 
-File them per **managing-work-with-issues** (that skill owns the when). Then don't just file and walk: dispatch a subagent in its own worktree to work each one in parallel, unless it's blocked, needs Garrett's input, or genuinely belongs in a separate session. Batch related findings into one issue. Reference each from the PR (`Follow-up: #123`) and list them with status in the final summary.
+Walk the findings you accumulated this session — bugs noticed in passing, tests you skipped, docs left stale, rough edges in code you touched. Each one is either **in this diff** or **has an issue number**. There is no third bucket (CLAUDE.md: *Finish what you find*).
+
+- **Fixable here ⇒ fix it here.** Adjacent and unblocked counts as here. Do it now, in this branch, before the PR — a second PR costs another round of context, review, and CI, and usually never happens.
+- **Genuinely out of scope or needs Garrett ⇒ file it** per **managing-work-with-issues**, batching related findings into one issue. Reference each from the PR (`Follow-up: #123`) and name it in the summary.
+
+Don't spawn an agent per follow-up. If a filed issue is ready to work, work it next yourself, or leave it for a later session — CLAUDE.md (*Execution*) keeps spawn counts low, and fanning out on your own leftovers is the expensive way to do what fixing-in-place already handles.
+
+Before writing the PR body, state the count out loud: *N findings — M fixed in this diff, K filed as #…*. A finding you can't place in one of those two buckets is one you dropped.
 
 ## 3. PR description
 

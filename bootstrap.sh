@@ -14,6 +14,20 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
 
+# ~/.claude must always point at the main checkout. A linked worktree is
+# temporary — linking into one leaves the whole config dangling the moment it is
+# removed, and the doctor would report every link broken while it is alive. Both
+# modes redirect to the main worktree rather than acting on this one.
+if git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  main_tree="$(git -C "$REPO_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  main_tree="${main_tree%/.git}"
+  if [ -n "$main_tree" ] && [ "$main_tree" != "$REPO_DIR" ] && [ -f "$main_tree/bootstrap.sh" ]; then
+    echo "→ running from a linked worktree; targeting the main checkout instead:"
+    echo "  $main_tree"
+    REPO_DIR="$main_tree"
+  fi
+fi
+
 # What gets linked into ~/.claude/. Single source of truth for install + doctor.
 SHARED_FILES=(
   "CLAUDE.md"

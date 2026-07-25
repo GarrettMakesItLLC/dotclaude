@@ -22,8 +22,19 @@ plugin costs context on every turn whether or not it is used. Enable a plugin
 only for a stack I actually deploy, and prefer one that ships skills over one
 that ships agents. Where two plugins overlap, keep the cheaper one.
 
-`github` is enabled for repo browsing, but **PR and issue writes go through the
-vendored `github-rest` MCP below**, not `gh` or the plugin — see the table.
+### Deliberately not enabled
+
+The official marketplace carries 200+ plugins; these are the near-misses, and
+the reason each stays out is the rule for anything like it:
+
+| Plugin | Why not |
+|--------|---------|
+| `github` | Its MCP routes writes through the deprecated GraphQL `projectCards` path that the vendored `github-rest` exists to avoid, and a second GitHub tool surface makes tool names ambiguous. One source per service. |
+| `code-simplifier` | The bundled `/simplify` command already does this. |
+| `claude-security` | The bundled `/security-review` already does this. |
+| `claude-md-management` | Overlapped by the `aligning-repo-config` skill, which knows this tiering model. |
+| `feature-dev` | Its workflow duplicates `superpowers` plus `finishing-work`, and competing process skills make the chosen path non-deterministic. |
+| `claude-code-setup`, `hookify`, `mcp-server-dev` | One-shot authoring tools, not per-turn context. Install for the session that needs one (`/plugin install <name>@claude-plugins-official`), then remove it. |
 
 ## MCP servers a plugin brings
 
@@ -33,7 +44,6 @@ machine. Plugins not listed ship skills only.
 | MCP | Plugin | Auth |
 |-----|--------|------|
 | Supabase | `supabase` | OAuth — `mcp__plugin_supabase_supabase__authenticate` |
-| Stripe | `stripe` | OAuth — `mcp__plugin_stripe_stripe__authenticate` |
 | Prisma | `prisma` | OAuth — `mcp__plugin_prisma_Prisma-Remote__authenticate` |
 | Railway | `railway` | OAuth — `mcp__plugin_railway_railway__*` (read-only ops allowlisted in `settings.json`) |
 | Vercel | `vercel` | OAuth — deployments, build/runtime logs, projects |
