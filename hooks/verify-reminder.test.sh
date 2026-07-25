@@ -74,6 +74,51 @@ check_bash silent 'ls -la && echo done'
 check_tool silent 'mcp__github-rest__pr_view'
 check_tool silent 'mcp__github-rest__pr_list'
 
+# --- follow-through: the nudge always demands every finding be accounted for ---
+out="$(printf '%s' '{"tool_name":"mcp__github-rest__pr_create","tool_input":{}}' | "$HOOK")"
+printf '%s' "$out" | grep -q "Finish what you find" \
+  || { echo "FAIL: nudge should carry the Finish-what-you-find accounting"; fail=1; }
+
+# --- deferred-work scan: markers this branch ADDS are named with file:line ---
+# A throwaway repo so the assertion depends on nothing about the host checkout.
+scan_repo="$(mktemp -d)"
+(
+  cd "$scan_repo" || exit 1
+  git init -q -b main .
+  git config user.email t@t; git config user.name t
+  printf 'ok = 1  # TODO: pre-existing, must NOT be reported\n' > base.py
+  git add -A && git commit -qm base
+  git checkout -qb feature
+  printf 'a = 1\nb = 2  # FIXME: added here\n' > added.py
+  printf "it.skip('added here', () => {})\n" > added.test.js
+  printf 'clean = 1\n' >> base.py
+  git add -A && git commit -qm work
+) >/dev/null 2>&1
+
+scan_out="$(cd "$scan_repo" && printf '%s' '{"tool_name":"mcp__github-rest__pr_create","tool_input":{}}' | "$HOOK")"
+scan_code=$?
+[ "$scan_code" = 0 ] || { echo "FAIL: hook must exit 0 with a marker scan, got $scan_code"; fail=1; }
+printf '%s' "$scan_out" | grep -q 'added.py:2' \
+  || { echo "FAIL: scan should report the added FIXME as added.py:2"; fail=1; }
+printf '%s' "$scan_out" | grep -q 'added.test.js:1' \
+  || { echo "FAIL: scan should report the added .skip( as added.test.js:1"; fail=1; }
+printf '%s' "$scan_out" | grep -q 'pre-existing' \
+  && { echo "FAIL: scan must not report markers the base branch already carried"; fail=1; }
+
+# A branch with no added markers gets the base nudge and no marker block.
+clean_out="$(cd "$scan_repo" && git checkout -q main && printf '%s' '{"tool_name":"mcp__github-rest__pr_create","tool_input":{}}' | "$HOOK")"
+printf '%s' "$clean_out" | grep -q "Verification check" \
+  || { echo "FAIL: clean branch should still get the base nudge"; fail=1; }
+printf '%s' "$clean_out" | grep -q "deferred-work markers" \
+  && { echo "FAIL: clean branch should not get a marker block"; fail=1; }
+
+# Outside a git repo the scan drops silently and the nudge still fires.
+nogit_out="$(cd "$(mktemp -d)" && printf '%s' '{"tool_name":"mcp__github-rest__pr_create","tool_input":{}}' | "$HOOK")"
+printf '%s' "$nogit_out" | grep -q "Verification check" \
+  || { echo "FAIL: nudge must survive running outside a git repo"; fail=1; }
+
+rm -rf "$scan_repo"
+
 if [ "$fail" = 0 ]; then
   echo "verify-reminder: all cases passed"
 fi

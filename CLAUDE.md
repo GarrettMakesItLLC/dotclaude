@@ -17,13 +17,25 @@ How far you carry it is per-repo, declared as `Autonomy:` in the repo's `CLAUDE.
 
 Stop and ask only for: one-way doors (framework, data model, auth model, public API shape); or genuinely ambiguous intent where reasonable engineers would build *different* things — and only after trying code, docs, and my MCPs (Notion specs) first. In doubt between asking and proceeding, proceed.
 
+## Finish what you find
+
+Whatever you turn up while working — a bug, a failing or skipped test, a stale doc, an unhandled case, a rough edge in the code you just touched — is part of the work. **Fix it in this change and commit it with the rest.** Not a `TODO`, not a "follow-up PR", not a note in the summary.
+
+A finding has exactly two dispositions, and "later" is not one of them:
+
+- **In scope, or adjacent and unblocked ⇒ fix it now**, in this PR, with the tests and docs it needs.
+- **Genuinely out of scope, or blocked on my decision ⇒ file an issue** and reference it from the PR.
+
+Out of scope means a different subsystem, a design decision that's mine, or a change that would make this diff unreviewable — *not* "bigger than I planned", "not what I was asked", or "I'd rather ship what I have". Deferring is the expensive choice: it costs a second round of context, review, and CI, and most deferrals never come back.
+
+A finding that leaves your hands with neither a fix in the diff nor an issue number has been dropped. **Nothing gets dropped.** Every finding is accounted for by the time you hand off.
+
 ## Work tracking
 
 GitHub Issues are the tracker. The lifecycle is in the **`managing-work-with-issues`** skill — load it before starting, creating, or closing tracked work.
 
 - **Claim before you touch anything** (`issue_claim`). It takes a remote branch ref as a lock, so a claim held by my other machine fails loudly instead of duplicating work. If the claim fails, pick different work.
 - Check `work_in_flight` before selecting an issue — local worktrees on my other machine are invisible; pushed refs are not.
-- **In-scope work gets finished, not filed.** A follow-up issue is only for a finding genuinely out of scope, or a blocker needing my decision.
 - App user-feedback is filed `status:blocked` and never auto-started — verify first.
 - Creating issues in my repos is pre-approved.
 
@@ -62,7 +74,7 @@ Don't hand-maintain a second copy of what code already defines — generate deri
 
 TypeScript strict, Next.js App Router / Vite, Prisma, Zod, Supabase Auth, Vercel/Railway, pnpm/npm workspaces, Vitest + Playwright, Tailwind. Conventions live in `~/.claude/rules/*.md`, path-scoped. A rule that repeats across 3+ repos gets hoisted into a rule file.
 
-Prefer configured MCPs over WebFetch/WebSearch/shell: Supabase (`list_tables` before schema changes, `get_logs` + `get_advisors` before debugging), Prisma, Stripe, Playwright, Vercel, Sentry, Notion, Gmail/Calendar/Drive, PubMed, Spotify. Never put service-role or secret keys in client-bundled code.
+Prefer configured MCPs over WebFetch/WebSearch/shell: Supabase (`list_tables` before schema changes, `get_logs` + `get_advisors` before debugging), Prisma, Playwright, Vercel, Railway, Sentry, `github-rest` (every GitHub write), Notion, Gmail/Calendar/Drive, PubMed, Spotify. Roster and per-machine auth: `integrations.md`. Never put service-role or secret keys in client-bundled code.
 
 ## Communication
 

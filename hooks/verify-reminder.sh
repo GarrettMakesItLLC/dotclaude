@@ -2,12 +2,16 @@
 # dotclaude verify-reminder — PreToolUse hook for the Bash tool and the
 # github-rest MCP. Fires ONLY when an agent is about to open a pull request
 # (`gh pr create`, or the `pr_create` MCP tool). On a match it injects a
-# non-blocking reminder asking the agent to confirm it ran the verification
-# relevant to its change (typecheck + affected tests) and to report the output.
+# non-blocking reminder covering the three things a PR hands off on: that the
+# change-scoped checks were run, that an issue is linked, and that no finding was
+# left dangling. It also names the deferred-work markers the branch actually adds
+# (`TODO`/`FIXME`, skipped or focused tests) so "I'll get it next PR" has to be a
+# decision rather than an oversight.
 #
-# Why this exists: "Verify before claiming done" lives in CLAUDE.md as prose, so
-# subagents follow it only probabilistically. This turns the rule into a
-# deterministic nudge at the one handoff that matters — opening the PR.
+# Why this exists: "Verify before claiming done" and "Finish what you find" live
+# in CLAUDE.md as prose, so subagents follow them only probabilistically. This
+# turns them into a deterministic nudge at the one handoff that matters — opening
+# the PR — and the marker scan is the part prose cannot do: it reads the diff.
 #
 # Why PR-create and NOT every push: pushes are constant (many parallel worktree
 # agents commit/push all day); nudging each one is alarm fatigue and undoes the
@@ -43,12 +47,60 @@ print(name, 1 if d.get("tool_input", {}).get("command") else 0)' 2>/dev/null)
 
 [ -z "${tool_name:-}" ] && exit 0
 
+# Added lines on this branch that defer work: TODO-class comments, and tests
+# skipped or narrowed to `.only`. Reported, never blocked — some are legitimate,
+# and prose that merely names a marker matches too. Over-reporting is the right
+# side to err on: a false hit costs one line of "intentional, because …" in the
+# PR body, a missed one costs a dropped fix.
+#
+# Diffed against the merge-base with the integration branch so only THIS
+# branch's additions count, not markers the codebase already carried. Every
+# failure path is silent: no repo, no upstream, detached, slow — the scan is
+# dropped and the rest of the nudge still fires.
+loose_ends() {
+  local base ref out
+  command -v git >/dev/null 2>&1 || return 0
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+  # Take the LATEST merge-base across the candidate integration branches, not the
+  # first that resolves: a feature branch cut from `dev` shares an older ancestor
+  # with `main`, and using that one would re-report every marker `dev` already
+  # carried.
+  local mb ts best_ts=0
+  for ref in origin/HEAD origin/main origin/dev main dev; do
+    git rev-parse --verify --quiet "$ref" >/dev/null 2>&1 || continue
+    mb="$(git merge-base "$ref" HEAD 2>/dev/null)" || continue
+    [ -n "$mb" ] || continue
+    ts="$(git show -s --format=%ct "$mb" 2>/dev/null)" || continue
+    case "$ts" in ''|*[!0-9]*) continue ;; esac
+    if [ "$ts" -gt "$best_ts" ]; then best_ts="$ts"; base="$mb"; fi
+  done
+  [ -n "${base:-}" ] || return 0
+  # A merge-base equal to HEAD means HEAD is already contained in the base ref —
+  # nothing of this branch's own to scan.
+  [ "$base" = "$(git rev-parse HEAD 2>/dev/null)" ] && return 0
+
+  # --unified=0 keeps context lines out, so only genuinely added lines match. awk
+  # tracks the `+++ b/<path>` header and each hunk's new-side start line so every
+  # hit is reported as `file:line` — a bare diff line is not actionable.
+  out="$(git diff --unified=0 --no-color "$base"..HEAD 2>/dev/null | awk '
+    /^\+\+\+ / { f = substr($0, 7); next }
+    /^@@/      { match($0, /\+[0-9]+/); n = substr($0, RSTART + 1, RLENGTH - 1) + 0; next }
+    /^\+/      { line = substr($0, 2)
+                 if (line ~ /(TODO|FIXME|XXX|HACK)|\.(skip|only)\(|(^|[^A-Za-z0-9_])(xit|xdescribe|fit|fdescribe)\(|@pytest\.mark\.skip/)
+                   printf "  %s:%d: %s\n", f, n, substr(line, 1, 110)
+                 n++ }
+  ' | head -15)"
+  [ -n "$out" ] && printf '%s' "$out"
+}
+
 nudge() {
   # Emit a non-blocking PreToolUse reminder. permissionDecision "allow" is
   # required by the schema; additionalContext is shown to the agent beside the
-  # tool result. python3 builds the JSON so the message can't break quoting.
-  python3 -c '
-import json
+  # tool result. python3 builds the JSON so the message can't break quoting, and
+  # the marker list travels via the environment so diff text can't either.
+  DOTCLAUDE_LOOSE_ENDS="$(loose_ends)" python3 -c '
+import json, os
 msg = (
     "Verification check before this PR hands off (CLAUDE.md: \"Verify before you push or open a PR\"). "
     "Confirm you have run the checks relevant to your change on THIS branch'\''s current state and they pass:\n"
@@ -58,8 +110,18 @@ msg = (
     "If anything fails, fix it (or open the PR as a draft) before calling this done. "
     "Scope to your diff — this is a fast local check, not the full suite.\n"
     "Before this PR hands off, also confirm issue linkage: the PR body references the issue it resolves (\"Closes #N\"), and that issue is set to status:in-review. "
-    "If no issue tracks this work, create one (see the managing-work-with-issues skill) and link it."
+    "If no issue tracks this work, create one (see the managing-work-with-issues skill) and link it.\n"
+    "Finally, account for every finding (CLAUDE.md: \"Finish what you find\"). "
+    "Each bug, stale doc, or rough edge you hit this session is either fixed in this diff or has an issue number — there is no third bucket. "
+    "State the count in the PR body: N found, M fixed here, K filed. Anything you could fix now, fix now instead of filing it."
 )
+loose = os.environ.get("DOTCLAUDE_LOOSE_ENDS", "").strip()
+if loose:
+    msg += (
+        "\nThis branch ADDS the following deferred-work markers. For each one: fix it in this diff, "
+        "or say in the PR body why it stays (and file the issue it points at). Do not let it through unremarked.\n"
+        + loose
+    )
 print(json.dumps({
     "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
