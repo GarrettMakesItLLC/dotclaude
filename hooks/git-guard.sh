@@ -51,13 +51,23 @@ block() {
   exit 2
 }
 
-# Strip quoted spans ('...' and "...") before matching so a commit MESSAGE that
-# merely mentions --no-verify / .env / main can't trip the guards. Flags and
-# paths that actually matter are unquoted; only message/-m bodies are quoted.
-# (Trade-off: a deliberately quoted branch name could slip a force-push past —
-# acceptable, since this is a backstop and quoted branch names are rare while
-# quoted messages are universal.)
-scrubbed="$(printf '%s' "$cmd" | sed -E "s/'[^']*'/ /g; s/\"[^\"]*\"/ /g")"
+# Strip message bodies before matching so a commit MESSAGE that merely mentions
+# --no-verify / .env / main can't trip the guards. Flags and paths that actually
+# matter live outside them.
+#
+# Two carriers, both scrubbed:
+#   - quoted spans ('...' and "..."), which carry a `-m` message;
+#   - heredoc bodies (`git commit -F - <<'EOF' … EOF`), which carry a long one.
+# The heredoc case was missing, so a message that named `.env.production` — the
+# very thing rule 3 exists to describe — blocked its own fix. Both are message
+# text by construction: nothing that decides what a git command DOES can live
+# inside a heredoc body.
+#
+# (Trade-off, unchanged: a deliberately quoted branch name could slip a
+# force-push past — acceptable for a backstop, since quoted branch names are
+# rare while quoted messages are universal.)
+scrubbed="$(printf '%s' "$cmd" | perl -0777 -pe "s/<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1.*?^\2\$/ /gms" \
+  | sed -E "s/'[^']*'/ /g; s/\"[^\"]*\"/ /g")"
 
 # 0) Reckless recursive delete of a root / home / system / parent path. The one
 # non-git rule, so it runs before the git-only gate below. Matched against a
