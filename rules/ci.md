@@ -8,6 +8,17 @@ paths:
 
 # CI conventions (GitHub Actions)
 
+## Trigger events
+
+**Validation runs once per change, on the PR.** A `push` re-run against a sha a PR already validated pays twice for one answer.
+
+- **`pull_request` into any branch** — full validation. This is the gate.
+- **`push` to `main`** — full validation: the post-merge safety net, and it warms the cache for the next branch.
+- **`push` to `dev`** — no validation re-run; every commit arrived through a PR that ran the same jobs on the same sha. What a `dev` push *does* trigger is the **staging deploy**, which is a separate workflow.
+- **`push` to a release branch** — nothing beyond the PR that opened it, unless a release-only job (artifact build, migration dry-run) genuinely can't run on a feature PR.
+
+Deploy and release workflows are the exception to the concurrency rule below — they queue rather than cancel.
+
 ## Concurrency
 
 Every workflow gets a concurrency group:

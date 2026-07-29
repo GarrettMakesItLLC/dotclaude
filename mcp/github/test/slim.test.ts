@@ -267,4 +267,13 @@ describe("field helpers", () => {
     expect(actorLogins([{ login: "a" }, {}])).toEqual(["a"]);
     expect(actorLogins(undefined)).toEqual([]);
   });
+
+  // A projection is cosmetic. An endpoint answering 200 with an unexpected
+  // shape must not turn a write that already succeeded into a failure.
+  it("both tolerate a non-array payload instead of throwing", () => {
+    expect(labelNames({ number: 8 })).toEqual([]);
+    expect(labelNames("nope")).toEqual([]);
+    expect(actorLogins({ login: "a" })).toEqual([]);
+    expect(labelNames([null, { name: "a" }])).toEqual(["a"]);
+  });
 });

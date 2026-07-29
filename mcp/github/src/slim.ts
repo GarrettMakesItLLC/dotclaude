@@ -71,15 +71,23 @@ export interface RawBranch {
   commit?: { sha?: string } | null;
 }
 
-/** Label objects carry six fields for a name the caller already recognises. */
-export function labelNames(labels: (RawLabel | string)[] | null | undefined): string[] {
-  if (!labels) return [];
-  return labels.map((l) => (typeof l === "string" ? l : (l.name ?? ""))).filter(Boolean);
+/**
+ * Label objects carry six fields for a name the caller already recognises.
+ *
+ * Non-array input yields `[]` rather than throwing: a projection is cosmetic,
+ * and an endpoint answering 200 with an unexpected shape must not turn a write
+ * that already succeeded into a reported failure.
+ */
+export function labelNames(labels: unknown): string[] {
+  if (!Array.isArray(labels)) return [];
+  return labels
+    .map((l) => (typeof l === "string" ? l : ((l as RawLabel | null)?.name ?? "")))
+    .filter(Boolean);
 }
 
-export function actorLogins(actors: RawActor[] | null | undefined): string[] {
-  if (!actors) return [];
-  return actors.map((a) => a.login ?? "").filter(Boolean);
+export function actorLogins(actors: unknown): string[] {
+  if (!Array.isArray(actors)) return [];
+  return actors.map((a) => (a as RawActor | null)?.login ?? "").filter(Boolean);
 }
 
 /** Drop keys that are absent or empty so a projection stays as small as it reads. */
