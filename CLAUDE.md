@@ -56,7 +56,9 @@ A feature is one cohesive deliverable, not a v1 with pieces bolted on afterward.
 
 ## Verify before a handoff
 
-A push and a PR are handoffs — never make them on unverified work. Run typecheck + the tests your change touches, plus the build if you touched build-affecting code, and report the output.
+A push and a PR are handoffs — never make them on unverified work. Run typecheck + the tests your change touches, plus the build if you touched build-affecting code, and report the output. The tests your change *touches* — a full-suite run on a one-module diff is the waste, not the gate. When a swarm has the machine contended, wait for the queue; never skip the check to get ahead of it.
+
+**Waiting for CI is a sleep, not a poll.** Sleep the run's realistic duration in one block, then check once and back off if it's still pending. Every poll is a whole turn that re-reads the conversation to produce one tool call.
 
 Self-review and verify locally *before* opening the PR, then open it ready — not draft. **Never use CI as the debugging loop**: reproduce failures locally; manual triggers are for what genuinely can't run locally, not debug-by-rerun.
 
