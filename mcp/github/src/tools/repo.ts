@@ -9,6 +9,7 @@ import {
   resolveRepo,
 } from "../github.js";
 import { getChecksSummary } from "../checks.js";
+import { slimBranch, type RawBranch } from "../slim.js";
 
 interface Repository {
   name: string;
@@ -57,10 +58,10 @@ export function registerRepoTools(server: McpServer): void {
     async ({ repo, limit }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghPaginate(`/repos/${owner}/${name}/branches`, {
+        const data = await ghPaginate<RawBranch>(`/repos/${owner}/${name}/branches`, {
           limit,
         });
-        return jsonText(data);
+        return jsonText(data.map(slimBranch));
       } catch (err) {
         return errorResult(err);
       }

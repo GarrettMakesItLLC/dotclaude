@@ -331,12 +331,18 @@ export function listLimit(limit?: number): number {
   return Math.min(Math.floor(n), MAX_LIMIT);
 }
 
-/** Render a value as a single pretty-printed JSON text content block. */
+/**
+ * Render a value as a single JSON text content block.
+ *
+ * Compact, not indented: a tool result is re-read on every subsequent turn of
+ * the session, and indentation buys the model nothing on payloads already
+ * projected down to the fields it reads (see `slim.ts`).
+ */
 export function jsonText(value: unknown): {
   content: { type: "text"; text: string }[];
 } {
   return {
-    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+    content: [{ type: "text", text: JSON.stringify(value) }],
   };
 }
 
