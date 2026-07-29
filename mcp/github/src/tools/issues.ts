@@ -18,6 +18,7 @@ import {
   type IssueStatus,
 } from "../labels.js";
 import { setIssueStatus } from "../issue-status.js";
+import { labelNames, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";
 import {
   acquireClaimLock,
   ClaimConflictError,
@@ -93,7 +94,7 @@ export function registerIssueTools(server: McpServer): void {
             filter: (item) => !("pull_request" in item) || !item.pull_request,
           },
         );
-        return jsonText(issuesOnly);
+        return jsonText(issuesOnly.map((i) => slimIssue(i)));
       } catch (err) {
         return errorResult(err);
       }
@@ -112,8 +113,8 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, number }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(`/repos/${owner}/${name}/issues/${number}`);
-        return jsonText(data);
+        const data = await ghRequest<RawIssue>(`/repos/${owner}/${name}/issues/${number}`);
+        return jsonText(slimIssue(data, { body: true }));
       } catch (err) {
         return errorResult(err);
       }
@@ -135,11 +136,11 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, title, body, labels, assignees }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(`/repos/${owner}/${name}/issues`, {
+        const data = await ghRequest<RawIssue>(`/repos/${owner}/${name}/issues`, {
           method: "POST",
           body: { title, body, labels, assignees },
         });
-        return jsonText(data);
+        return jsonText(slimIssue(data));
       } catch (err) {
         return errorResult(err);
       }
@@ -165,11 +166,11 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, number, title, body, state, state_reason }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
+        const data = await ghRequest<RawIssue>(`/repos/${owner}/${name}/issues/${number}`, {
           method: "PATCH",
           body: { title, body, state, state_reason },
         });
-        return jsonText(data);
+        return jsonText(slimIssue(data));
       } catch (err) {
         return errorResult(err);
       }
@@ -189,11 +190,11 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, number, body }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(
+        const data = await ghRequest<{ id: number; html_url: string; created_at: string }>(
           `/repos/${owner}/${name}/issues/${number}/comments`,
           { method: "POST", body: { body } },
         );
-        return jsonText(data);
+        return jsonText(slimComment(data));
       } catch (err) {
         return errorResult(err);
       }
@@ -213,11 +214,11 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, number, labels }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(
+        const data = await ghRequest<RawLabel[]>(
           `/repos/${owner}/${name}/issues/${number}/labels`,
           { method: "PUT", body: { labels } },
         );
-        return jsonText(data);
+        return jsonText({ number, labels: labelNames(data) });
       } catch (err) {
         return errorResult(err);
       }
@@ -238,11 +239,11 @@ export function registerIssueTools(server: McpServer): void {
       try {
         const { owner, name } = await resolveRepo(repo);
         const resolved = await resolveAssignees(assignees);
-        const data = await ghRequest(
+        const data = await ghRequest<RawIssue>(
           `/repos/${owner}/${name}/issues/${number}/assignees`,
           { method: "POST", body: { assignees: resolved } },
         );
-        return jsonText(data);
+        return jsonText(slimIssue(data));
       } catch (err) {
         return errorResult(err);
       }
@@ -263,11 +264,11 @@ export function registerIssueTools(server: McpServer): void {
       try {
         const { owner, name } = await resolveRepo(repo);
         const resolved = await resolveAssignees(assignees);
-        const data = await ghRequest(
+        const data = await ghRequest<RawIssue>(
           `/repos/${owner}/${name}/issues/${number}/assignees`,
           { method: "DELETE", body: { assignees: resolved } },
         );
-        return jsonText(data);
+        return jsonText(slimIssue(data));
       } catch (err) {
         return errorResult(err);
       }
@@ -308,11 +309,11 @@ export function registerIssueTools(server: McpServer): void {
           .map((l) => l.name)
           .filter((n) => !n.startsWith("type:"));
         const next = [...kept, typeLabel(t)];
-        const data = await ghRequest(
+        const data = await ghRequest<RawLabel[]>(
           `/repos/${owner}/${name}/issues/${number}/labels`,
           { method: "PUT", body: { labels: next } },
         );
-        return jsonText(data);
+        return jsonText({ number, type, labels: labelNames(data) });
       } catch (err) {
         return errorResult(err);
       }
@@ -341,7 +342,7 @@ export function registerIssueTools(server: McpServer): void {
           `/repos/${owner}/${name}/issues/${number}/sub_issues`,
           { method: "POST", body: { sub_issue_id: child.id } },
         );
-        return jsonText(data);
+        return jsonText({ parent: number, sub_issue: sub_number, linked: true });
       } catch (err) {
         return errorResult(err);
       }
@@ -360,10 +361,10 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, number }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghPaginate(`/repos/${owner}/${name}/issues/${number}/sub_issues`, {
+        const data = await ghPaginate<RawIssue>(`/repos/${owner}/${name}/issues/${number}/sub_issues`, {
           limit: 1000,
         });
-        return jsonText(data);
+        return jsonText(data.map((i) => slimIssue(i)));
       } catch (err) {
         return errorResult(err);
       }
@@ -508,11 +509,11 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, number, milestone }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
+        const data = await ghRequest<RawIssue>(`/repos/${owner}/${name}/issues/${number}`, {
           method: "PATCH",
           body: { milestone },
         });
-        return jsonText(data);
+        return jsonText(slimIssue(data));
       } catch (err) {
         return errorResult(err);
       }
@@ -625,12 +626,11 @@ export function registerIssueTools(server: McpServer): void {
           }
         }
 
-        const final = await ghRequest<Record<string, unknown>>(
+        const final = await ghRequest<RawIssue>(
           `/repos/${owner}/${name}/issues/${number}`,
         );
-        return jsonText(
-          warnings.length ? { ...final, _warnings: warnings } : final,
-        );
+        const slim = slimIssue(final);
+        return jsonText(warnings.length ? { ...slim, _warnings: warnings } : slim);
       } catch (err) {
         return errorResult(err);
       }

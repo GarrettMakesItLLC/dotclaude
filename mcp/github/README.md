@@ -39,13 +39,31 @@ omitted, the server resolves a default once (cached) by running
 directory. If that fails and no `repo` was supplied, the tool returns a clear
 error asking you to pass `repo` explicitly.
 
+## Response shape
+
+Every tool returns a projection (`src/slim.ts`), never the raw REST payload. A
+tool result stays in the model's context for the rest of the session and is
+re-read on every subsequent turn, so a raw issue (~6KB) or PR (~20KB) is a
+recurring cost paid for fields nothing reads — nested actor objects, full label
+objects for names already in hand, and a dozen `*_url` variants. `issue_list` at
+its default limit of 30 goes from ~60k tokens to ~3k.
+
+The contract:
+
+- Actors collapse to logins, labels to names, milestones to titles.
+- Absent and empty fields are omitted rather than emitted as `null`/`[]`.
+- **List tools omit `body`; single-object views (`issue_view`, `pr_view`)
+  include it.** Fetch the view when you need the body.
+- **Writes acknowledge what changed** — a number, a URL, the mutated field —
+  instead of echoing the whole object back.
+- JSON is serialized compact; indentation buys nothing on a projected payload.
+
 ## Tools
 
 Pull requests:
 
 - `pr_list` — list PRs (`state`, `base`, `head`, `limit`).
-- `pr_view` — view one PR (number, title, state, draft, mergeable,
-  mergeable_state, head ref/sha, base ref, html_url, body).
+- `pr_view` — view one PR, including `body`.
 - `pr_create` — create a PR (`title`, `head`, `base`, `body?`, `draft?`).
 - `pr_update` — update a PR (`title?`, `body?`, `base?`, `state?`).
 - `pr_comment` — comment on a PR.

@@ -10,6 +10,7 @@ import {
 } from "../github.js";
 import { getChecksSummary } from "../checks.js";
 import { setIssueStatus } from "../issue-status.js";
+import { actorLogins, slimComment, slimPr, type RawPull } from "../slim.js";
 
 interface PullRequest {
   number: number;
@@ -49,11 +50,11 @@ export function registerPrTools(server: McpServer): void {
     async ({ repo, state, base, head, limit }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghPaginate(`/repos/${owner}/${name}/pulls`, {
+        const data = await ghPaginate<RawPull>(`/repos/${owner}/${name}/pulls`, {
           query: { state, base, head },
           limit,
         });
-        return jsonText(data);
+        return jsonText(data.map((p) => slimPr(p)));
       } catch (err) {
         return errorResult(err);
       }
@@ -72,18 +73,7 @@ export function registerPrTools(server: McpServer): void {
     async ({ repo, number }) => {
       try {
         const pr = await fetchPr(repo, number);
-        return jsonText({
-          number: pr.number,
-          title: pr.title,
-          state: pr.state,
-          draft: pr.draft,
-          mergeable: pr.mergeable,
-          mergeable_state: pr.mergeable_state,
-          head: { ref: pr.head.ref, sha: pr.head.sha },
-          base: { ref: pr.base.ref },
-          html_url: pr.html_url,
-          body: pr.body,
-        });
+        return jsonText(slimPr(pr, { body: true }));
       } catch (err) {
         return errorResult(err);
       }
@@ -106,11 +96,11 @@ export function registerPrTools(server: McpServer): void {
     async ({ repo, title, head, base, body, draft }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(`/repos/${owner}/${name}/pulls`, {
+        const data = await ghRequest<RawPull>(`/repos/${owner}/${name}/pulls`, {
           method: "POST",
           body: { title, head, base, body, draft },
         });
-        return jsonText(data);
+        return jsonText(slimPr(data));
       } catch (err) {
         return errorResult(err);
       }
@@ -133,11 +123,11 @@ export function registerPrTools(server: McpServer): void {
     async ({ repo, number, title, body, base, state }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(`/repos/${owner}/${name}/pulls/${number}`, {
+        const data = await ghRequest<RawPull>(`/repos/${owner}/${name}/pulls/${number}`, {
           method: "PATCH",
           body: { title, body, base, state },
         });
-        return jsonText(data);
+        return jsonText(slimPr(data));
       } catch (err) {
         return errorResult(err);
       }
@@ -157,11 +147,11 @@ export function registerPrTools(server: McpServer): void {
     async ({ repo, number, body }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(
+        const data = await ghRequest<{ id: number; html_url: string; created_at: string }>(
           `/repos/${owner}/${name}/issues/${number}/comments`,
           { method: "POST", body: { body } },
         );
-        return jsonText(data);
+        return jsonText(slimComment(data));
       } catch (err) {
         return errorResult(err);
       }
@@ -188,11 +178,11 @@ export function registerPrTools(server: McpServer): void {
     async ({ repo, number, reviewers, team_reviewers }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest(
+        const data = await ghRequest<RawPull>(
           `/repos/${owner}/${name}/pulls/${number}/requested_reviewers`,
           { method: "POST", body: { reviewers, team_reviewers } },
         );
-        return jsonText(data);
+        return jsonText({ number, requested_reviewers: actorLogins(data.requested_reviewers) });
       } catch (err) {
         return errorResult(err);
       }
@@ -233,7 +223,7 @@ export function registerPrTools(server: McpServer): void {
             ? `${base_}\n\n${closesRef}`
             : closesRef;
 
-        const pr = await ghRequest<Record<string, unknown>>(`/repos/${owner}/${name}/pulls`, {
+        const pr = await ghRequest<RawPull>(`/repos/${owner}/${name}/pulls`, {
           method: "POST",
           body: { title, head, base, body: finalBody, draft },
         });
@@ -248,7 +238,8 @@ export function registerPrTools(server: McpServer): void {
           warnings.push(`issue #${issue_number} not moved to in-review: ${msg}`);
         }
 
-        return jsonText(warnings.length ? { ...pr, _warnings: warnings } : pr);
+        const slim = slimPr(pr);
+        return jsonText(warnings.length ? { ...slim, _warnings: warnings } : slim);
       } catch (err) {
         return errorResult(err);
       }

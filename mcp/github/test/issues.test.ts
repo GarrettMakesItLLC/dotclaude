@@ -126,8 +126,8 @@ describe("issue_add_assignees", () => {
     const res = await handler({ repo: "octo/repo", number: 5, assignees: ["@me"] });
 
     expect(res.isError).toBeFalsy();
-    const issue = JSON.parse(res.content[0].text) as { assignees: { login: string }[] };
-    expect(issue.assignees[0].login).toBe("GarrettMakesIt");
+    const issue = JSON.parse(res.content[0].text) as { assignees: string[] };
+    expect(issue.assignees).toEqual(["GarrettMakesIt"]);
   });
 });
 
