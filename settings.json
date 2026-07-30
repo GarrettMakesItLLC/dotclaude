@@ -80,6 +80,15 @@
             "command": "\"$HOME\"/.claude/hooks/worktree-bootstrap.sh"
           }
         ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/tool-gap-reporter.sh"
+          }
+        ]
       }
     ]
   },

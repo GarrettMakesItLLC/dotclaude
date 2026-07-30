@@ -49,7 +49,7 @@ SHARED_DIRS=(
 SHARED_SKILLS=(
   "finishing-work"              # my personal finish-line procedure (definition of done, PR body, cleanup)
   "managing-work-with-issues"   # cross-machine claim protocol, label taxonomy, issue lifecycle
-  "extending-the-github-mcp"    # self-healing: unblock, file, and grow the github-rest MCP on capability gaps
+  "closing-tool-gaps"           # self-healing: unblock, file, and close a tool gap in any MCP, hook, or skill
   "operating-production"        # incident/rollback posture, health checks, alerting for deployed services
   "aligning-repo-config"        # re-tier a repo's CLAUDE.md / .claude config against this global config
   "running-an-audit"            # audit/investigation method + per-realm checklists in references/
