@@ -124,6 +124,9 @@ Repo:
 - `repo_get` — repo metadata (name, full_name, default_branch, private,
   html_url, description).
 - `branch_list` — list branches.
+- `repo_file_read` — read a file from a repo without checking it out (decoded
+  text + path/sha/size/line count, or a directory's entry names). Windows to
+  500 lines by default; page with `offset`/`limit`.
 - `ref_status` — merged status + check-runs summary for a branch or sha.
 
 The list tools (`pr_list`, `issue_list`, `branch_list`) return up to `limit`
