@@ -60,6 +60,12 @@ check 2 'rm -rf -- /'
 check 0 'git commit -m "fix: load .env before init"'
 check 0 'git commit -am "chore: add .env to gitignore"'
 check 0 'git commit -m "stop using --no-verify in scripts"'
+# A -n belonging to another command in the same line is not commit's -n.
+check 0 'grep -n labels_audit README.md && git commit -q -F -'
+check 0 'git add -A; git commit -m "x"; grep -rn TODO src'
+check 0 'git log --oneline -n 5'
+# ...but commit's own still blocks, wherever it sits in the pipeline.
+check 2 'grep -n x README.md && git commit -n -m "x"'
 check 0 'git commit -m "force-push to main is now blocked"'
 check 0 'git commit -m "document core.hooksPath bypass"'
 
