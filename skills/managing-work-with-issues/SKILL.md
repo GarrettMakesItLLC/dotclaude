@@ -35,6 +35,7 @@ GitHub's auto-close needs the keyword before **each** number: `Closes #1, closes
 - **status:** `backlog` → `ready` → `in-progress` → `in-review`; `blocked` or `waiting` from any state. Exactly one at a time.
 - **type:** `bug` / `feature` / `task`.
 - **source:** `owner` / `user-feedback` — who reported it through an app's in-app reporter, which files into that app's own repo. `musclebuddy` / `redthread` / `adventureos` name the app instead, for reports cross-filed somewhere else. Feedback only.
+- **epic:** structural rather than a state, and orthogonal to the three above — the issue is an index of sub-issues.
 
 An app may carry labels of its own outside this taxonomy (musclebuddy's `beta-feedback`, `idea`). They aren't drift — leave them alone.
 
@@ -55,6 +56,21 @@ Before applying `blocked`, try to resolve it. A missing env var you can fetch fr
 Clear title; body with **what + why + a `file:line` pointer**; type set; milestone and relationships where known. **No assignee at creation** — unassigned until claimed. `status:ready` when fully scoped, `blocked` only when Garrett is genuinely required.
 
 A follow-up issue is **only** for a finding genuinely out of scope, or a blocker needing a human decision that halts autonomous progress. Filing a follow-up for work you could finish now is a failure, not tidiness.
+
+## Epics and milestones — the two axes
+
+Every issue that isn't a standalone one-off answers two questions, and they are different questions:
+
+- **Parent epic — "what is this part of?"** A native sub-issue relationship (`issue_open` with `parent`, or `issue_add_sub_issue`). The epic is an **index, not work**: labelled `epic`, its body links its children and carries the scope statement, and nothing is ever implemented on it directly.
+- **Milestone — "which push does this ship in?"** Found-or-created by exact title (`issue_open` with `milestone`, or `milestone_ensure`). Titles are themed and dated: `Feature Gaps — surface & wire (2026-06)`, `Pre-Launch Audit (2026-07-09)`.
+
+An issue with a milestone and no parent is orphaned work; an issue with a parent and no milestone is unscheduled work. Both are how a backlog becomes unreadable.
+
+Close an epic when its children are closed — an **exhausted epic** left open reads as live work, and the next session re-derives its contents. Never file a child under a closed parent.
+
+Audit findings land on exactly this shape: the audit epic is the findings index, one child per finding, all on the dated milestone — see **running-an-audit**.
+
+Where a repo carries an issue-audit script (MuscleBuddy's `npm run issues:audit`), **it is the arbiter, not this document** — it reads the live tracker and exits non-zero on any violation. Its rule names are the checklist: `missing-parent`, `missing-milestone`, `missing-status`, `missing-type`, `closed-parent`, `unlabelled-epic`, `stale-in-progress`, `blocked-without-owner-action`, `waiting-without-dependency`, `exhausted-epic`, `deprecated-label`. Run it before handing off in any repo that has it.
 
 ## Reported feedback (`source:*`)
 
