@@ -11,8 +11,9 @@
 # claimed late — or not at all — gets started twice. The lock itself is the
 # remote `issue-<N>-*` branch ref that `issue_claim` creates atomically; this
 # hook enforces that an agent editing on such a branch actually went through
-# `issue_claim` (issue assigned AND labeled `status:in-progress`) rather than
-# creating the branch by hand.
+# `issue_claim` (issue assigned AND labeled `status:in-progress` — or
+# `status:in-review`, the same claim after its PR opened, so review fixups on the
+# claimed branch stay editable) rather than creating the branch by hand.
 #
 # SCOPE: only branches whose name encodes an issue (`issue-<N>-...`). Scratch
 # branches, feature branches, detached HEAD, and non-GitHub repos are untouched
@@ -142,7 +143,8 @@ if not isinstance(data, dict):
     sys.exit(0)
 assignees = data.get("assignees") or ([data["assignee"]] if data.get("assignee") else [])
 labels = [l.get("name", "") if isinstance(l, dict) else str(l) for l in (data.get("labels") or [])]
-print("claimed" if assignees and "status:in-progress" in labels else "unclaimed")
+held = {"status:in-progress", "status:in-review"}.intersection(labels)
+print("claimed" if assignees and held else "unclaimed")
 ' "${CLAIM_GUARD_API:-https://api.github.com}" "$slug" "$issue" 2>/dev/null)"
 
 if [ "$verdict" = "claimed" ]; then
@@ -155,7 +157,8 @@ fi
 
 echo "⛔ dotclaude claim-guard blocked this edit." >&2
 echo "Reason: you are on branch '$branch', which claims issue #$issue of $slug," >&2
-echo "  but that issue is not assigned with status:in-progress — it was never claimed." >&2
+echo "  but that issue is not assigned with status:in-progress or status:in-review —" >&2
+echo "  it was never claimed." >&2
 echo "  Two machines run agents against this repo; an unclaimed issue is duplicate work" >&2
 echo "  waiting to happen. The remote branch ref is the lock, and issue_claim takes it." >&2
 echo "Fix: claim it, then work on the branch the claim hands back:" >&2

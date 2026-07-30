@@ -17,13 +17,22 @@ if common="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>
 fi
 fail=0
 
+# Everything bootstrap links whole, read from bootstrap.sh itself — a hardcoded
+# copy here leaves the fixture reporting drift the moment a shared file or
+# directory is added, which reads as a failure of the case under test.
+shared_names() {
+  awk '/^SHARED_(FILES|DIRS)=\(/ {inside = 1; next} inside && /^\)/ {inside = 0} inside' \
+    "$REPO/bootstrap.sh" | sed -n 's/^[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
 # A fake HOME whose ~/.claude is linked to the real repo, minus whatever the
 # caller asks to leave unlinked.
 make_home() {
   local skip="${1:-}" h name
   h="$(mktemp -d)"
   mkdir -p "$h/.claude/skills"
-  for name in CLAUDE.md settings.json keybindings.json rules hooks commands; do
+  for name in $(shared_names); do
+    [ -e "$REPO/$name" ] || continue
     ln -s "$REPO/$name" "$h/.claude/$name"
   done
   for name in "$REPO"/skills/*; do

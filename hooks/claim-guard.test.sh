@@ -36,6 +36,9 @@ JSON
 cat > "$API_ROOT/7" <<'JSON'
 {"number":7,"assignees":[{"login":"GarrettMakesIt"}],"labels":[{"name":"status:ready"}]}
 JSON
+cat > "$API_ROOT/8" <<'JSON'
+{"number":8,"assignees":[{"login":"GarrettMakesIt"}],"labels":[{"name":"status:in-review"},{"name":"type:feature"}]}
+JSON
 
 # -u so the "Serving HTTP on ... port N" banner is flushed into the log we poll.
 python3 -u -m http.server 0 --directory "$TMP/api" > "$TMP/srv.log" 2>&1 &
@@ -94,6 +97,11 @@ repo "$TMP/unclaimed" "issue-6-do-a-thing" "git@github.com:octo/repo.git"
 check 2 Edit         file_path     "$TMP/unclaimed/src/app.ts"
 check 2 Write        file_path     "$TMP/unclaimed/a/b/c/deep.ts"           # missing ancestors
 check 2 NotebookEdit notebook_path "$TMP/unclaimed/src/nb.ipynb"
+
+# --- status:in-review -> allow: the same claim after its PR opened, so a review
+# fixup on the claimed branch is still editable
+repo "$TMP/inreview" "issue-8-in-review" "https://github.com/octo/repo.git"
+check 0 Edit file_path "$TMP/inreview/src/app.ts"
 
 # --- assigned but NOT status:in-progress -> block (assignee alone is not a claim)
 repo "$TMP/halfclaimed" "issue-7-half" "https://github.com/octo/repo.git"
