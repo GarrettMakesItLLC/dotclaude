@@ -1,7 +1,7 @@
 ---
 name: managing-work-with-issues
 description: Use when starting, creating, or finishing any tracked unit of work in a GitHub repo — claiming an issue before you begin, filing a well-formed issue during investigation or as a follow-up, triaging app user-feedback, or moving an issue through its status lifecycle. Carries the cross-machine claim protocol that prevents duplicate work.
-allowed-tools: mcp__github-rest__issue_claim, mcp__github-rest__work_in_flight, mcp__github-rest__claim_release, mcp__github-rest__issue_open, mcp__github-rest__issue_list, mcp__github-rest__issue_view, mcp__github-rest__issue_update, mcp__github-rest__issue_set_status, mcp__github-rest__issue_set_type, mcp__github-rest__issue_set_labels, mcp__github-rest__issue_set_milestone, mcp__github-rest__issue_add_sub_issue, mcp__github-rest__issue_comment, mcp__github-rest__labels_ensure, mcp__github-rest__milestone_ensure, Bash(git fetch:*), Bash(git checkout:*)
+allowed-tools: mcp__github-rest__issue_claim, mcp__github-rest__work_in_flight, mcp__github-rest__claim_release, mcp__github-rest__issue_open, mcp__github-rest__issue_list, mcp__github-rest__issue_view, mcp__github-rest__issue_update, mcp__github-rest__issue_set_status, mcp__github-rest__issue_set_type, mcp__github-rest__issue_set_labels, mcp__github-rest__issue_set_milestone, mcp__github-rest__issue_add_sub_issue, mcp__github-rest__issue_comment, mcp__github-rest__labels_ensure, mcp__github-rest__labels_audit, mcp__github-rest__label_list, mcp__github-rest__label_update, mcp__github-rest__label_delete, mcp__github-rest__milestone_ensure, Bash(git fetch:*), Bash(git checkout:*)
 ---
 
 # Managing work with GitHub issues
@@ -34,12 +34,14 @@ GitHub's auto-close needs the keyword before **each** number: `Closes #1, closes
 
 - **status:** `backlog` → `ready` → `in-progress` → `in-review`; `blocked` or `waiting` from any state. Exactly one at a time.
 - **type:** `bug` / `feature` / `task`.
-- **source:** `owner` / `user-feedback` — who reported it through an app's in-app reporter, which files into that app's own repo. `musclebuddy` / `redthread` / `adventureos` name the app instead, for reports cross-filed somewhere else. Feedback only.
-- **epic:** structural rather than a state, and orthogonal to the three above — the issue is an index of sub-issues.
+- **source:** where the report came from. `owner` / `user-feedback` arrived through an app's in-app reporter; `musclebuddy` / `redthread` / `adventureos` name the app instead, for reports cross-filed somewhere else; `agent` and `code-review` are internal provenance — an audit or sweep found it, or a review did. **`owner`, `agent` and `code-review` are trusted**: they carry their evidence, so their defects start `ready` rather than waiting to be verified.
+- **markers:** orthogonal to all three above, and to each other. `epic` — an index of sub-issues, never worked directly. `launch-blocker` — must clear before public launch.
 
-An app may carry labels of its own outside this taxonomy (musclebuddy's `beta-feedback`, `idea`). They aren't drift — leave them alone.
+An app may carry axes of its own outside this taxonomy (`area:*`, `module:*`, musclebuddy's `beta-feedback` / `idea`). They aren't drift — `labels_audit` lists them as unrecognized for review, not for deletion.
 
-Missing labels in a repo: provision the set once with `labels_ensure`. New repos also want the issue/PR templates from `templates/` copied into `.github/`.
+**GitHub's stock labels are not part of the taxonomy.** `bug`, `enhancement` and `documentation` duplicate an axis at the identical color; `labels_ensure` retitles them as deprecated where they exist but never creates them, because they are still attached to closed issues and deleting a label erases it from that history. `good first issue`, `help wanted`, `invalid` and `question` have no place in a solo tracker — `labels_audit` reports them, `label_delete` removes them.
+
+Provision a repo once with `labels_ensure`, then check it with `labels_audit`. `label_list` shows usage counts, and `label_update` renames a legacy label into the taxonomy without losing the issues that carry it. New repos also want the issue/PR templates from `templates/` copied into `.github/`.
 
 ### `blocked` vs `waiting` vs `backlog`
 

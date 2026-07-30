@@ -116,8 +116,21 @@ Claims:
 
 Labels:
 
-- `labels_ensure` — idempotently provision the standard `status:*` / `type:*`
-  / `source:*` label taxonomy plus the structural `epic` label into a repo.
+- `labels_ensure` — idempotently provision the canonical taxonomy (`status:*`,
+  `type:*`, `source:*`, and the markers `epic` / `launch-blocker`) into a repo,
+  and retitle GitHub's colliding stock labels (`bug`, `enhancement`,
+  `documentation`) as deprecated where they already exist.
+- `labels_audit` — read-only drift report: missing canonical labels, stock
+  labels not yet retitled, removable GitHub defaults still present, and labels
+  the taxonomy doesn't recognize (per-repo `area:*`/`module:*` axes land here
+  and are fine).
+- `label_list` — every label with color, description, and how many issues carry
+  it.
+- `label_update` — rename, recolor, or redescribe. A rename carries the label
+  across every issue that has it, so a legacy label folds into the taxonomy
+  without losing history.
+- `label_delete` — delete, reporting the issue count it was attached to.
+  Refuses on a canonical label without `force`.
 
 Repo:
 
