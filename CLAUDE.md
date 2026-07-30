@@ -36,7 +36,7 @@ GitHub Issues are the tracker. The lifecycle is in the **`managing-work-with-iss
 
 - **Claim before you touch anything** (`issue_claim`). It takes a remote branch ref as a lock, so a claim held by my other machine fails loudly instead of duplicating work. If the claim fails, pick different work.
 - Check `work_in_flight` before selecting an issue — local worktrees on my other machine are invisible; pushed refs are not.
-- App user-feedback is filed `status:blocked` and never auto-started — verify first.
+- Third-party app feedback is filed `status:blocked` and never auto-started — I verify it first. My own reports (`source:owner`) are already verified and start `ready`.
 - Creating issues in my repos is pre-approved.
 
 ## Execution

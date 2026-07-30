@@ -18,7 +18,7 @@ export type IssueStatus = (typeof ISSUE_STATUSES)[number];
 export const ISSUE_TYPES = ["bug", "feature", "task"] as const;
 export type IssueType = (typeof ISSUE_TYPES)[number];
 
-export const ISSUE_SOURCES = ["musclebuddy", "redthread", "adventureos"] as const;
+export const ISSUE_SOURCES = ["owner", "musclebuddy", "redthread", "adventureos"] as const;
 export type IssueSource = (typeof ISSUE_SOURCES)[number];
 
 /**
@@ -43,6 +43,7 @@ const TYPE_STYLES: Record<IssueType, LabelStyle> = {
 };
 
 const SOURCE_STYLES: Record<IssueSource, LabelStyle> = {
+  owner: { color: "fef2c0", description: "Reported by the owner through an app's feedback flow" },
   musclebuddy: { color: "5319e7", description: "Originated from MuscleBuddy user feedback" },
   redthread: { color: "e99695", description: "Originated from RedThread user feedback" },
   adventureos: { color: "0052cc", description: "Originated from AdventureOS user feedback" },
