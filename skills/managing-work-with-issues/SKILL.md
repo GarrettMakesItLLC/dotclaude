@@ -32,21 +32,37 @@ GitHub's auto-close needs the keyword before **each** number: `Closes #1, closes
 
 ## Taxonomy
 
-- **status:** `backlog` → `ready` → `in-progress` → `in-review`; `blocked` from any state. Exactly one at a time.
+- **status:** `backlog` → `ready` → `in-progress` → `in-review`; `blocked` or `waiting` from any state. Exactly one at a time.
 - **type:** `bug` / `feature` / `task`.
-- **source:** `musclebuddy` / `redthread` / `adventureos` — origin of user-reported feedback only.
+- **source:** `owner` / `musclebuddy` / `redthread` / `adventureos` — origin of reported feedback only. `owner` is Garrett reporting through an app's own feedback flow.
 
 Missing labels in a repo: provision the set once with `labels_ensure`. New repos also want the issue/PR templates from `templates/` copied into `.github/`.
 
+### `blocked` vs `waiting` vs `backlog`
+
+These three get conflated, and the cost is real: agents skip a `blocked` queue wholesale, so an over-applied `blocked` hides startable work.
+
+- **`blocked` means it needs Garrett** — a decision only he can make, a credential only he can mint, an asset only he can author, or a dashboard only he can see. Nothing else. Every `blocked` issue carries a **`## ⛔ Owner action required`** section: a checklist of the literal steps, an estimate, and — where there is a defensible default — a recommendation he can just say yes to. "Blocked on the owner" without those steps is an unfinished issue.
+- **`waiting` means it depends on another issue**, not a person. It carries a **`## ⏳ Waiting on #N`** section naming the dependency and stating plainly that nothing is needed from Garrett. An agent seeing `waiting` should check whether the dependency has landed and re-label to `ready` if so.
+- **`backlog` means nothing is outstanding at all** — it is scoped and startable, just not prioritised.
+
+Before applying `blocked`, try to resolve it. A missing env var you can fetch from Railway/Vercel, a fact you can grep for, a bug you can reproduce — those are work, not blockers. Only what genuinely requires Garrett's hands or judgement earns the label.
+
 ## Filing an issue
 
-Clear title; body with **what + why + a `file:line` pointer**; type set; milestone and relationships where known. **No assignee at creation** — unassigned until claimed. `status:ready` when fully scoped, `blocked` only when a decision or fact is genuinely outstanding.
+Clear title; body with **what + why + a `file:line` pointer**; type set; milestone and relationships where known. **No assignee at creation** — unassigned until claimed. `status:ready` when fully scoped, `blocked` only when Garrett is genuinely required.
 
 A follow-up issue is **only** for a finding genuinely out of scope, or a blocker needing a human decision that halts autonomous progress. Filing a follow-up for work you could finish now is a failure, not tidiness.
 
-## User-reported feedback (musclebuddy / redthread / adventureos)
+## Reported feedback (owner / musclebuddy / redthread / adventureos)
 
-Files with matching `type:*` + `source:*` and **`status:blocked`**, never `ready`. Garrett verifies reports before implementation and flips them to `ready` himself — agents never auto-start one.
+Files with matching `type:*` + `source:*`. The status depends on **who reported it and whether an agent can verify it**:
+
+- **Garrett's own defect reports → `status:ready`.** He is the primary reporter, and his account of running software settles the question of whether it happens. Reproduce it, then fix it. `source:owner` marks these.
+- **A third party's defect report → `status:blocked`.** One person's account of what they saw, unverifiable from here, and building against it confidently builds the wrong thing. It waits for Garrett to reproduce.
+- **Any idea or feature request → `status:blocked`, whoever filed it.** These need his intent before they are built, and he develops them *with* an agent rather than receiving a finished guess.
+
+The in-app reporter applies this itself (`apps/server/src/lib/bug-report-github.ts`), so the label that arrives is already correct — do not re-derive it by hand. `issue_open` encodes the same defaults: pass `source` and `type` and the status follows.
 
 ## Tooling
 
