@@ -225,7 +225,50 @@ describe("labels_audit", () => {
     expect(out.unrecognized).toEqual(["area:web"]);
     expect(out.clean).toBe(false);
   });
+
+  it("reports a per-repo label wearing a canonical label's color, and keeps it out of clean", async () => {
+    const { ISSUE_LABELS } = await import("../src/labels.js");
+    const ready = ISSUE_LABELS.find((l) => l.name === "status:ready");
+    if (!ready) throw new Error("status:ready missing from the taxonomy");
+
+    fetchMock.mockImplementation(async (url: string) => {
+      if (!url.includes("/labels")) return makeResponse({ status: 500 });
+      return makeResponse({
+        status: 200,
+        body: [
+          ...ISSUE_LABELS.map((l) => ({ name: l.name, color: l.color, description: l.description })),
+          ...DEPRECATED_LABELS_FIXTURE,
+          // Two local labels squatting one canonical color, and one that is fine.
+          { name: "quick-win", color: ready.color, description: "local" },
+          { name: "seo", color: ready.color.toUpperCase(), description: "local, cased differently" },
+          { name: "area:web", color: "abcdef", description: "local, no clash" },
+        ],
+      });
+    });
+
+    const handler = await getHandler("labels_audit");
+    const res = await handler({ repo: "octo/repo" });
+
+    const out = JSON.parse(res.content[0].text) as {
+      missing: string[];
+      color_collisions: { label: string; color: string; also_used_by: string[] }[];
+      clean: boolean;
+    };
+    expect(out.missing).toEqual([]);
+    expect(out.color_collisions).toEqual([
+      { label: "status:ready", color: ready.color, also_used_by: ["quick-win", "seo"] },
+    ]);
+    // A local color choice is the repo's call, so it does not make the audit dirty.
+    expect(out.clean).toBe(true);
+  });
 });
+
+/** The deprecated labels already retitled, so they don't skew a collision fixture. */
+const DEPRECATED_LABELS_FIXTURE = [
+  { name: "bug", color: "ededed", description: "DEPRECATED historical label — use type:bug on new work" },
+  { name: "enhancement", color: "ededed", description: "DEPRECATED historical label — use type:feature on new work" },
+  { name: "documentation", color: "ededed", description: "DEPRECATED historical label — use type:task on new work" },
+];
 
 describe("taxonomy", () => {
   it("provisions exactly one label per status, type, source and marker value", async () => {

@@ -95,8 +95,13 @@ if printf '%s' "$scrubbed" | grep -Eiq -- '-c[[:space:]=]*core\.hookspath'; then
   block "git -c core.hooksPath=... disables hooks (same effect as --no-verify). Forbidden — fix the hook and retry."
 fi
 # (push -n is --dry-run, harmless — only commit's -n means --no-verify.)
-if printf '%s' "$scrubbed" | grep -Eq 'git[[:space:]]+commit([[:space:]]|$)' \
-   && printf '%s' "$scrubbed" | grep -Eq '[[:space:]]-[a-zA-Z]*n[a-zA-Z]*([[:space:]]|$)'; then
+# Scan only `git commit`'s OWN arguments, up to the next command separator: a
+# `-n` anywhere else in a compound command (`grep -n … && git commit …`) is not
+# this flag, and blocking on it makes the guard something to work around.
+commit_args="$(printf '%s' "$scrubbed" \
+  | perl -0777 -ne 'while (/git\s+commit((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)/gs) { print "$1\n" }')"
+if [ -n "$commit_args" ] \
+   && printf '%s' "$commit_args" | grep -Eq '(^|[[:space:]])-[a-zA-Z]*n[a-zA-Z]*([[:space:]]|$)'; then
   block "git commit -n bypasses hooks (short for --no-verify). Forbidden — fix the hook and retry."
 fi
 

@@ -233,12 +233,29 @@ export function registerLabelTools(server: McpServer): void {
         const removable = REMOVABLE_DEFAULT_LABELS.filter((n) => present.has(n));
         const unrecognized = raw.map((l) => l.name).filter((n) => !isKnownLabel(n));
 
+        // A per-repo label wearing a canonical color defeats the point of the
+        // color. The taxonomy cannot own per-repo palettes, so this is reported
+        // for the repo to resolve and deliberately does not affect `clean`.
+        const byColor = new Map<string, string[]>();
+        for (const l of raw) {
+          const key = l.color.toLowerCase();
+          byColor.set(key, [...(byColor.get(key) ?? []), l.name]);
+        }
+        const canonical = new Set(ISSUE_LABELS.map((l) => l.name));
+        const collisions = ISSUE_LABELS.flatMap((l) => {
+          const others = (byColor.get(l.color.toLowerCase()) ?? []).filter(
+            (n) => n !== l.name && !canonical.has(n),
+          );
+          return others.length ? [{ label: l.name, color: l.color, also_used_by: others }] : [];
+        });
+
         return jsonText({
           repo: `${owner}/${name}`,
           missing,
           deprecated_present: deprecatedPresent,
           removable_defaults: removable,
           unrecognized,
+          color_collisions: collisions,
           clean: missing.length === 0 && deprecatedPresent.length === 0 && removable.length === 0,
         });
       } catch (err) {
