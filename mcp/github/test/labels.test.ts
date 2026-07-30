@@ -61,7 +61,7 @@ describe("labels_ensure", () => {
 
     expect(res.isError).toBeFalsy();
     const summary = JSON.parse(res.content[0].text) as { created: number; updated: number };
-    expect(summary.created + summary.updated).toBe(13);
+    expect(summary.created + summary.updated).toBe(14);
     expect(summary.updated).toBeGreaterThanOrEqual(1);
   });
 });

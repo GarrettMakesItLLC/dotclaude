@@ -565,8 +565,10 @@ export function registerIssueTools(server: McpServer): void {
           .enum(ISSUE_SOURCES)
           .optional()
           .describe(
-            "Feedback source, if this issue originated from user feedback. `owner` marks the owner's " +
-              "own reports — trusted, so his defects start `ready` instead of awaiting verification.",
+            "Where the report came from, if it is feedback. `owner` / `user-feedback` are how it " +
+              "arrived — an app's in-app reporter, filed in that app's own repo. The per-app values " +
+              "name which app, for reports cross-filed elsewhere. `owner` is trusted, so his defects " +
+              "start `ready` instead of awaiting verification.",
           ),
         milestone: z
           .string()

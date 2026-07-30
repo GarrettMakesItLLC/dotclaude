@@ -34,7 +34,9 @@ GitHub's auto-close needs the keyword before **each** number: `Closes #1, closes
 
 - **status:** `backlog` → `ready` → `in-progress` → `in-review`; `blocked` or `waiting` from any state. Exactly one at a time.
 - **type:** `bug` / `feature` / `task`.
-- **source:** `owner` / `musclebuddy` / `redthread` / `adventureos` — origin of reported feedback only. `owner` is Garrett reporting through an app's own feedback flow.
+- **source:** `owner` / `user-feedback` — who reported it through an app's in-app reporter, which files into that app's own repo. `musclebuddy` / `redthread` / `adventureos` name the app instead, for reports cross-filed somewhere else. Feedback only.
+
+An app may carry labels of its own outside this taxonomy (musclebuddy's `beta-feedback`, `idea`). They aren't drift — leave them alone.
 
 Missing labels in a repo: provision the set once with `labels_ensure`. New repos also want the issue/PR templates from `templates/` copied into `.github/`.
 
@@ -54,7 +56,7 @@ Clear title; body with **what + why + a `file:line` pointer**; type set; milesto
 
 A follow-up issue is **only** for a finding genuinely out of scope, or a blocker needing a human decision that halts autonomous progress. Filing a follow-up for work you could finish now is a failure, not tidiness.
 
-## Reported feedback (owner / musclebuddy / redthread / adventureos)
+## Reported feedback (`source:*`)
 
 Files with matching `type:*` + `source:*`. The status depends on **who reported it and whether an agent can verify it**:
 
