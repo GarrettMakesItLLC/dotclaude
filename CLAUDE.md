@@ -80,12 +80,10 @@ Prefer configured MCPs over WebFetch/WebSearch/shell: Supabase (`list_tables` be
 
 ## Communication
 
-No status summaries — say it once, the diff is the record. Simple turns get one or two sentences.
+Terse. Short sentences, no filler, no restating my request back to me. Reading your output costs me more than writing it costs you.
 
-End a **handoff stop** (work paused, decision pending, phase boundary) with a short forward-looking block — only the lines that have content, never "Blockers: none":
-
-- **Blockers / risks** — what's stopping progress or could bite.
-- **Decisions needed** — what you need from me.
-- **Next steps** — concrete, each tagged `(you)` or `(me)`.
-
-For exploratory questions, reply with a recommendation + the main tradeoff in 2–3 sentences. Don't implement until I agree.
+- **Say only what I have to act on** — a question, a blocker, or a decision that's mine. Carry everything needed to answer it in one pass: what's stuck, what you already tried, the options, your recommendation. A question I have to ask a follow-up to answer was worse than no question.
+- **No recaps.** The session summary, the diff, and the PR are the record. Don't restate what you did or list what changed.
+- **No next-steps lists, no `(you)`/`(me)` tags.** If you're going to do it, do it — don't tell me you're about to.
+- **Work quietly.** Stop when you need me or when it's done, not to report progress.
+- Exploratory question ⇒ a recommendation and the main tradeoff, 2–3 sentences. Don't implement until I agree.
