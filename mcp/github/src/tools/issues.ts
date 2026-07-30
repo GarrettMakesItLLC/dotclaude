@@ -17,7 +17,9 @@ import {
   nativeTypeName,
   statusLabel,
   sourceLabel,
+  type IssueSource,
   type IssueStatus,
+  type IssueType,
 } from "../labels.js";
 import { setIssueStatus } from "../issue-status.js";
 import { labelNames, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";
@@ -38,6 +40,20 @@ async function resolveAssignees(assignees: string[]): Promise<string[]> {
   const out: string[] = [];
   for (const a of assignees) out.push(a === "@me" ? await getViewerLogin() : a);
   return out;
+}
+
+/**
+ * The status an issue starts in when the caller doesn't name one.
+ *
+ * A defect the owner reported himself is already verified — his account of
+ * running software settles whether it happens — so it starts ready. Anyone
+ * else's defect report is one unverified account, and a feature request needs
+ * his intent before it is built: both wait on him.
+ */
+function defaultStatus(source?: IssueSource, type?: IssueType): IssueStatus {
+  if (!source) return "ready";
+  if (source === "owner") return type === "feature" ? "blocked" : "ready";
+  return "blocked";
 }
 
 /**
@@ -528,7 +544,8 @@ export function registerIssueTools(server: McpServer): void {
         "Create a fully-formed issue in one call: composes status/type/source labels, sets the " +
         "native issue type (best-effort), finds-or-creates and attaches a milestone by title, and " +
         "nests it under a parent as a sub-issue — instead of hand-composing across several tool calls. " +
-        "Status defaults to `ready`, or `blocked` when a `source` is set (unverified feedback). " +
+        "Status defaults to `ready`, except third-party feedback and owner feature requests, which " +
+        "start `blocked` awaiting the owner. " +
         "The issue itself is always created first; milestone/sub-issue enrichment is best-effort — " +
         "on partial failure the created issue is still returned, annotated with a `_warnings` array.",
       inputSchema: {
@@ -540,13 +557,17 @@ export function registerIssueTools(server: McpServer): void {
           .enum(ISSUE_STATUSES)
           .optional()
           .describe(
-            "Initial status. Defaults to `ready`, or `blocked` when `source` is set (unverified feedback). " +
-              "Use `waiting` when the issue depends on another issue rather than on a person.",
+            "Initial status. Defaults to `ready`; to `blocked` for third-party feedback and for any " +
+              "`source: owner` feature request. Use `waiting` when the issue depends on another " +
+              "issue rather than on a person.",
           ),
         source: z
           .enum(ISSUE_SOURCES)
           .optional()
-          .describe("Feedback source, if this issue originated from user feedback."),
+          .describe(
+            "Feedback source, if this issue originated from user feedback. `owner` marks the owner's " +
+              "own reports — trusted, so his defects start `ready` instead of awaiting verification.",
+          ),
         milestone: z
           .string()
           .optional()
@@ -566,7 +587,7 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, title, body, type, status, source, milestone, parent, assignees }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const effectiveStatus: IssueStatus = status ?? (source ? "blocked" : "ready");
+        const effectiveStatus: IssueStatus = status ?? defaultStatus(source, type);
 
         const labels = [statusLabel(effectiveStatus)];
         if (type) labels.push(typeLabel(type));

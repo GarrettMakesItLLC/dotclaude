@@ -438,6 +438,62 @@ describe("issue_open", () => {
     expect(res.isError).toBeFalsy();
   });
 
+  it("defaults an owner-reported defect to status:ready — his report is the verification", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        const sent = JSON.parse(init.body as string) as { labels: string[] };
+        expect(sent.labels).toEqual(
+          expect.arrayContaining(["status:ready", "type:bug", "source:owner"]),
+        );
+        expect(sent.labels).not.toContain("status:blocked");
+        return makeResponse({ status: 201, body: { number: 46, id: 8005, labels: sent.labels } });
+      }
+      if (init.method === "PATCH" && url.endsWith("/issues/46")) {
+        return makeResponse({ status: 200, body: {} });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/46")) {
+        return makeResponse({ status: 200, body: { number: 46, id: 8005 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({
+      repo: "octo/repo",
+      title: "Rest timer drifts",
+      type: "bug",
+      source: "owner",
+    });
+    expect(res.isError).toBeFalsy();
+  });
+
+  it("still defaults an owner-reported feature to status:blocked — it needs his intent first", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        const sent = JSON.parse(init.body as string) as { labels: string[] };
+        expect(sent.labels).toEqual(
+          expect.arrayContaining(["status:blocked", "type:feature", "source:owner"]),
+        );
+        expect(sent.labels).not.toContain("status:ready");
+        return makeResponse({ status: 201, body: { number: 47, id: 8006, labels: sent.labels } });
+      }
+      if (init.method === "PATCH" && url.endsWith("/issues/47")) {
+        return makeResponse({ status: 200, body: {} });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/47")) {
+        return makeResponse({ status: 200, body: { number: 47, id: 8006 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({
+      repo: "octo/repo",
+      title: "Add a plate calculator",
+      type: "feature",
+      source: "owner",
+    });
+    expect(res.isError).toBeFalsy();
+  });
+
   it("attaches an existing milestone by title without creating a duplicate", async () => {
     let milestonePatched = false;
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
