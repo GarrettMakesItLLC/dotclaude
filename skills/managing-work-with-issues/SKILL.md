@@ -86,4 +86,4 @@ The in-app reporter applies this itself (`apps/server/src/lib/bug-report-github.
 
 ## Tooling
 
-Use the `github-rest` MCP tools — they encode the taxonomy and avoid `gh`'s deprecated GraphQL `projectCards` path. `gh api` (REST) is an acceptable fallback for *anything except a claim*: the claim protocol depends on the atomic ref-create, so if `issue_claim` is unavailable, don't hand-roll it — say so and stop. A missing capability → **extending-the-github-mcp**.
+Use the `github-rest` MCP tools — they encode the taxonomy and avoid `gh`'s deprecated GraphQL `projectCards` path. `gh api` (REST) is an acceptable fallback for *anything except a claim*: the claim protocol depends on the atomic ref-create, so if `issue_claim` is unavailable, don't hand-roll it — say so and stop. A missing capability, or a tool failing repeatedly → **closing-tool-gaps**.

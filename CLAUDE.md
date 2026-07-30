@@ -38,6 +38,7 @@ GitHub Issues are the tracker. The lifecycle is in the **`managing-work-with-iss
 - Check `work_in_flight` before selecting an issue — local worktrees on my other machine are invisible; pushed refs are not.
 - Third-party app feedback is filed `status:blocked` and never auto-started — I verify it first. My own reports (`source:owner`) are already verified and start `ready`.
 - Creating issues in my repos is pre-approved.
+- **A tool that keeps failing, or can't do what you need, is a defect in my ecosystem — not a fact about the world.** File it where the fix would land, with the call, the error, and the workaround you used, then carry on. Working around it silently means the next session rediscovers it. Procedure: **`closing-tool-gaps`**.
 
 ## Execution
 

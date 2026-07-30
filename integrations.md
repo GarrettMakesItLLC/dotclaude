@@ -59,7 +59,7 @@ with `claude mcp add --scope user`.
 |-----|--------|------|---------|
 | `github-rest` | `mcp/github/` | Reuses `gh auth token` at runtime | GitHub PR, issue, and repo ops over the **REST** API — including the cross-machine issue-claim lock. REST-only, so it avoids the deprecated GraphQL `projectCards` field that breaks `gh`'s PR mutations, and needs no `jq`. Prefer it over `gh pr …` / `gh issue …` for every write. Tool list: `mcp/github/README.md`. |
 
-Missing a capability? The **`extending-the-github-mcp`** skill covers unblocking
+Missing a capability, or a tool that keeps failing? The **`closing-tool-gaps`** skill covers unblocking
 now and adding the tool so the gap closes for everyone.
 
 ## claude.ai OAuth connectors — reconnect on a fresh machine
