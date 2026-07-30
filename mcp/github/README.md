@@ -121,9 +121,9 @@ Labels:
   and retitle GitHub's colliding stock labels (`bug`, `enhancement`,
   `documentation`) as deprecated where they already exist.
 - `labels_audit` — read-only drift report: missing canonical labels, stock
-  labels not yet retitled, removable GitHub defaults still present, and labels
-  the taxonomy doesn't recognize (per-repo `area:*`/`module:*` axes land here
-  and are fine).
+  labels not yet retitled, removable GitHub defaults still present, labels the
+  taxonomy doesn't recognize (per-repo `area:*`/`module:*` axes land here and
+  are fine), and per-repo labels wearing a canonical label's exact color.
 - `label_list` — every label with color, description, and how many issues carry
   it.
 - `label_update` — rename, recolor, or redescribe. A rename carries the label
