@@ -12,6 +12,8 @@ Source: `mcp/github/` in `GarrettMakesItLLC/dotclaude`. A capability gap is a bu
 
 Fall back to `gh api` (REST). Never `gh api graphql`, and avoid `gh`'s convenience subcommands (`gh pr edit`, `gh pr merge`) — they can silently route through the deprecated GraphQL `projectCards` path the MCP exists to avoid. **Say in your summary that you fell back and why** — the fallback is the gap signal.
 
+**Percent-encode the name in the final path segment.** `gh api repos/O/R/labels/source:owner` returns 404 for a label that exists; `source%3Aowner` returns it. The 404 reads as "absent", so an unencoded write reports success at doing nothing. The MCP builds its own URL and is unaffected.
+
 ## 2. Capture the gap
 
 File an issue in `GarrettMakesItLLC/dotclaude`: the operation, why it was needed, the REST endpoint that would back it. `type:task`. This happens even if you go on to fix it.
