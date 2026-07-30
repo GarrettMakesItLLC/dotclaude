@@ -8,7 +8,8 @@ My personal Claude Code configuration — synced across machines via git.
 |------|---------|
 | `CLAUDE.md` | Global instructions injected into **every** session. Universal *behavioral* rules only. |
 | `rules/` | Path-scoped stack conventions (`frontend`, `data-api`, `monorepo-hosting`, `ci`). Each loads only when Claude opens a matching file. |
-| `skills/` | On-demand procedures: `finishing-work`, `managing-work-with-issues`, `operating-production`, `extending-the-github-mcp`, `aligning-repo-config`. Linked individually into `~/.claude/skills/`, so skills from other sources aren't clobbered. |
+| `skills/` | On-demand procedures: `finishing-work`, `managing-work-with-issues`, `operating-production`, `extending-the-github-mcp`, `aligning-repo-config`, `running-an-audit`. Linked individually into `~/.claude/skills/`, so skills from other sources aren't clobbered. A skill with per-topic checklists keeps them in its own `references/`, loaded only when that topic is in scope. |
+| `agents/` | Subagent definitions — the standing instructions and tool set for a dispatched role, so a fan-out doesn't re-specify them per call. `domain-auditor` is the read-only, evidence-required auditor `running-an-audit` fans out. |
 | `hooks/` | Deterministic guardrails. `git-guard.sh` blocks dangerous shell commands; `worktree-guard.sh` blocks edits to a `.worktrees/` repo's main tree; `verify-reminder.sh` nudges verification, issue linkage, and per-finding accounting at PR-open, naming the deferred-work markers the branch adds; `worktree-bootstrap.sh` seeds a newly created worktree; `link-doctor.sh` reports at session start when a committed skill or directory isn't linked into `~/.claude` yet; `subagent-evidence.sh` blocks a subagent report that claims completed work without showing command output. Each ships a `*.test.sh` self-test; the script headers are the spec. |
 | `mcp/` | Source for the custom MCP servers I wrote. `mcp/github` (`github-rest`) covers PR, issue, and repo ops over REST, including the issue-claim lock. `bootstrap.sh` builds and registers it; tool list in `mcp/github/README.md`. |
 | `settings.json` | User-scope settings: enabled plugins, marketplace, permission defaults, hooks wiring. |
@@ -29,6 +30,8 @@ window**. Each rule lives at the cheapest tier that can still enforce it:
 | **Hook** (`hooks/` + `settings.json`) | Never — runs as code at an event (0 tokens) | Deterministic guardrails that must hold every time |
 | **Path-scoped rule** (`rules/`) | Only when a matching file is opened | Language/stack conventions |
 | **Skill** (`skills/`) | Only when invoked or matched | Multi-step procedures & checklists |
+| **Skill reference** (`skills/*/references/`) | Only when the skill reads it | Per-topic checklists too long to carry in the skill |
+| **Agent** (`agents/`) | Only in the spawned agent's window | The standing role of a dispatched subagent |
 | **`CLAUDE.md`** | Session start, **every turn** | Small set of universal behavioral rules |
 | **Subagent / Workflow / agent team** | Spawned, isolated window(s) | Token-heavy or large parallel work |
 
