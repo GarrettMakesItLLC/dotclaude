@@ -117,7 +117,7 @@ Claims:
 Labels:
 
 - `labels_ensure` — idempotently provision the standard `status:*` / `type:*`
-  / `source:*` label taxonomy into a repo.
+  / `source:*` label taxonomy plus the structural `epic` label into a repo.
 
 Repo:
 

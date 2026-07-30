@@ -42,6 +42,7 @@ SHARED_DIRS=(
   "rules"      # path-scoped stack conventions, loaded only when matching files open
   "hooks"      # PreToolUse git-guard etc. — enforce CLAUDE.md rules deterministically
   "commands"   # personal slash commands (e.g. /dotclaude-sync)
+  "agents"     # subagent definitions for dispatched roles (e.g. domain-auditor)
 )
 # Skills are linked individually into ~/.claude/skills/<name> (NOT a whole-dir
 # link) so they coexist with skills sourced elsewhere (e.g. ~/.agents).
@@ -51,6 +52,7 @@ SHARED_SKILLS=(
   "extending-the-github-mcp"    # self-healing: unblock, file, and grow the github-rest MCP on capability gaps
   "operating-production"        # incident/rollback posture, health checks, alerting for deployed services
   "aligning-repo-config"        # re-tier a repo's CLAUDE.md / .claude config against this global config
+  "running-an-audit"            # audit/investigation method + per-realm checklists in references/
 )
 
 MODE="install"

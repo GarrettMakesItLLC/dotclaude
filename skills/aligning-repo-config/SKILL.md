@@ -48,6 +48,8 @@ For each line in the repo file, ask *what is the cheapest thing that can enforce
 | A stack convention specific to this repo, path-scoped | `.claude/rules/<area>.md` |
 | Already enforced by a config file (commitlint, eslint, tsconfig, CI) | Delete the prose — the config is the rule |
 | A multi-step procedure or finish-line checklist | A skill, global or `.claude/skills/` |
+| A checklist for one topic a skill covers, long enough to crowd it | That skill's `references/<topic>.md` |
+| The standing instructions of a dispatched subagent role | An agent definition (`agents/`) |
 | Deterministic and detectable at an event | A hook |
 
 What's left — and what the repo file must actually contain:

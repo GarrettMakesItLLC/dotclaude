@@ -18,6 +18,14 @@ export type IssueStatus = (typeof ISSUE_STATUSES)[number];
 export const ISSUE_TYPES = ["bug", "feature", "task"] as const;
 export type IssueType = (typeof ISSUE_TYPES)[number];
 
+/**
+ * Structural labels — what an issue *is* in the tracker's shape, orthogonal to
+ * status/type/source. `epic` marks an index issue: it carries the scope and its
+ * children, and is never implemented directly.
+ */
+export const ISSUE_STRUCTURES = ["epic"] as const;
+export type IssueStructure = (typeof ISSUE_STRUCTURES)[number];
+
 export const ISSUE_SOURCES = [
   "owner",
   "user-feedback",
@@ -48,6 +56,10 @@ const TYPE_STYLES: Record<IssueType, LabelStyle> = {
   task: { color: "bfd4f2", description: "Chore / maintenance / non-feature work" },
 };
 
+const STRUCTURE_STYLES: Record<IssueStructure, LabelStyle> = {
+  epic: { color: "7057ff", description: "Index issue: carries the scope and its sub-issues, never worked directly" },
+};
+
 const SOURCE_STYLES: Record<IssueSource, LabelStyle> = {
   owner: { color: "fef2c0", description: "Reported by the owner through an app's feedback flow" },
   "user-feedback": { color: "d876e3", description: "Reported by a user through an app's feedback flow" },
@@ -76,6 +88,7 @@ export const ISSUE_LABELS: LabelSpec[] = [
   ...ISSUE_STATUSES.map((s) => ({ name: statusLabel(s), ...STATUS_STYLES[s] })),
   ...ISSUE_TYPES.map((t) => ({ name: typeLabel(t), ...TYPE_STYLES[t] })),
   ...ISSUE_SOURCES.map((s) => ({ name: sourceLabel(s), ...SOURCE_STYLES[s] })),
+  ...ISSUE_STRUCTURES.map((s) => ({ name: s, ...STRUCTURE_STYLES[s] })),
 ];
 
 /** Every `status:*` label name — the mutually-exclusive status set. */

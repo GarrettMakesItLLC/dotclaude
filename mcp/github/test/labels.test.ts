@@ -61,21 +61,27 @@ describe("labels_ensure", () => {
 
     expect(res.isError).toBeFalsy();
     const summary = JSON.parse(res.content[0].text) as { created: number; updated: number };
-    expect(summary.created + summary.updated).toBe(14);
+    expect(summary.created + summary.updated).toBe(15);
     expect(summary.updated).toBeGreaterThanOrEqual(1);
   });
 });
 
 describe("taxonomy", () => {
-  it("provisions exactly one label per status, type and source value", async () => {
-    const { ISSUE_LABELS, ISSUE_STATUSES, ISSUE_TYPES, ISSUE_SOURCES } = await import(
-      "../src/labels.js"
-    );
+  it("provisions exactly one label per status, type, source and structural value", async () => {
+    const { ISSUE_LABELS, ISSUE_STATUSES, ISSUE_TYPES, ISSUE_SOURCES, ISSUE_STRUCTURES } =
+      await import("../src/labels.js");
     expect(ISSUE_LABELS.map((l) => l.name)).toEqual([
       ...ISSUE_STATUSES.map((s) => `status:${s}`),
       ...ISSUE_TYPES.map((t) => `type:${t}`),
       ...ISSUE_SOURCES.map((s) => `source:${s}`),
+      ...ISSUE_STRUCTURES,
     ]);
+  });
+
+  it("gives every label a distinct name and color, so two axes never look alike", async () => {
+    const { ISSUE_LABELS } = await import("../src/labels.js");
+    expect(new Set(ISSUE_LABELS.map((l) => l.name)).size).toBe(ISSUE_LABELS.length);
+    expect(new Set(ISSUE_LABELS.map((l) => l.color)).size).toBe(ISSUE_LABELS.length);
   });
 
   it("includes waiting in the status set, and STATUS_LABEL_NAMES covers all of it", async () => {
