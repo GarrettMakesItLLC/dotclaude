@@ -119,6 +119,75 @@ jobs:
           sys.exit(1 if (missing or extra) else 0)
           PY
 
+      - name: bootstrap.sh links only directories that exist
+        # A whole-dir entry naming a directory that isn't here links nothing and
+        # the doctor stays silent about it, because it skips absent sources.
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          src = open("bootstrap.sh").read()
+          m = re.search(r'SHARED_DIRS=\((.*?)\n\)', src, re.S)
+          if not m:
+              print("could not find SHARED_DIRS in bootstrap.sh"); sys.exit(1)
+          listed = re.findall(r'"([\w-]+)"', m.group(1))
+          missing = [d for d in listed if not os.path.isdir(d)]
+          for d in missing: print(f"✗ bootstrap.sh links {d}/ which does not exist")
+          if not missing: print(f"✓ SHARED_DIRS all present: {', '.join(listed)}")
+          sys.exit(1 if missing else 0)
+          PY
+
+      - name: Agent definitions parse and are named after their file
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          fail = []
+          for f in sorted(os.listdir("agents")) if os.path.isdir("agents") else []:
+              if not f.endswith(".md"):
+                  fail.append(f"agents/{f} is not a .md agent definition"); continue
+              text = open(os.path.join("agents", f)).read()
+              fm = re.match(r'---\n(.*?)\n---\n', text, re.S)
+              if not fm:
+                  fail.append(f"agents/{f} has no frontmatter block"); continue
+              keys = dict(re.findall(r'^([a-z-]+):\s*(.*)$', fm.group(1), re.M))
+              for required in ("name", "description"):
+                  if not keys.get(required):
+                      fail.append(f"agents/{f} frontmatter is missing `{required}`")
+              if keys.get("name") and keys["name"] != f[:-3]:
+                  fail.append(f"agents/{f} declares name `{keys['name']}` — must match the filename")
+          print("\n".join(fail) if fail else "✓ agent definitions valid")
+          sys.exit(1 if fail else 0)
+          PY
+
+      - name: Skill reference files and their links agree
+        # A skill's references/ is loaded by path, so a renamed or unlisted file is
+        # invisible at the moment it is needed and silent until then.
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          fail = []
+          for skill in sorted(os.listdir("skills")):
+              refs_dir = os.path.join("skills", skill, "references")
+              skill_md = os.path.join("skills", skill, "SKILL.md")
+              if not os.path.isdir(refs_dir):
+                  continue
+              body = open(skill_md).read()
+              linked = set(re.findall(r'references/([\w./-]+\.md)', body))
+              for extra in sorted(f for f in os.listdir(refs_dir) if f.endswith(".md")):
+                  if extra not in linked:
+                      fail.append(f"✗ skills/{skill}/references/{extra} is never referenced from SKILL.md")
+              for name in sorted(linked):
+                  if not os.path.exists(os.path.join(refs_dir, name)):
+                      fail.append(f"✗ skills/{skill}/SKILL.md links references/{name} which does not exist")
+              # Cross-reference between realm files, same rule.
+              for name in sorted(f for f in os.listdir(refs_dir) if f.endswith(".md")):
+                  text = open(os.path.join(refs_dir, name)).read()
+                  for target in sorted(set(re.findall(r'`([\w-]+\.md)`', text))):
+                      if target != "SKILL.md" and not os.path.exists(os.path.join(refs_dir, target)):
+                          fail.append(f"✗ skills/{skill}/references/{name} names `{target}` which does not exist")
+          print("\n".join(fail) if fail else "✓ skill reference links resolve")
+          sys.exit(1 if fail else 0)
+          PY
+
   commitlint:
     # This job is the enforcement boundary for conventional commits — which is why
     # CLAUDE.md does not restate the prefix list.
