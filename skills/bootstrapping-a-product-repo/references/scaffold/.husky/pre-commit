@@ -1,0 +1,4 @@
+# Formatting and markdown only — the same gates CI runs, and both are seconds.
+# Nothing heavier belongs here: a slow pre-commit hook gets bypassed, and a
+# bypassed hook enforces nothing.
+npm run check

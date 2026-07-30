@@ -1,0 +1,28 @@
+{
+  "name": "REPO_NAME_LOWERCASE",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0 <21",
+    "npm": "10.8.2"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint:md": "markdownlint-cli2 \"**/*.md\"",
+    "lint:actions": "actionlint",
+    "check": "npm run format:check && npm run lint:md",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.6.1",
+    "@commitlint/config-conventional": "^19.6.0",
+    "husky": "^9.1.7",
+    "markdownlint-cli2": "^0.23.2",
+    "prettier": "^3.4.2"
+  }
+}

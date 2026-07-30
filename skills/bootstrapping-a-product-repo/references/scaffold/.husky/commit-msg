@@ -1,0 +1,4 @@
+# Merges here squash, so the PR title is what lands on `main` and is checked
+# again by .github/workflows/pr-title-lint.yml. This catches the local message
+# early, while the commit is still cheap to amend.
+npx --no -- commitlint --edit "$1"

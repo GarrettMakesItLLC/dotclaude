@@ -8,7 +8,7 @@ My personal Claude Code configuration — synced across machines via git.
 |------|---------|
 | `CLAUDE.md` | Global instructions injected into **every** session. Universal *behavioral* rules only. |
 | `rules/` | Path-scoped stack conventions (`frontend`, `data-api`, `monorepo-hosting`, `ci`). Each loads only when Claude opens a matching file. |
-| `skills/` | On-demand procedures: `finishing-work`, `managing-work-with-issues`, `operating-production`, `closing-tool-gaps`, `aligning-repo-config`, `running-an-audit`. Linked individually into `~/.claude/skills/`, so skills from other sources aren't clobbered. A skill with per-topic checklists keeps them in its own `references/`, loaded only when that topic is in scope. |
+| `skills/` | On-demand procedures: `finishing-work`, `managing-work-with-issues`, `operating-production`, `closing-tool-gaps`, `aligning-repo-config`, `running-an-audit`, `bootstrapping-a-product-repo`. Linked individually into `~/.claude/skills/`, so skills from other sources aren't clobbered. A skill with per-topic checklists keeps them in its own `references/`, loaded only when that topic is in scope. |
 | `agents/` | Subagent definitions — the standing instructions and tool set for a dispatched role, so a fan-out doesn't re-specify them per call. `domain-auditor` is the read-only, evidence-required auditor `running-an-audit` fans out. |
 | `hooks/` | Deterministic guardrails. `git-guard.sh` blocks dangerous shell commands; `worktree-guard.sh` blocks edits to a `.worktrees/` repo's main tree; `verify-reminder.sh` nudges verification, issue linkage, and per-finding accounting at PR-open, naming the deferred-work markers the branch adds; `worktree-bootstrap.sh` seeds a newly created worktree; `link-doctor.sh` reports at session start when a committed skill or directory isn't linked into `~/.claude` yet; `subagent-evidence.sh` blocks a subagent report that claims completed work without showing command output; `tool-gap-reporter.sh` names the tool and the repo to file in when the same MCP tool fails twice in a session. Each ships a `*.test.sh` self-test; the script headers are the spec. |
 | `mcp/` | Source for the custom MCP servers I wrote. `mcp/github` (`github-rest`) covers PR, issue, and repo ops over REST, including the issue-claim lock. `bootstrap.sh` builds and registers it; tool list in `mcp/github/README.md`. |
@@ -51,21 +51,39 @@ descriptions load at session start whether or not it is used. See
 
 ## Setup on a new machine
 
+For a whole machine — toolchain, repo fleet, dependencies, and this config — start
+from `dotfiles`, which clones this repo and runs the script below as one of its
+steps:
+
+```bash
+git clone git@github.com:GarrettMakesItLLC/dotfiles.git ~/workspace/dotfiles
+bash ~/workspace/dotfiles/bootstrap/device.sh
+```
+
+For this config alone:
+
 ```bash
 git clone git@github.com:GarrettMakesItLLC/dotclaude.git ~/dotclaude
 bash ~/dotclaude/bootstrap.sh
 ```
 
-The script is idempotent and narrates what it links; re-run it any time. Real
-files already sitting at a link target are moved to `~/.claude.bak.<timestamp>/`,
-never overwritten. `bash ~/dotclaude/bootstrap.sh --check` is a read-only link
-doctor.
+The script is idempotent and narrates what it links; re-run it any time — a newly
+committed skill or directory needs a run to get its symlink. Real files already
+sitting at a link target are moved to `~/.claude.bak.<timestamp>/`, never
+overwritten. `bash ~/dotclaude/bootstrap.sh --check` is a read-only link doctor.
 
 Two things bootstrap can't do for you:
 
 - **OAuth connectors and API keys** — per-machine, interactive. See `integrations.md`.
 - **Issue labels** — per-repo, not per-machine. Run the `labels_ensure` MCP tool
-  once in each project repo, and copy `templates/` into its `.github/`.
+  once in each project repo, then `labels_audit` to catch leftovers.
+
+Issue and PR templates are no longer copied per repo: `GarrettMakesItLLC/.github`
+supplies them org-wide to every repo without its own. `templates/` here stays the
+authoring source — edit here, copy forward to that repo.
+
+Standing up a whole new repo to the fleet standard is the
+`bootstrapping-a-product-repo` skill.
 
 ## Updating
 
