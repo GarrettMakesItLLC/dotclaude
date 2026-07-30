@@ -10,11 +10,13 @@ import {
   resolveRepo,
 } from "../github.js";
 import {
+  ISSUE_SOURCES,
+  ISSUE_STATUSES,
+  ISSUE_TYPES,
   typeLabel,
   nativeTypeName,
   statusLabel,
   sourceLabel,
-  type IssueType,
   type IssueStatus,
 } from "../labels.js";
 import { setIssueStatus } from "../issue-status.js";
@@ -283,19 +285,18 @@ export function registerIssueTools(server: McpServer): void {
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number."),
-        type: z.enum(["bug", "feature", "task"]).describe("Issue type."),
+        type: z.enum(ISSUE_TYPES).describe("Issue type."),
       },
     },
     async ({ repo, number, type }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const t = type as IssueType;
 
         // Native issue type — org-configured, may not exist on this owner. Best-effort.
         try {
           await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
             method: "PATCH",
-            body: { type: nativeTypeName(t) },
+            body: { type: nativeTypeName(type) },
           });
         } catch {
           // Owner lacks native issue types; the label below is the universal fallback.
@@ -308,7 +309,7 @@ export function registerIssueTools(server: McpServer): void {
         const kept = issue.labels
           .map((l) => l.name)
           .filter((n) => !n.startsWith("type:"));
-        const next = [...kept, typeLabel(t)];
+        const next = [...kept, typeLabel(type)];
         const data = await ghRequest<RawLabel[]>(
           `/repos/${owner}/${name}/issues/${number}/labels`,
           { method: "PUT", body: { labels: next } },
@@ -458,7 +459,7 @@ export function registerIssueTools(server: McpServer): void {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number."),
         status: z
-          .enum(["backlog", "ready", "blocked", "in-progress", "in-review"])
+          .enum(ISSUE_STATUSES)
           .optional()
           .describe("New status. Omit to clear the status:* label without setting a new one."),
       },
@@ -466,7 +467,7 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, number, status }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        return jsonText(await setIssueStatus(owner, name, number, status as IssueStatus | undefined));
+        return jsonText(await setIssueStatus(owner, name, number, status));
       } catch (err) {
         return errorResult(err);
       }
@@ -534,15 +535,16 @@ export function registerIssueTools(server: McpServer): void {
         repo: repoParam,
         title: z.string().describe("Issue title."),
         body: z.string().optional().describe("Issue body (markdown)."),
-        type: z.enum(["bug", "feature", "task"]).optional().describe("Issue type."),
+        type: z.enum(ISSUE_TYPES).optional().describe("Issue type."),
         status: z
-          .enum(["backlog", "ready", "blocked", "in-progress", "in-review"])
+          .enum(ISSUE_STATUSES)
           .optional()
           .describe(
-            "Initial status. Defaults to `ready`, or `blocked` when `source` is set (unverified feedback).",
+            "Initial status. Defaults to `ready`, or `blocked` when `source` is set (unverified feedback). " +
+              "Use `waiting` when the issue depends on another issue rather than on a person.",
           ),
         source: z
-          .enum(["musclebuddy", "redthread", "adventureos"])
+          .enum(ISSUE_SOURCES)
           .optional()
           .describe("Feedback source, if this issue originated from user feedback."),
         milestone: z
@@ -564,11 +566,10 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, title, body, type, status, source, milestone, parent, assignees }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const t = type as IssueType | undefined;
-        const effectiveStatus = (status ?? (source ? "blocked" : "ready")) as IssueStatus;
+        const effectiveStatus: IssueStatus = status ?? (source ? "blocked" : "ready");
 
         const labels = [statusLabel(effectiveStatus)];
-        if (t) labels.push(typeLabel(t));
+        if (type) labels.push(typeLabel(type));
         if (source) labels.push(sourceLabel(source));
 
         const created = await ghRequest<{ number: number; id: number }>(
@@ -586,12 +587,12 @@ export function registerIssueTools(server: McpServer): void {
         const { number, id } = created;
         const warnings: string[] = [];
 
-        if (t) {
+        if (type) {
           // Native issue type — org-configured, may not exist on this owner. Best-effort.
           try {
             await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
               method: "PATCH",
-              body: { type: nativeTypeName(t) },
+              body: { type: nativeTypeName(type) },
             });
           } catch {
             // Owner lacks native issue types; the type:* label already applied is the fallback.
