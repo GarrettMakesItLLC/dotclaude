@@ -91,7 +91,8 @@ Issues:
   `@me`.
 - `issue_claim` — take the distributed lock for an issue, then self-assign `@me`
   and set `status:in-progress`. See [Claiming work](#claiming-work).
-- `issue_set_status` — set the single `status:*` label (or clear it), preserving all other labels.
+- `issue_set_status` — set the single `status:*` label (or clear it), preserving
+  all other labels. Accepts any status in the taxonomy (`src/labels.ts`).
 - `issue_set_type` — set bug/feature/task as the native issue type
   (best-effort) plus a `type:*` label.
 - `issue_set_milestone` / `milestone_ensure` — attach an issue to a milestone,

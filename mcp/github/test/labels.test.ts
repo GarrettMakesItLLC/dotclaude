@@ -61,7 +61,26 @@ describe("labels_ensure", () => {
 
     expect(res.isError).toBeFalsy();
     const summary = JSON.parse(res.content[0].text) as { created: number; updated: number };
-    expect(summary.created + summary.updated).toBe(11);
+    expect(summary.created + summary.updated).toBe(12);
     expect(summary.updated).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("taxonomy", () => {
+  it("provisions exactly one label per status, type and source value", async () => {
+    const { ISSUE_LABELS, ISSUE_STATUSES, ISSUE_TYPES, ISSUE_SOURCES } = await import(
+      "../src/labels.js"
+    );
+    expect(ISSUE_LABELS.map((l) => l.name)).toEqual([
+      ...ISSUE_STATUSES.map((s) => `status:${s}`),
+      ...ISSUE_TYPES.map((t) => `type:${t}`),
+      ...ISSUE_SOURCES.map((s) => `source:${s}`),
+    ]);
+  });
+
+  it("includes waiting in the status set, and STATUS_LABEL_NAMES covers all of it", async () => {
+    const { ISSUE_STATUSES, STATUS_LABEL_NAMES } = await import("../src/labels.js");
+    expect(ISSUE_STATUSES).toContain("waiting");
+    expect(STATUS_LABEL_NAMES).toEqual(ISSUE_STATUSES.map((s) => `status:${s}`));
   });
 });

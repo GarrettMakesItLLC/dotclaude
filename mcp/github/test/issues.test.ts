@@ -31,18 +31,28 @@ type ToolHandler = (args: Record<string, unknown>) => Promise<{
  * handler for the named tool so it can be invoked directly.
  */
 async function getIssueHandler(name: string): Promise<ToolHandler> {
+  const { handler } = await getIssueTool(name);
+  return handler;
+}
+
+interface ToolDef {
+  inputSchema: Record<string, { safeParse: (v: unknown) => { success: boolean } }>;
+}
+
+/** Register the issue tools and return both the declared schema and the handler. */
+async function getIssueTool(name: string): Promise<{ def: ToolDef; handler: ToolHandler }> {
   const { registerIssueTools } = await import("../src/tools/issues.js");
-  const handlers = new Map<string, ToolHandler>();
+  const tools = new Map<string, { def: ToolDef; handler: ToolHandler }>();
   const stubServer = {
-    registerTool: (toolName: string, _def: unknown, handler: ToolHandler) => {
-      handlers.set(toolName, handler);
+    registerTool: (toolName: string, def: ToolDef, handler: ToolHandler) => {
+      tools.set(toolName, { def, handler });
     },
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   registerIssueTools(stubServer as any);
-  const handler = handlers.get(name);
-  if (!handler) throw new Error(`${name} was not registered`);
-  return handler;
+  const tool = tools.get(name);
+  if (!tool) throw new Error(`${name} was not registered`);
+  return tool;
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -163,6 +173,40 @@ describe("issue_add_sub_issue", () => {
     const handler = await getIssueHandler("issue_add_sub_issue");
     const res = await handler({ repo: "octo/repo", number: 4, sub_number: 12 });
     expect(res.isError).toBeFalsy();
+  });
+});
+
+describe("issue_set_status", () => {
+  it("accepts every taxonomy status — including waiting — on the tools that take one", async () => {
+    const { ISSUE_STATUSES } = await import("../src/labels.js");
+    for (const tool of ["issue_set_status", "issue_open"]) {
+      const { def } = await getIssueTool(tool);
+      for (const status of ISSUE_STATUSES) {
+        expect(def.inputSchema.status.safeParse(status).success, `${tool} ← ${status}`).toBe(true);
+      }
+      expect(def.inputSchema.status.safeParse("done").success).toBe(false);
+    }
+  });
+
+  it("swaps the existing status:* label for status:waiting, preserving other labels", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "GET" && url.endsWith("/issues/3364")) {
+        return makeResponse({
+          status: 200,
+          body: { labels: [{ name: "status:ready" }, { name: "type:task" }] },
+        });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        const sent = JSON.parse(init.body as string).labels as string[];
+        expect(sent).toEqual(["type:task", "status:waiting"]);
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_set_status");
+    const res = await handler({ repo: "octo/repo", number: 3364, status: "waiting" });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text).labels).toContain("status:waiting");
   });
 });
 
