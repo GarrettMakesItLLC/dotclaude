@@ -494,6 +494,33 @@ describe("issue_open", () => {
     expect(res.isError).toBeFalsy();
   });
 
+  it("defaults an in-app third-party report to status:blocked", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        const sent = JSON.parse(init.body as string) as { labels: string[] };
+        expect(sent.labels).toEqual(
+          expect.arrayContaining(["status:blocked", "type:bug", "source:user-feedback"]),
+        );
+        return makeResponse({ status: 201, body: { number: 48, id: 8007, labels: sent.labels } });
+      }
+      if (init.method === "PATCH" && url.endsWith("/issues/48")) {
+        return makeResponse({ status: 200, body: {} });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/48")) {
+        return makeResponse({ status: 200, body: { number: 48, id: 8007 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({
+      repo: "octo/repo",
+      title: "Timer stops on lock screen",
+      type: "bug",
+      source: "user-feedback",
+    });
+    expect(res.isError).toBeFalsy();
+  });
+
   it("attaches an existing milestone by title without creating a duplicate", async () => {
     let milestonePatched = false;
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
