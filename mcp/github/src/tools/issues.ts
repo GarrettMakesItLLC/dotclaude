@@ -17,6 +17,7 @@ import {
   nativeTypeName,
   statusLabel,
   sourceLabel,
+  TRUSTED_SOURCES,
   type IssueSource,
   type IssueStatus,
   type IssueType,
@@ -46,13 +47,14 @@ async function resolveAssignees(assignees: string[]): Promise<string[]> {
  * The status an issue starts in when the caller doesn't name one.
  *
  * A defect the owner reported himself is already verified — his account of
- * running software settles whether it happens — so it starts ready. Anyone
- * else's defect report is one unverified account, and a feature request needs
- * his intent before it is built: both wait on him.
+ * running software settles whether it happens — so it starts ready. So does one
+ * an agent or a code review found, since both carry the evidence with them.
+ * Anyone else's defect report is one unverified account, and a feature request
+ * needs his intent before it is built: both wait on him.
  */
 function defaultStatus(source?: IssueSource, type?: IssueType): IssueStatus {
   if (!source) return "ready";
-  if (source === "owner") return type === "feature" ? "blocked" : "ready";
+  if (TRUSTED_SOURCES.includes(source)) return type === "feature" ? "blocked" : "ready";
   return "blocked";
 }
 
