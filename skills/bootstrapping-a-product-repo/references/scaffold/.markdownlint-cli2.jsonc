@@ -1,0 +1,21 @@
+{
+  "config": {
+    // Prettier owns line width and whitespace; markdownlint would only disagree.
+    "line-length": false,
+    "no-trailing-spaces": false,
+    // Specs legitimately reuse headings like "Scope" across sections.
+    "no-duplicate-heading": false,
+    // Inline HTML is used for issue-template detail blocks.
+    "no-inline-html": false,
+    // A doc's first line is its title; the H1 need not match the filename.
+    "first-line-heading": true,
+  },
+  // GitHub templates are forms, not documents — they open with a section
+  // heading by design and MD041 would demand an H1 that GitHub never renders.
+  "ignores": [
+    "node_modules/**",
+    "**/node_modules/**",
+    ".github/ISSUE_TEMPLATE/**",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+  ],
+}

@@ -1,0 +1,11 @@
+{
+  "name": "Copilot review for default branch",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "copilot_code_review" }
+  ]
+}

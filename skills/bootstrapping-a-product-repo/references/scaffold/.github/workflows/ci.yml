@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+    # `ready_for_review` is not a default type — without it, marking a draft PR
+    # ready (with no new push) would never trigger CI, leaving required checks
+    # stuck pending.
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [dev, main]
+  # Validate the merged state, and warm the npm cache on the ref that feature
+  # PRs actually restore from. Actions cache lookups fall back from the current
+  # ref to the PR's base branch, so without a run at `ref=dev` no dev-scoped
+  # cache ever exists and every feature PR starts cold. Two branches each green
+  # on a stale base can also break once merged, and only `dev` sees that tree.
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Idempotent validation: a newer head makes the previous run irrelevant.
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Every cheap gate lives in ONE job, because Actions bills each job rounded UP
+  # to the whole minute. Formatting, markdown lint and workflow lint are seconds
+  # apiece and share a checkout, so splitting them would buy three billed minutes
+  # for one minute of work and no parallelism worth having.
+  check:
+    name: Check (format, markdown, workflows)
+    runs-on: ubuntu-latest
+    # Sub-minute in every healthy run. Capped so a hung step cannot inherit the
+    # 360-minute default.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Prettier
+        run: npm run format:check
+
+      - name: Markdown
+        run: npm run lint:md
+
+      # Pinned by digest-bearing tag rather than a floating major: a workflow
+      # linter that silently changes its ruleset turns a green history red for
+      # reasons unrelated to the diff.
+      - name: Workflows
+        uses: raven-actions/actionlint@v2
+        with:
+          fail-on-error: true
+
+  # One aggregate required check, so adding or splitting jobs never means editing
+  # the branch ruleset. It also closes the skipped-job hole: a skipped job
+  # satisfies a required status check of the same name, so requiring `check`
+  # directly would let a path-filtered skip merge unverified.
+  ci-success:
+    # Named to match the other repos exactly, so one branch ruleset definition is
+    # portable across all of them without editing the required-check string.
+    name: CI Success
+    if: always() && github.event_name == 'pull_request'
+    needs: [check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify no required job failed or was skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS"
+          echo "$RESULTS" | grep -q '"result": *"failure"' && {
+            echo "::error::A required job failed."; exit 1; }
+          echo "$RESULTS" | grep -q '"result": *"cancelled"' && {
+            echo "::error::A required job was cancelled."; exit 1; }
+          echo "$RESULTS" | grep -q '"result": *"skipped"' && {
+            echo "::error::A required job was skipped — it had work to do."; exit 1; }
+          echo "All required jobs succeeded."
