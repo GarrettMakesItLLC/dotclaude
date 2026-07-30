@@ -53,6 +53,7 @@ SHARED_SKILLS=(
   "operating-production"        # incident/rollback posture, health checks, alerting for deployed services
   "aligning-repo-config"        # re-tier a repo's CLAUDE.md / .claude config against this global config
   "running-an-audit"            # audit/investigation method + per-realm checklists in references/
+  "bootstrapping-a-product-repo" # stand up a new repo: branches, rulesets, labels, CI, scaffold
 )
 
 MODE="install"
