@@ -56,8 +56,9 @@ export function registerClaimTools(server: McpServer): void {
         "Release an issue's claim by deleting its lock branch on the remote — for work abandoned " +
         "without a PR. Refuses when the branch carries commits that landed nowhere (not merged " +
         "into the default branch and not in a merged PR) unless `force` is set, so a live claim on " +
-        "another machine cannot be dropped by accident. Also returns the issue to `status:ready` " +
-        "and unassigns the authenticated user (best-effort, reported via `_warnings`).",
+        "another machine cannot be dropped by accident. Also returns an OPEN issue to " +
+        "`status:ready` — a closed one has its status cleared instead, because done is the absence " +
+        "of a status — and unassigns the authenticated user (best-effort, reported via `_warnings`).",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number whose claim is released."),
@@ -125,13 +126,29 @@ export function registerClaimTools(server: McpServer): void {
           warnings.push(`assignee not removed (the lock is released regardless): ${msg}`);
         }
 
-        let status: string | null = "ready";
+        // A lock branch outlives its issue as readily as it outlives its work: a
+        // merged PR closes the issue and leaves the ref behind. Returning THAT
+        // to `ready` shows finished work as startable, and contradicts the model
+        // the audit enforces — done is a closed issue with no status label at
+        // all. So a closed issue has its status cleared rather than rewritten.
+        let reopenTo: "ready" | undefined = "ready";
         try {
-          await setIssueStatus(owner, name, number, "ready");
+          const issue = await ghRequest<{ state?: string }>(
+            `/repos/${owner}/${name}/issues/${number}`,
+          );
+          if (issue.state === "closed") reopenTo = undefined;
+        } catch {
+          // Unreadable state ⇒ treat it as open, which is the prior behaviour
+          // and the far more common case.
+        }
+
+        let status: string | null = reopenTo ?? null;
+        try {
+          await setIssueStatus(owner, name, number, reopenTo);
         } catch (err) {
           status = null;
           const msg = err instanceof Error ? err.message : String(err);
-          warnings.push(`status:ready not set (the lock is released regardless): ${msg}`);
+          warnings.push(`status not updated (the lock is released regardless): ${msg}`);
         }
 
         const result = {
