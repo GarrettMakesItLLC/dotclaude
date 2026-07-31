@@ -77,6 +77,14 @@ check 0 'git commit -am "fix main"'
 check 0 'git push origin feature/foo'
 check 0 'git push --force origin feature/foo'
 check 0 'git push -n origin main'
+# `-f` is a force flag only inside `git push`'s own arguments. These pass a
+# FIELD to a later command in the same compound line, and the whole-line scan
+# they used to hit blocked repo bootstrap outright.
+check 0 'git push -u origin main && gh api repos/o/r/git/refs -f ref=refs/heads/dev -f sha="$MAIN"'
+check 0 'gh api repos/o/r -f default_branch=main && git push origin feature/foo'
+# …but a real force-push still blocks when it shares a line with anything else.
+check 2 'echo starting && git push --force origin main'
+check 2 'git push -f origin main && gh api repos/o/r -f x=1'
 check 0 'git add .env.example'
 check 0 'git add src/app.ts'
 check 0 'git log -n 5'

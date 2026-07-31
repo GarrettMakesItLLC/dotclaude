@@ -108,12 +108,19 @@ fi
 # 2) Force-push to main/master is the user's call, never Claude's. Covers
 # --force / -f / --force-with-lease AND the leading-'+' refspec force form, and
 # matches main/master written bare, as origin main, refs/heads/main, or :main.
-if printf '%s' "$scrubbed" | grep -Eq 'git[[:space:]].*push'; then
+#
+# Scoped to `git push`'s OWN arguments for the same reason `git commit -n` is:
+# `-f` is a force flag only here. `gh api … -f ref=refs/heads/dev` in the same
+# compound command passes a FIELD, and blocking on it makes the guard something
+# to work around rather than something to satisfy.
+push_args="$(printf '%s' "$scrubbed" \
+  | perl -0777 -ne 'while (/git\s+(?:-[^\s]+\s+)*push((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)/gs) { print "$1\n" }')"
+if [ -n "$push_args" ]; then
   has_force=0
-  printf '%s' "$scrubbed" | grep -Eq -- '(--force([[:space:]=]|$)|--force-with-lease|[[:space:]]-f([[:space:]]|$))' && has_force=1
-  printf '%s' "$scrubbed" | grep -Eq '[[:space:]]\+[^[:space:]]*(main|master)' && has_force=1
+  printf '%s' "$push_args" | grep -Eq -- '(--force([[:space:]=]|$)|--force-with-lease|[[:space:]]-f([[:space:]]|$))' && has_force=1
+  printf '%s' "$push_args" | grep -Eq '[[:space:]]\+[^[:space:]]*(main|master)' && has_force=1
   if [ "$has_force" = 1 ] \
-     && printf '%s' "$scrubbed" | grep -Eq '([[:space:]:/+]|origin[[:space:]]+)(main|master)([[:space:]:]|$)'; then
+     && printf '%s' "$push_args" | grep -Eq '([[:space:]:/+]|origin[[:space:]]+)(main|master)([[:space:]:]|$)'; then
     block "force-pushing to main/master is reserved for the user (CLAUDE.md). Push a feature branch, or ask first."
   fi
 fi
