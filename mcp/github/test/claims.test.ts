@@ -108,6 +108,78 @@ describe("claim_release", () => {
     expect(deleted).toBe(true);
   });
 
+  it("returns an OPEN issue to status:ready", async () => {
+    let sentLabels: string[] | undefined;
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
+      if (init.method === "GET" && url.endsWith("/repos/octo/repo")) {
+        return makeResponse({ status: 200, body: { default_branch: "main" } });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/12")) {
+        return makeResponse({
+          status: 200,
+          body: { number: 12, title: "Fix the thing", state: "open", labels: [{ name: "type:bug" }] },
+        });
+      }
+      if (init.method === "GET" && url.includes("/compare/")) {
+        return makeResponse({ status: 200, body: { ahead_by: 0, behind_by: 0, status: "identical" } });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        sentLabels = (JSON.parse(init.body ?? "{}") as { labels: string[] }).labels;
+        return makeResponse({ status: 200, body: [] });
+      }
+      if (init.method === "DELETE") return makeResponse({ status: 204 });
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getClaimHandler("claim_release");
+    const res = await handler({ repo: "octo/repo", number: 12 });
+
+    expect((JSON.parse(res.content[0].text) as { status: string | null }).status).toBe("ready");
+    expect(sentLabels).toEqual(["type:bug", "status:ready"]);
+  });
+
+  it("CLEARS the status on a closed issue rather than showing finished work as startable", async () => {
+    // A lock branch outlives its issue as readily as it outlives its work: a
+    // merged PR closes the issue and leaves the ref behind. Done in this
+    // taxonomy is a closed issue with NO status label.
+    let sentLabels: string[] | undefined;
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
+      if (init.method === "GET" && url.endsWith("/repos/octo/repo")) {
+        return makeResponse({ status: 200, body: { default_branch: "main" } });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/12")) {
+        return makeResponse({
+          status: 200,
+          body: {
+            number: 12,
+            title: "Fix the thing",
+            state: "closed",
+            labels: [{ name: "type:bug" }, { name: "status:in-progress" }],
+          },
+        });
+      }
+      if (init.method === "GET" && url.includes("/compare/")) {
+        return makeResponse({ status: 200, body: { ahead_by: 0, behind_by: 0, status: "identical" } });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        sentLabels = (JSON.parse(init.body ?? "{}") as { labels: string[] }).labels;
+        return makeResponse({ status: 200, body: [] });
+      }
+      if (init.method === "DELETE") return makeResponse({ status: 204 });
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getClaimHandler("claim_release");
+    const res = await handler({ repo: "octo/repo", number: 12 });
+
+    expect(res.isError).toBeFalsy();
+    expect((JSON.parse(res.content[0].text) as { status: string | null }).status).toBeNull();
+    // The stale `status:in-progress` goes; nothing replaces it.
+    expect(sentLabels).toEqual(["type:bug"]);
+  });
+
   it("refuses to delete a branch with unmerged commits unless force is set", async () => {
     let deleted = false;
     const mock = async (url: string, init: { method?: string }) => {
