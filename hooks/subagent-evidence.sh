@@ -97,9 +97,8 @@ if (
         "This report claims completed work but shows no command output, and "
         "CLAUDE.md (Execution) requires every dispatched subagent to run the checks for its "
         "slice and include the output — \"done without evidence is a claim, not a fact\".\n"
-        "Run the checks that actually cover what you changed (typecheck, the affected tests, "
-        "the build if you touched build-affecting code) and paste the real output into your "
-        "report. Do not paraphrase it and do not fabricate it.\n"
+        "Run the check that actually covers what you changed (typecheck — CI runs the rest) "
+        "and paste the real output into your report. Do not paraphrase it and do not fabricate it.\n"
         "If your slice genuinely had nothing to run — research, reading, a docs-only edit — "
         "say so in one line and end the turn; that is an accepted answer."
     )

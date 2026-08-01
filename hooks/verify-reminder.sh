@@ -103,10 +103,9 @@ nudge() {
 import json, os
 msg = (
     "Verification check before this PR hands off (CLAUDE.md: \"Verify before you push or open a PR\"). "
-    "Confirm you have run the checks relevant to your change on THIS branch'\''s current state and they pass:\n"
-    "  - Always: typecheck + the tests affected by your change.\n"
-    "  - Only if you touched build-affecting code (config, deps, codegen, bundler/routes): the build.\n"
-    "If you have not run them yet, run them now and report the command output. "
+    "Confirm you have run the check relevant to your change on THIS branch'\''s current state and it passes:\n"
+    "  - typecheck (CI runs the rest — lint, tests, build).\n"
+    "If you have not run it yet, run it now and report the command output. "
     "If anything fails, fix it (or open the PR as a draft) before calling this done. "
     "Scope to your diff — this is a fast local check, not the full suite.\n"
     "Before this PR hands off, also confirm issue linkage: the PR body references the issue it resolves (\"Closes #N\"), and that issue is set to status:in-review. "
