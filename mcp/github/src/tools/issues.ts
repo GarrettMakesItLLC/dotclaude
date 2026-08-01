@@ -609,6 +609,13 @@ export function registerIssueTools(server: McpServer): void {
               "name which app, for reports cross-filed elsewhere. `owner` is trusted, so his defects " +
               "start `ready` instead of awaiting verification.",
           ),
+        complexity: z
+          .enum(ISSUE_COMPLEXITIES)
+          .optional()
+          .describe(
+            "How much judgment the task takes: trivial (Haiku-class), standard (Sonnet-class, " +
+              "the default), or complex (Opus-class, cross-cutting/ambiguous/one-way-door).",
+          ),
         milestone: z
           .string()
           .optional()
@@ -625,7 +632,7 @@ export function registerIssueTools(server: McpServer): void {
           .describe('Usernames to assign, or "@me". Default: unassigned.'),
       },
     },
-    async ({ repo, title, body, type, status, source, milestone, parent, assignees }) => {
+    async ({ repo, title, body, type, status, source, complexity, milestone, parent, assignees }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
         const effectiveStatus: IssueStatus = status ?? defaultStatus(source, type);
@@ -633,6 +640,7 @@ export function registerIssueTools(server: McpServer): void {
         const labels = [statusLabel(effectiveStatus)];
         if (type) labels.push(typeLabel(type));
         if (source) labels.push(sourceLabel(source));
+        if (complexity) labels.push(complexityLabel(complexity));
 
         const created = await ghRequest<{ number: number; id: number }>(
           `/repos/${owner}/${name}/issues`,

@@ -653,6 +653,23 @@ describe("issue_open", () => {
     expect(issue._warnings).toHaveLength(1);
     expect(issue._warnings[0]).toContain('milestone "v2"');
   });
+
+  it("includes complexity:* in the label set when complexity is passed", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        const body = JSON.parse(init.body as string);
+        expect(body.labels).toContain("complexity:complex");
+        return makeResponse({ status: 201, body: { number: 42, id: 1001 } });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/42")) {
+        return makeResponse({ status: 200, body: { number: 42, labels: [{ name: "complexity:complex" }] } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({ repo: "octo/repo", title: "Something hard", complexity: "complex" });
+    expect(res.isError).toBeFalsy();
+  });
 });
 
 describe("issue_set_status", () => {
