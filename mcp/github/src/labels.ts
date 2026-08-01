@@ -19,6 +19,13 @@ export const ISSUE_TYPES = ["bug", "feature", "task"] as const;
 export type IssueType = (typeof ISSUE_TYPES)[number];
 
 /**
+ * How much judgment a task takes, and which model it calls for. Orthogonal to
+ * type/status/source — a bug fix and a feature can each be trivial or complex.
+ */
+export const ISSUE_COMPLEXITIES = ["trivial", "standard", "complex"] as const;
+export type IssueComplexity = (typeof ISSUE_COMPLEXITIES)[number];
+
+/**
  * Marker labels — orthogonal to status/type/source, and to each other. `epic`
  * says what an issue *is* in the tracker's shape; `launch-blocker` says what it
  * gates. Neither is a state, so neither is mutually exclusive with anything.
@@ -67,6 +74,21 @@ const TYPE_STYLES: Record<IssueType, LabelStyle> = {
   task: { color: "bfd4f2", description: "Chore / maintenance / non-feature work" },
 };
 
+const COMPLEXITY_STYLES: Record<IssueComplexity, LabelStyle> = {
+  trivial: {
+    color: "b4e7ce",
+    description: "Mechanical, single-file, no judgment calls — a Haiku-class task",
+  },
+  standard: {
+    color: "cfe2f3",
+    description: "Bounded scope, known patterns — the default, Sonnet-class task",
+  },
+  complex: {
+    color: "e07a5f",
+    description: "Cross-cutting, ambiguous, or one-way-door — an Opus-class task",
+  },
+};
+
 const MARKER_STYLES: Record<IssueMarker, LabelStyle> = {
   epic: { color: "7057ff", description: "Index issue: carries the scope and its sub-issues, never worked directly" },
   "launch-blocker": { color: "cc0000", description: "Must clear before public launch" },
@@ -87,6 +109,11 @@ export function typeLabel(type: IssueType): string {
   return `type:${type}`;
 }
 
+/** The `complexity:*` label name for a complexity value. */
+export function complexityLabel(complexity: IssueComplexity): string {
+  return `complexity:${complexity}`;
+}
+
 /** The `status:*` label name for a status value. */
 export function statusLabel(status: IssueStatus): string {
   return `status:${status}`;
@@ -101,6 +128,7 @@ export function sourceLabel(source: IssueSource): string {
 export const ISSUE_LABELS: LabelSpec[] = [
   ...ISSUE_STATUSES.map((s) => ({ name: statusLabel(s), ...STATUS_STYLES[s] })),
   ...ISSUE_TYPES.map((t) => ({ name: typeLabel(t), ...TYPE_STYLES[t] })),
+  ...ISSUE_COMPLEXITIES.map((c) => ({ name: complexityLabel(c), ...COMPLEXITY_STYLES[c] })),
   ...ISSUE_SOURCES.map((s) => ({ name: sourceLabel(s), ...SOURCE_STYLES[s] })),
   ...ISSUE_MARKERS.map((m) => ({ name: m, ...MARKER_STYLES[m] })),
 ];

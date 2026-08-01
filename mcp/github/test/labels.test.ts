@@ -272,11 +272,12 @@ const DEPRECATED_LABELS_FIXTURE = [
 
 describe("taxonomy", () => {
   it("provisions exactly one label per status, type, source and marker value", async () => {
-    const { ISSUE_LABELS, ISSUE_STATUSES, ISSUE_TYPES, ISSUE_SOURCES, ISSUE_MARKERS } =
+    const { ISSUE_LABELS, ISSUE_STATUSES, ISSUE_TYPES, ISSUE_COMPLEXITIES, ISSUE_SOURCES, ISSUE_MARKERS } =
       await import("../src/labels.js");
     expect(ISSUE_LABELS.map((l) => l.name)).toEqual([
       ...ISSUE_STATUSES.map((s) => `status:${s}`),
       ...ISSUE_TYPES.map((t) => `type:${t}`),
+      ...ISSUE_COMPLEXITIES.map((c) => `complexity:${c}`),
       ...ISSUE_SOURCES.map((s) => `source:${s}`),
       ...ISSUE_MARKERS,
     ]);
@@ -307,5 +308,14 @@ describe("taxonomy", () => {
     const { ISSUE_STATUSES, STATUS_LABEL_NAMES } = await import("../src/labels.js");
     expect(ISSUE_STATUSES).toContain("waiting");
     expect(STATUS_LABEL_NAMES).toEqual(ISSUE_STATUSES.map((s) => `status:${s}`));
+  });
+
+  it("includes a complexity:* axis with exactly three tiers", async () => {
+    const { ISSUE_COMPLEXITIES, ISSUE_LABELS, complexityLabel } = await import("../src/labels.js");
+    expect([...ISSUE_COMPLEXITIES].sort()).toEqual(["complex", "standard", "trivial"]);
+    for (const c of ISSUE_COMPLEXITIES) {
+      expect(ISSUE_LABELS.some((l) => l.name === complexityLabel(c))).toBe(true);
+    }
+    expect(complexityLabel("trivial")).toBe("complexity:trivial");
   });
 });
