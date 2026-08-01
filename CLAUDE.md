@@ -61,6 +61,8 @@ A push and a PR are handoffs — never make them on unverified work. Run typeche
 
 **Waiting for CI is a sleep, not a poll.** Sleep the run's realistic duration in one block, then check once and back off if it's still pending. Every poll is a whole turn that re-reads the conversation to produce one tool call.
 
+**On an autonomous-merge repo, set auto-merge (`gh pr merge --auto --squash`) right after opening the PR, then stop watching it.** GitHub merges it the instant checks (and the merge queue, where enabled) clear — no polling needed at all. Come back once, on a single generous wakeup (~25-30 min covers CI plus queue-wait for almost everything), and either it's merged and done, or it needs a real fix.
+
 Self-review and verify locally *before* opening the PR, then open it ready — not draft. **Never use CI as the debugging loop**: reproduce failures locally; manual triggers are for what genuinely can't run locally, not debug-by-rerun.
 
 Done isn't "PR opened" — it's the checkout clean, on the default branch, pulled current, no stray worktrees or branches. Run the **`finishing-work`** skill at the finish line. Never delete a worktree or branch holding uncommitted or unpushed work without flagging it.
