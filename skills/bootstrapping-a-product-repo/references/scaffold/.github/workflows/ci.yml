@@ -14,6 +14,13 @@ on:
   # on a stale base can also break once merged, and only `dev` sees that tree.
   push:
     branches: [dev]
+  # Tier 2 (merge-queue lane): uncomment once this repo has a suite too slow
+  # for the PR gate (e2e, a11y), and update ci-success per the comment on
+  # that job below. Requires enabling the merge queue on the branch ruleset;
+  # CI Success remains the only required check — no second name to add.
+  # See rules/ci.md's "Two-tier check model" and the commented example job
+  # at the bottom of this file.
+  # merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -59,16 +66,66 @@ jobs:
         with:
           fail-on-error: true
 
+  # Folded in from a standalone pr-title-lint.yml: a separately-required
+  # ruleset check has the same merge-queue re-validation problem CI Success
+  # solves (rules/ci.md's "Two-tier check model"), and `needs:` can't reach
+  # across workflow files — so PR-title linting lives here and joins
+  # ci-success's needs: instead of being its own required check.
+  lint-pr-title:
+    name: Lint PR Title
+    # A PR's title cannot change once it's in the merge queue, so there is
+    # nothing to re-check on merge_group — expected to skip there, same as
+    # `check`.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # A regex over the PR title — seconds. Capped so a hung action cannot
+    # inherit the 360-minute default (#3397).
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Validate PR title
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            chore
+            test
+            build
+            ci
+            style
+            revert
+          requireScope: false
+
   # One aggregate required check, so adding or splitting jobs never means editing
   # the branch ruleset. It also closes the skipped-job hole: a skipped job
   # satisfies a required status check of the same name, so requiring `check`
   # directly would let a path-filtered skip merge unverified.
+  #
+  # This repo has no Tier 2 (merge_group) job yet, so this stays a
+  # pull_request-only job with an unconditional skip-check. Once a slow suite
+  # (e2e, a11y) gets added as a merge_group-gated job below, this job needs
+  # three changes — see rules/ci.md's "Two-tier check model" for the full
+  # convention, and the commented example at the bottom of this file:
+  #   1. `if:` becomes `always() && (github.event_name == 'pull_request' ||
+  #      github.event_name == 'merge_group')`.
+  #   2. `needs:` gains the new Tier 2 job(s).
+  #   3. The skip-check becomes event-aware: Tier 1 jobs (check,
+  #      lint-pr-title) are expected to skip on merge_group; Tier 2 jobs are
+  #      expected to skip on pull_request. Only an *unexpected* skip fails.
   ci-success:
     # Named to match the other repos exactly, so one branch ruleset definition is
     # portable across all of them without editing the required-check string.
     name: CI Success
     if: always() && github.event_name == 'pull_request'
-    needs: [check]
+    needs: [check, lint-pr-title]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -84,3 +141,59 @@ jobs:
           echo "$RESULTS" | grep -q '"result": *"skipped"' && {
             echo "::error::A required job was skipped — it had work to do."; exit 1; }
           echo "All required jobs succeeded."
+
+    # --- Tier 2 (merge-queue lane) example — commented out, not active. ---
+    # Uncomment and adapt once this repo has a slow suite (e2e, a11y) to gate.
+    # Also uncomment `merge_group:` in the `on:` block above. There is still
+    # only one required check (`CI Success`) — do not add a second aggregate.
+    # This shows the resulting `ci-success` job with all three changes from
+    # the comment on the real `ci-success` job above applied, plus the new
+    # `e2e` job. Replace the real `ci-success` job above with this version
+    # (and delete this commented block) rather than keeping both.
+    #
+    # e2e:
+    #   name: E2E
+    #   if: github.event_name == 'merge_group'
+    #   runs-on: ubuntu-latest
+    #   timeout-minutes: 20
+    #   steps:
+    #     - uses: actions/checkout@v4
+    #     - uses: actions/setup-node@v4
+    #       with:
+    #         node-version: 20
+    #         cache: npm
+    #     - run: npm ci
+    #     - run: npm run test:e2e
+    #
+    # ci-success:
+    #   name: CI Success
+    #   if: always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+    #   needs: [check, lint-pr-title, e2e]
+    #   runs-on: ubuntu-latest
+    #   timeout-minutes: 5
+    #   steps:
+    #     - name: Verify no required job failed or was unexpectedly skipped
+    #       env:
+    #         RESULTS: ${{ toJSON(needs) }}
+    #         EVENT: ${{ github.event_name }}
+    #       run: |
+    #         echo "$RESULTS"
+    #         echo "$RESULTS" | grep -q '"result": *"failure"' && {
+    #           echo "::error::A required job failed."; exit 1; }
+    #         echo "$RESULTS" | grep -q '"result": *"cancelled"' && {
+    #           echo "::error::A required job was cancelled."; exit 1; }
+    #         # Tier 1 (check, lint-pr-title) is expected to skip on merge_group;
+    #         # Tier 2 (e2e) is expected to skip on pull_request. Only an
+    #         # unexpected skip on the tier's own trigger fails the check.
+    #         python3 - "$EVENT" <<'PYEOF'
+    #         import json, os, sys
+    #         event = sys.argv[1]
+    #         results = json.loads(os.environ["RESULTS"])
+    #         tier1, tier2 = ("check", "lint-pr-title"), ("e2e",)
+    #         watch = tier1 if event == "pull_request" else tier2
+    #         for job in watch:
+    #             if results[job]["result"] == "skipped":
+    #                 print(f"::error::{job} was skipped on {event} — it had work to do.")
+    #                 sys.exit(1)
+    #         PYEOF
+    #         echo "All required jobs succeeded."

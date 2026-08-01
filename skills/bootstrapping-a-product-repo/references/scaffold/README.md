@@ -14,13 +14,14 @@ being stored here:
 Nothing else is templated — every other file is identical in every repo, which is the reason they live
 here rather than being re-authored per repo.
 
-## Two names that must not change
+## One name that must not change
 
 - **`CI Success`** — the `ci-success` job's display name in `ci.yml`. The `StagePR` and `ProdPR`
-  rulesets require it by that exact string; renaming it silently unprotects the branch.
-- **`Semantic PR Title`** — the job's display name in `pr-title-lint.yml`, required by `StagePR`.
+  rulesets require it by that exact string; renaming it silently unprotects the branch. It is the
+  only required status check — `lint-pr-title` (PR-title linting) lives inside `ci.yml` and joins
+  `ci-success`'s `needs:` rather than being independently required.
 
-Both are why one ruleset definition is portable across every repo in the org.
+This is why one ruleset definition is portable across every repo in the org.
 
 ## What is deliberately absent
 

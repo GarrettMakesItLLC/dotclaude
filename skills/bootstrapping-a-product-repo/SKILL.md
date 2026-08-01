@@ -80,7 +80,7 @@ done
 
 | Ruleset | Targets | Merge method | Requires |
 | --- | --- | --- | --- |
-| `StagePR` | `~DEFAULT_BRANCH` | squash | `CI Success`, `Semantic PR Title` |
+| `StagePR` | `~DEFAULT_BRANCH` | squash | `CI Success` |
 | `ProdPR` | `refs/heads/main` | **merge commit only** | `CI Success` |
 | `Copilot review for default branch` | `~DEFAULT_BRANCH` | — | — |
 
@@ -125,8 +125,7 @@ cd .worktrees/bootstrap
 | File | Notes |
 | --- | --- |
 | `CLAUDE.md` | Autonomy line first. Describe what the repo **is**, not what it will be — mark planned layout as not-yet-present. |
-| `.github/workflows/ci.yml` | The `CI Success` job name is what the rulesets require. Do not rename it. |
-| `.github/workflows/pr-title-lint.yml` | Job name must be `Semantic PR Title` in every repo, so one ruleset definition stays portable. |
+| `.github/workflows/ci.yml` | The `CI Success` job name is what the rulesets require. Do not rename it. PR-title linting is the `lint-pr-title` job inside this file, not a standalone workflow — it joins `ci-success`'s `needs:` rather than being independently required. |
 | `.github/workflows/issue-status-clear.yml` | Strips `status:*` on close. |
 | `package.json`, prettier, markdownlint, commitlint, husky | See the traps below. |
 | `.gitignore` | Add `.worktrees/` and `.claude/settings.local.json` here. |
