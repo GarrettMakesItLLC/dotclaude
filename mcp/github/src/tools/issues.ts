@@ -23,7 +23,6 @@ import {
   type IssueSource,
   type IssueStatus,
   type IssueType,
-  type IssueComplexity,
 } from "../labels.js";
 import { setIssueStatus } from "../issue-status.js";
 import { labelNames, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";

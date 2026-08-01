@@ -9,7 +9,7 @@ history.jsonl
 ide/
 mcp-needs-auth-cache.json
 paste-cache/
-plans/
+/plans/
 projects/
 session-env/
 sessions/

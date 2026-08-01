@@ -95,12 +95,14 @@ Issues:
   all other labels. Accepts any status in the taxonomy (`src/labels.ts`).
 - `issue_set_type` — set bug/feature/task as the native issue type
   (best-effort) plus a `type:*` label.
+- `issue_set_complexity` — set the single `complexity:*` label (trivial/
+  standard/complex), preserving all other labels.
 - `issue_set_milestone` / `milestone_ensure` — attach an issue to a milestone,
   finding or creating it by title.
 - `issue_add_sub_issue` / `issue_list_sub_issues` — manage parent/child issue
   relationships.
 - `issue_open` — create a fully-formed issue in one call: composes
-  `status:*`/`type:*`/`source:*` labels, sets the native issue type
+  `status:*`/`type:*`/`source:*`/`complexity:*` labels, sets the native issue type
   (best-effort), finds-or-creates and attaches a milestone by title, and
   nests it under a `parent` as a sub-issue. Composes the granular tools above
   so agents don't have to hand-compose fields across several calls.
@@ -117,7 +119,7 @@ Claims:
 Labels:
 
 - `labels_ensure` — idempotently provision the canonical taxonomy (`status:*`,
-  `type:*`, `source:*`, and the markers `epic` / `launch-blocker`) into a repo,
+  `type:*`, `source:*`, `complexity:*`, and the markers `epic` / `launch-blocker`) into a repo,
   and retitle GitHub's colliding stock labels (`bug`, `enhancement`,
   `documentation`) as deprecated where they already exist.
 - `labels_audit` — read-only drift report: missing canonical labels, stock

@@ -76,11 +76,11 @@ const TYPE_STYLES: Record<IssueType, LabelStyle> = {
 
 const COMPLEXITY_STYLES: Record<IssueComplexity, LabelStyle> = {
   trivial: {
-    color: "b4e7ce",
+    color: "8d6e63",
     description: "Mechanical, single-file, no judgment calls — a Haiku-class task",
   },
   standard: {
-    color: "cfe2f3",
+    color: "4db6ac",
     description: "Bounded scope, known patterns — the default, Sonnet-class task",
   },
   complex: {
