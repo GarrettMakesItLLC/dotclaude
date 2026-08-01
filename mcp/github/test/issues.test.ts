@@ -235,6 +235,30 @@ describe("issue_set_type", () => {
   });
 });
 
+describe("issue_set_complexity", () => {
+  it("replaces complexity:* labels, preserving non-complexity labels", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "GET" && url.endsWith("/issues/7")) {
+        return makeResponse({
+          status: 200,
+          body: { labels: [{ name: "complexity:trivial" }, { name: "status:ready" }] },
+        });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        const sent = JSON.parse(init.body as string).labels as string[];
+        expect(sent).toContain("complexity:complex");
+        expect(sent).toContain("status:ready");
+        expect(sent).not.toContain("complexity:trivial");
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_set_complexity");
+    const res = await handler({ repo: "octo/repo", number: 7, complexity: "complex" });
+    expect(res.isError).toBeFalsy();
+  });
+});
+
 describe("issue_claim", () => {
   /**
    * Mock the full happy path. `refStatus` drives the outcome of the atomic

@@ -13,14 +13,17 @@ import {
   ISSUE_SOURCES,
   ISSUE_STATUSES,
   ISSUE_TYPES,
+  ISSUE_COMPLEXITIES,
   typeLabel,
   nativeTypeName,
   statusLabel,
   sourceLabel,
+  complexityLabel,
   TRUSTED_SOURCES,
   type IssueSource,
   type IssueStatus,
   type IssueType,
+  type IssueComplexity,
 } from "../labels.js";
 import { setIssueStatus } from "../issue-status.js";
 import { labelNames, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";
@@ -333,6 +336,40 @@ export function registerIssueTools(server: McpServer): void {
           { method: "PUT", body: { labels: next } },
         );
         return jsonText({ number, type, labels: labelNames(data) });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "issue_set_complexity",
+    {
+      description:
+        "Set an issue's complexity:* label (trivial/standard/complex), replacing any existing " +
+        "complexity:* label. No native GitHub field to mirror — label only, unlike issue_set_type.",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Issue number."),
+        complexity: z.enum(ISSUE_COMPLEXITIES).describe("Complexity tier."),
+      },
+    },
+    async ({ repo, number, complexity }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+
+        const issue = await ghRequest<{ labels: { name: string }[] }>(
+          `/repos/${owner}/${name}/issues/${number}`,
+        );
+        const kept = issue.labels
+          .map((l) => l.name)
+          .filter((n) => !n.startsWith("complexity:"));
+        const next = [...kept, complexityLabel(complexity)];
+        const data = await ghRequest<RawLabel[]>(
+          `/repos/${owner}/${name}/issues/${number}/labels`,
+          { method: "PUT", body: { labels: next } },
+        );
+        return jsonText({ number, complexity, labels: labelNames(data) });
       } catch (err) {
         return errorResult(err);
       }
