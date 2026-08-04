@@ -62,6 +62,21 @@ with `claude mcp add --scope user`.
 Missing a capability, or a tool that keeps failing? The **`closing-tool-gaps`** skill covers unblocking
 now and adding the tool so the gap closes for everyone.
 
+## GitHub org permissions — `admin:org` not granted
+
+The `gh` token (`gh auth token`, what `github-rest` reuses) lacks the `admin:org`
+scope, which blocks organization-level rulesets — a single ruleset applied at
+the `GarrettMakesItLLC` org level, inherited by every repo. Until that scope is
+granted, branch protection is **repo-level rulesets**, set by hand per repo, and
+they drift: AdventureOS and RedThread were each missing rulesets other repos
+already carried, caught only by manual audit.
+
+Every repo should carry the same three rulesets — `StagePR`, `ProdPR`, and
+`Copilot review for default branch` — with `allowed_merge_methods` set: squash
+on the default branch, merge-commit only on `main`. Setting that field
+structurally rules out squashing a promotion (which breaks version
+computation) rather than leaving it a documented hope enforced by nothing.
+
 ## claude.ai OAuth connectors — reconnect on a fresh machine
 
 Nothing in this repo configures these. They are OAuth connectors whose tokens
