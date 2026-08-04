@@ -8,6 +8,10 @@ paths:
 
 # CI conventions (GitHub Actions)
 
+## Shared actions (`GarrettMakesItLLC/ci`)
+
+Composite actions and reusable workflows common to the product repos (e.g. `setup-node-workspace`) live in `GarrettMakesItLLC/ci`, tagged `@v1`. Consumers pin `@v1`, never `@main` — there is no staging tier for a shared action, so `@main` would let an in-progress change break every consumer's CI simultaneously. A private repo calling another private repo's `uses:` needs Actions access explicitly granted (repo settings → Actions → Access), or every `uses:` 404s.
+
 ## Trigger events
 
 **Validation runs once per change, on the PR.** A `push` re-run against a sha a PR already validated pays twice for one answer.
@@ -87,6 +91,10 @@ Gate each expensive job on a `dorny/paths-filter` job scoped to what that job ca
 ## Capability gates
 
 A workflow needing not-yet-provisioned secrets or a data-plane ships **off by default** behind a `RUN_*` repo variable (`workflow_dispatch` always runs), with a guard step that fails clearly when the variable is on but the secrets are missing.
+
+## Branch rulesets
+
+Every repo carries the same three rulesets: `StagePR`, `ProdPR`, and `Copilot review for default branch`. Set `allowed_merge_methods` on each — squash on the default branch, merge-commit only on `main` — so squashing a promotion (which breaks version computation) is structurally impossible rather than a documented hope. Org-level rulesets aren't available yet (`integrations.md`), so this is set by hand, per repo.
 
 ## Other
 
