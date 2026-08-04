@@ -76,9 +76,10 @@ A repo `CLAUDE.md` is **testable**, and a confidently wrong instruction costs mo
 ## 5. The rest of the surface
 
 - **`.claude/settings.json`** — repo-specific permissions and hooks only. Never a copy of user settings; user scope already applies.
-- **`.github/`** — `PULL_REQUEST_TEMPLATE.md` and `ISSUE_TEMPLATE/` are copies of `~/dotclaude/templates/`. `diff -r` them and copy forward; local additions stay only if repo-specific.
+- **`.github/`** — `GarrettMakesItLLC/.github` already supplies org-wide default `ISSUE_TEMPLATE/` and `PULL_REQUEST_TEMPLATE.md` (sourced from `~/dotclaude/templates/`) to any repo that doesn't define its own. A repo-local copy is redundant unless it genuinely diverges — `diff -r` against `~/dotclaude/templates/`, and delete the repo copy rather than leaving two sources if it doesn't.
 - **Labels** — `labels_ensure` once per repo, so the taxonomy the issue skill assumes exists.
 - **MCP** — `.mcp.json` only for a server this repo alone needs.
+- **Integrations** — cross-check `~/dotclaude/integrations.md`'s roster against what the repo actually uses (its `package.json`/CI for Supabase, Railway, Vercel, Sentry, etc.). A used integration undocumented there is a gap to file back against `integrations.md`, not something to re-document per repo.
 
 ## 6. Ship it
 
