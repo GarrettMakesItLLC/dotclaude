@@ -1,4 +1,19 @@
+import { hostname } from "node:os";
 import { GhHttpError, ghRequest, jsonText } from "./github.js";
+
+/** A marker embedded in the claim-stamp comment, parsed back out to identify the holder. */
+const CLAIM_STAMP_RE = /<!-- claim-lock: (\{.*?\}) -->/;
+
+interface ClaimStamp {
+  branch: string;
+  holder: string;
+  claimed_at: string;
+}
+
+/** This machine's identity for claim stamps. Overridable for environments where `hostname()` isn't meaningful (e.g. ephemeral containers). */
+function machineIdentity(): string {
+  return process.env.CLAIM_MACHINE_ID ?? hostname();
+}
 
 /** Prefix every claim branch carries, so a lock ref is identifiable by name alone. */
 export const CLAIM_BRANCH_PREFIX = "issue-";
@@ -66,6 +81,8 @@ export interface ClaimHolder {
   branch: string;
   last_commit: CommitSummary | null;
   pull_request: PullSummary | null;
+  claimed_by: string | null;
+  claimed_at: string | null;
 }
 
 /** Thrown when the lock ref already exists — the issue is claimed elsewhere. */
@@ -97,6 +114,10 @@ interface PullResponse {
   html_url?: string;
   merged_at?: string | null;
   head?: { ref?: string };
+}
+
+interface CommentResponse {
+  body?: string;
 }
 
 function firstLine(message: string | undefined): string | null {
@@ -138,10 +159,64 @@ export async function pullsForBranch(
 }
 
 /**
- * Describe who holds an existing lock ref: its last commit and any PR opened
- * from it, so the caller can tell a live claim from an abandoned one. Every
- * lookup is best-effort — a conflict is already established by the time this
- * runs, and partial detail beats failing the report.
+ * Post a comment on the issue stamping this claim with who holds it and when.
+ * The ref alone records that *someone* claimed the issue, not *who* — every
+ * machine authenticates as the same GitHub user, so the ref can't arbitrate
+ * "is this my own earlier session, or another machine, holding the lock?".
+ * Best-effort: the branch ref is the actual lock and must not depend on this.
+ */
+export async function stampClaim(
+  owner: string,
+  name: string,
+  issueNumber: number,
+  branch: string,
+): Promise<void> {
+  const stamp: ClaimStamp = {
+    branch,
+    holder: machineIdentity(),
+    claimed_at: new Date().toISOString(),
+  };
+  await ghRequest(`/repos/${owner}/${name}/issues/${issueNumber}/comments`, {
+    method: "POST",
+    body: {
+      body:
+        `🔒 Claimed by \`${stamp.holder}\` at ${stamp.claimed_at} (branch \`${branch}\`)\n` +
+        `<!-- claim-lock: ${JSON.stringify(stamp)} -->`,
+    },
+  });
+}
+
+/** The most recent claim stamp for `branch`, or null if none was posted (older claim, or the post itself failed). */
+export async function latestClaimStamp(
+  owner: string,
+  name: string,
+  issueNumber: number,
+  branch: string,
+): Promise<ClaimStamp | null> {
+  try {
+    const comments = await ghRequest<CommentResponse[]>(
+      `/repos/${owner}/${name}/issues/${issueNumber}/comments`,
+      { query: { per_page: 100 } },
+    );
+    let latest: ClaimStamp | null = null;
+    for (const comment of comments) {
+      const match = comment.body ? CLAIM_STAMP_RE.exec(comment.body) : null;
+      if (!match) continue;
+      const parsed = JSON.parse(match[1]) as ClaimStamp;
+      if (parsed.branch !== branch) continue;
+      if (!latest || parsed.claimed_at > latest.claimed_at) latest = parsed;
+    }
+    return latest;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Describe who holds an existing lock ref: its claim stamp (holder + time),
+ * last commit, and any PR opened from it, so the caller can tell a live claim
+ * from an abandoned one. Every lookup is best-effort — a conflict is already
+ * established by the time this runs, and partial detail beats failing the report.
  */
 export async function claimHolder(
   owner: string,
@@ -163,7 +238,11 @@ export async function claimHolder(
     // Ref exists but its branch view is unavailable; the branch name still identifies the holder.
   }
 
-  const pulls = await pullsForBranch(owner, name, branch);
+  const issueNumber = issueNumberForBranch(branch);
+  const [pulls, stamp] = await Promise.all([
+    pullsForBranch(owner, name, branch),
+    issueNumber ? latestClaimStamp(owner, name, issueNumber, branch) : Promise.resolve(null),
+  ]);
   const pull = pulls.find((p) => p.state === "open") ?? pulls[0];
 
   return {
@@ -178,6 +257,8 @@ export async function claimHolder(
           html_url: pull.html_url ?? "",
         }
       : null,
+    claimed_by: stamp?.holder ?? null,
+    claimed_at: stamp?.claimed_at ?? null,
   };
 }
 
@@ -203,11 +284,20 @@ export async function acquireClaimLock(
   } catch (err) {
     if (err instanceof GhHttpError && err.status === 422) {
       const holder = await claimHolder(owner, name, branch);
+      const whoWhen = holder.claimed_by
+        ? `Claimed by \`${holder.claimed_by}\` at ${holder.claimed_at}. `
+        : "No claim stamp found (an older claim, predating stamping, or the stamp post failed) — " +
+          "treat as held by an unknown machine. ";
+      const sameMachine = holder.claimed_by === machineIdentity();
       throw new ClaimConflictError(
-        `Issue #${issueNumber} is already claimed: the lock branch "${branch}" exists on the remote. ` +
-          "Another machine or session holds it — do NOT start this issue. " +
-          "Pick different work, or resume the existing branch after confirming it is abandoned " +
-          "(`work_in_flight` to survey, `claim_release` to drop a dead lock).",
+        `Issue #${issueNumber} is already claimed: the lock branch "${branch}" exists on the remote. ${whoWhen}` +
+          (sameMachine
+            ? "That's THIS machine — most likely your own earlier session that died or finished " +
+              "without a PR. Safe to investigate resuming: `work_in_flight` for its last commit and " +
+              "PR status, `claim_release` to drop it if abandoned."
+            : "Default to: pick different work. Only resume this branch if you have independent " +
+              "confirmation (outside this tool) that the holder above is not actively working it — " +
+              "the mismatch alone is not evidence of abandonment."),
         holder,
       );
     }

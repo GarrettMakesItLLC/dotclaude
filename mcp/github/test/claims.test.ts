@@ -347,6 +347,46 @@ describe("work_in_flight", () => {
     expect(rows[1].pull_request).toBeNull();
   });
 
+  it("surfaces claimed_by/claimed_at from each branch's stamp comment", async () => {
+    const stamp = { branch: "issue-9-newer", holder: "workhorse", claimed_at: "2026-07-19T00:00:00.000Z" };
+    fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+      if (init.method === "GET" && url.includes("/git/matching-refs/heads/issue-")) {
+        return makeResponse({
+          status: 200,
+          body: [{ ref: "refs/heads/issue-9-newer", object: { sha: "sha9" } }],
+        });
+      }
+      if (init.method === "GET" && url.includes("/pulls")) {
+        return makeResponse({ status: 200, body: [] });
+      }
+      if (init.method === "GET" && url.endsWith("/commits/sha9")) {
+        return makeResponse({
+          status: 200,
+          body: { sha: "sha9", commit: { author: { name: "Grace", date: "2026-07-20T00:00:00Z" }, message: "newer" } },
+        });
+      }
+      if (init.method === "GET" && url.includes("/issues/9/comments")) {
+        return makeResponse({
+          status: 200,
+          body: [
+            {
+              body: `🔒 Claimed by \`workhorse\` at ${stamp.claimed_at} (branch \`issue-9-newer\`)\n<!-- claim-lock: ${JSON.stringify(stamp)} -->`,
+            },
+          ],
+        });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getClaimHandler("work_in_flight");
+    const res = await handler({ repo: "octo/repo" });
+
+    expect(res.isError).toBeFalsy();
+    const rows = JSON.parse(res.content[0].text) as { claimed_by: string | null; claimed_at: string | null }[];
+    expect(rows[0].claimed_by).toBe("workhorse");
+    expect(rows[0].claimed_at).toBe(stamp.claimed_at);
+  });
+
   it("returns an empty list when the repo has no issue-* refs", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
       if (init.method === "GET" && url.includes("/git/matching-refs/heads/issue-")) {
