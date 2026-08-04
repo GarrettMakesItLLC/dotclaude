@@ -32,6 +32,7 @@ import {
   ClaimClosedError,
   ClaimConflictError,
   resolveClaimBranch,
+  stampClaim,
   structuredError,
 } from "../claim-lock.js";
 
@@ -433,12 +434,14 @@ export function registerIssueTools(server: McpServer): void {
     {
       description:
         "Claim an issue to begin work, taking a distributed lock first: creates the remote branch " +
-        "`issue-<N>-<slug>` at the default-branch head via an atomic ref create, then self-assigns " +
-        "the authenticated user and moves status to in-progress. If the branch already exists the " +
-        "issue is ALREADY CLAIMED (typically by another machine) — the call fails with the holder's " +
-        "branch, last commit and any open PR, and you must pick different work. Assignee alone " +
-        "cannot arbitrate this: every machine authenticates as the same user. Check out the " +
-        "returned branch instead of creating your own.",
+        "`issue-<N>-<slug>` at the default-branch head via an atomic ref create, stamps a claim " +
+        "comment on the issue (holder identity + timestamp), then self-assigns the authenticated " +
+        "user and moves status to in-progress. If the branch already exists the issue is ALREADY " +
+        "CLAIMED — the call fails with the holder's branch, last commit, any open PR, and — from " +
+        "the stamp — who holds it and when, so you can tell your own earlier session from another " +
+        "machine. Default to picking different work unless the stamp identifies THIS machine. " +
+        "Assignee alone cannot arbitrate this: every machine authenticates as the same user. Check " +
+        "out the returned branch instead of creating your own.",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number."),
@@ -456,8 +459,15 @@ export function registerIssueTools(server: McpServer): void {
         const lock = await acquireClaimLock(owner, name, target, number);
 
         // The ref IS the lock. Once it exists the claim is held, so a failure in
-        // either step below is reported as a warning and never rolls the ref back.
+        // any step below is reported as a warning and never rolls the ref back.
         const warnings: string[] = [];
+        try {
+          await stampClaim(owner, name, number, target);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          warnings.push(`claim stamp not posted (the branch lock is held regardless): ${msg}`);
+        }
+
         let assignee: string | null = null;
         try {
           assignee = await getViewerLogin();
