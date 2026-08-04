@@ -19,7 +19,9 @@ import {
   statusLabel,
   sourceLabel,
   complexityLabel,
+  complexityModelMismatch,
   TRUSTED_SOURCES,
+  type IssueComplexity,
   type IssueSource,
   type IssueStatus,
   type IssueType,
@@ -28,8 +30,8 @@ import { setIssueStatus } from "../issue-status.js";
 import { labelNames, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";
 import {
   acquireClaimLock,
+  claimBranchName,
   ClaimConflictError,
-  resolveClaimBranch,
   structuredError,
 } from "../claim-lock.js";
 
@@ -436,7 +438,11 @@ export function registerIssueTools(server: McpServer): void {
         "issue is ALREADY CLAIMED (typically by another machine) — the call fails with the holder's " +
         "branch, last commit and any open PR, and you must pick different work. Assignee alone " +
         "cannot arbitrate this: every machine authenticates as the same user. Check out the " +
-        "returned branch instead of creating your own.",
+        "returned branch instead of creating your own. Pass `caller_model` (your own model id, e.g. " +
+        "\"claude-sonnet-5\") and, when the issue carries a `complexity:*` label calling for a " +
+        "stronger model than you're running, the claim still succeeds but reports a " +
+        "`model_mismatch` field flagging it — over-provisioned needs no action, under-provisioned " +
+        "is worth surfacing to the owner rather than silently proceeding.",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number."),
@@ -444,17 +450,32 @@ export function registerIssueTools(server: McpServer): void {
           .string()
           .optional()
           .describe("Override the derived lock branch name (default `issue-<N>-<title-slug>`)."),
+        caller_model: z
+          .string()
+          .optional()
+          .describe(
+            "The claiming agent's own model id (e.g. \"claude-sonnet-5\"), self-reported — this " +
+              "tool has no other way to know it. Omit to skip the complexity/model check entirely.",
+          ),
       },
     },
-    async ({ repo, number, branch }) => {
+    async ({ repo, number, branch, caller_model }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const target = await resolveClaimBranch(owner, name, number, branch);
+        const issue = await ghRequest<RawIssue>(`/repos/${owner}/${name}/issues/${number}`);
+        const target = branch ?? claimBranchName(number, issue.title ?? "");
         const lock = await acquireClaimLock(owner, name, target, number);
 
         // The ref IS the lock. Once it exists the claim is held, so a failure in
         // either step below is reported as a warning and never rolls the ref back.
         const warnings: string[] = [];
+
+        const complexity = labelNames(issue.labels)
+          .find((l) => l.startsWith("complexity:"))
+          ?.slice("complexity:".length) as IssueComplexity | undefined;
+        const modelMismatch =
+          complexity && caller_model ? complexityModelMismatch(complexity, caller_model) : null;
+
         let assignee: string | null = null;
         try {
           assignee = await getViewerLogin();
@@ -486,6 +507,7 @@ export function registerIssueTools(server: McpServer): void {
           assignee,
           status,
           checkout: `git fetch origin && git checkout ${target}`,
+          model_mismatch: modelMismatch,
         };
         return jsonText(warnings.length ? { ...result, _warnings: warnings } : result);
       } catch (err) {

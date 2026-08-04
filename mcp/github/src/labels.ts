@@ -114,6 +114,46 @@ export function complexityLabel(complexity: IssueComplexity): string {
   return `complexity:${complexity}`;
 }
 
+/** Model tiers, weakest first — matches the minimum a complexity label calls for. */
+const MODEL_TIERS = ["haiku", "sonnet", "opus"] as const;
+type ModelTier = (typeof MODEL_TIERS)[number];
+
+const COMPLEXITY_MIN_TIER: Record<IssueComplexity, ModelTier> = {
+  trivial: "haiku",
+  standard: "sonnet",
+  complex: "opus",
+};
+
+/** The tier a model id names, by substring match (`claude-opus-5` → `opus`), or null if unrecognized. */
+function modelTier(modelId: string): ModelTier | null {
+  const lower = modelId.toLowerCase();
+  // Checked strongest-first: an id could plausibly contain more than one tier name.
+  for (let i = MODEL_TIERS.length - 1; i >= 0; i--) {
+    if (lower.includes(MODEL_TIERS[i])) return MODEL_TIERS[i];
+  }
+  return null;
+}
+
+/**
+ * A human-readable warning when `callerModel` is under-provisioned for
+ * `complexity`, or null when it meets or exceeds the minimum (including when
+ * either input is unrecognized — silence, not a false positive, is the safe
+ * failure mode for a heuristic this coarse).
+ */
+export function complexityModelMismatch(
+  complexity: IssueComplexity,
+  callerModel: string,
+): string | null {
+  const caller = modelTier(callerModel);
+  if (!caller) return null;
+  const required = COMPLEXITY_MIN_TIER[complexity];
+  if (MODEL_TIERS.indexOf(caller) >= MODEL_TIERS.indexOf(required)) return null;
+  return (
+    `caller is running "${callerModel}" (${caller}-tier) but this issue is labeled ` +
+    `complexity:${complexity}, which calls for ${required}-tier or stronger.`
+  );
+}
+
 /** The `status:*` label name for a status value. */
 export function statusLabel(status: IssueStatus): string {
   return `status:${status}`;

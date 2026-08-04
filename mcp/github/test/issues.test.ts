@@ -271,6 +271,7 @@ describe("issue_claim", () => {
     assigneesStatus?: number;
     branchBody?: unknown;
     prsBody?: unknown;
+    issueLabels?: { name: string }[];
   }) {
     return async (url: string, init: { method?: string; body?: string }) => {
       const method = init.method ?? "GET";
@@ -300,7 +301,11 @@ describe("issue_claim", () => {
       if (method === "GET" && url.endsWith("/issues/8")) {
         return makeResponse({
           status: 200,
-          body: { number: 8, title: "Fix the thing!", labels: [{ name: "status:ready" }, { name: "type:bug" }] },
+          body: {
+            number: 8,
+            title: "Fix the thing!",
+            labels: opts.issueLabels ?? [{ name: "status:ready" }, { name: "type:bug" }],
+          },
         });
       }
       if (method === "PUT" && url.endsWith("/labels")) {
@@ -410,6 +415,42 @@ describe("issue_claim", () => {
     expect(res.isError).toBeFalsy();
     const out = JSON.parse(res.content[0].text) as { branch: string };
     expect(out.branch).toBe("issue-8-custom");
+  });
+
+  it("flags model_mismatch when caller_model is under-provisioned for the issue's complexity:* label", async () => {
+    const calls: string[] = [];
+    fetchMock.mockImplementation(
+      mockClaim({
+        refStatus: 201,
+        calls,
+        issueLabels: [{ name: "type:bug" }, { name: "complexity:complex" }],
+      }),
+    );
+
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8, caller_model: "claude-sonnet-5" });
+
+    expect(res.isError).toBeFalsy();
+    const out = JSON.parse(res.content[0].text) as { model_mismatch: string | null };
+    expect(out.model_mismatch).toContain("complexity:complex");
+  });
+
+  it("reports no mismatch when caller_model meets the complexity, or when either is absent", async () => {
+    const calls: string[] = [];
+    fetchMock.mockImplementation(
+      mockClaim({
+        refStatus: 201,
+        calls,
+        issueLabels: [{ name: "type:bug" }, { name: "complexity:complex" }],
+      }),
+    );
+    const handler = await getIssueHandler("issue_claim");
+
+    const matched = await handler({ repo: "octo/repo", number: 8, caller_model: "claude-opus-5" });
+    expect((JSON.parse(matched.content[0].text) as { model_mismatch: string | null }).model_mismatch).toBeNull();
+
+    const noModel = await handler({ repo: "octo/repo", number: 8 });
+    expect((JSON.parse(noModel.content[0].text) as { model_mismatch: string | null }).model_mismatch).toBeNull();
   });
 });
 
