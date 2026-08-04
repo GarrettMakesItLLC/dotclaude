@@ -28,6 +28,8 @@ import { setIssueStatus } from "../issue-status.js";
 import { labelNames, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";
 import {
   acquireClaimLock,
+  assertIssueClaimable,
+  ClaimClosedError,
   ClaimConflictError,
   resolveClaimBranch,
   structuredError,
@@ -449,6 +451,7 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, number, branch }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
+        await assertIssueClaimable(owner, name, number);
         const target = await resolveClaimBranch(owner, name, number, branch);
         const lock = await acquireClaimLock(owner, name, target, number);
 
@@ -495,6 +498,15 @@ export function registerIssueTools(server: McpServer): void {
             reason: "already-claimed",
             issue: number,
             ...err.holder,
+            message: err.message,
+          });
+        }
+        if (err instanceof ClaimClosedError) {
+          return structuredError({
+            claimed: false,
+            reason: "closed",
+            issue: number,
+            ...err.issue,
             message: err.message,
           });
         }

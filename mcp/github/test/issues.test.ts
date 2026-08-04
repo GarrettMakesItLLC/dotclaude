@@ -411,6 +411,49 @@ describe("issue_claim", () => {
     const out = JSON.parse(res.content[0].text) as { branch: string };
     expect(out.branch).toBe("issue-8-custom");
   });
+
+  it("refuses to claim a closed issue, without creating the lock ref or self-assigning", async () => {
+    const calls: string[] = [];
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      const method = init.method ?? "GET";
+      calls.push(`${method} ${new URL(url).pathname}`);
+      if (method === "GET" && url.endsWith("/issues/8")) {
+        return makeResponse({
+          status: 200,
+          body: {
+            number: 8,
+            title: "Fix the thing!",
+            state: "closed",
+            state_reason: "completed",
+            closed_at: "2026-07-30T18:31:30Z",
+            labels: [{ name: "type:bug" }],
+          },
+        });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8 });
+
+    expect(res.isError).toBe(true);
+    const out = JSON.parse(res.content[0].text) as {
+      claimed: boolean;
+      reason: string;
+      issue: number;
+      state: string;
+      state_reason: string | null;
+      closed_at: string | null;
+    };
+    expect(out.claimed).toBe(false);
+    expect(out.reason).toBe("closed");
+    expect(out.issue).toBe(8);
+    expect(out.state).toBe("closed");
+    expect(out.state_reason).toBe("completed");
+    expect(out.closed_at).toBe("2026-07-30T18:31:30Z");
+    expect(calls.some((c) => c.endsWith("/git/refs"))).toBe(false);
+    expect(calls.some((c) => c.endsWith("/assignees"))).toBe(false);
+  });
 });
 
 describe("issue_open", () => {
