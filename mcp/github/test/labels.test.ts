@@ -319,3 +319,26 @@ describe("taxonomy", () => {
     expect(complexityLabel("trivial")).toBe("complexity:trivial");
   });
 });
+
+describe("complexityModelMismatch", () => {
+  it("flags an under-provisioned caller", async () => {
+    const { complexityModelMismatch } = await import("../src/labels.js");
+    const msg = complexityModelMismatch("complex", "claude-sonnet-5");
+    expect(msg).not.toBeNull();
+    expect(msg).toContain("complexity:complex");
+    expect(msg).toContain("sonnet-tier");
+    expect(msg).toContain("opus-tier or stronger");
+  });
+
+  it("says nothing about an exactly-matched or over-provisioned caller", async () => {
+    const { complexityModelMismatch } = await import("../src/labels.js");
+    expect(complexityModelMismatch("standard", "claude-sonnet-5")).toBeNull();
+    expect(complexityModelMismatch("trivial", "claude-opus-5")).toBeNull();
+  });
+
+  it("stays silent when the caller's model id isn't recognized, rather than guessing", async () => {
+    const { complexityModelMismatch } = await import("../src/labels.js");
+    expect(complexityModelMismatch("complex", "gpt-4")).toBeNull();
+    expect(complexityModelMismatch("complex", "")).toBeNull();
+  });
+});
