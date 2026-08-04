@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # dotclaude worktree-guard — PreToolUse hook for file-mutating tools
-# (Edit | Write | MultiEdit | NotebookEdit).
+# (Edit | Write | MultiEdit | NotebookEdit | Bash).
 #
 # Turns the "Worktree-first for code changes" rule in ~/dotclaude/CLAUDE.md from
 # prose Claude follows probabilistically into a hard, deterministic block. Wired
@@ -31,13 +31,22 @@
 # exits 0 and lets the edit through. A guard that bricks every edit is far worse
 # than one that occasionally misses — it is a backstop, not the only boundary.
 #
+# BASH COVERAGE (#92): a `Bash` command is scanned for write patterns —
+# redirection (`>`, `>>`), `sed -i`/`--in-place`, `cp`/`mv`/`install`/`tee`
+# destinations, and a Python `open(path, "w"/"a"/...)` call anywhere in the
+# command (the heredoc-to-python3 workaround that motivated this). Every
+# candidate path found is checked against the same main-tree/worktree logic as
+# Edit/Write. This is deliberately best-effort, NOT exhaustive — a write
+# buried in a script it invokes, or spelled in a way the regexes below don't
+# recognize, still gets through. It closes the common escape hatch (an agent
+# reaching for `python3 - <<EOF ... open(path, "w") ... EOF` when Edit/Write
+# was blocked), not every possible one.
+#
 # KNOWN GAPS (by design — backstop, not a sandbox):
 #   - Cannot distinguish a subagent from the main session (no such flag in hook
 #     input). Both are guarded; the escape hatch + config-repo exemption cover
 #     the legitimate main-session cases.
-#   - An agent can still write via the Bash tool (`echo > file`, `sed -i`).
-#     Bash file-mangling is out of scope here; this guards the first-class edit
-#     tools, which is how agents overwhelmingly write.
+#   - Bash coverage is pattern-based, not a real shell parse — see above.
 
 set -uo pipefail
 
@@ -48,67 +57,146 @@ input="$(cat)"
 
 # Need python3 to parse the tool_input JSON. No parser -> fail open.
 command -v python3 >/dev/null 2>&1 || exit 0
-# Edit/Write/MultiEdit use file_path; NotebookEdit uses notebook_path.
-file_path="$(printf '%s' "$input" | python3 -c 'import json,sys
-try:
-    ti = json.load(sys.stdin).get("tool_input", {})
-    sys.stdout.write(ti.get("file_path") or ti.get("notebook_path") or "")
-except Exception:
-    pass' 2>/dev/null)"
+# Edit/Write/MultiEdit use file_path; NotebookEdit uses notebook_path; Bash
+# uses command, scanned below for write patterns instead of a single path.
+# Emits one candidate path per line — bash variables cannot hold an embedded
+# NUL byte ($(...) truncates there), and a literal newline in a path is rare
+# enough to accept missing (fail-open, per the header).
+# A quoted heredoc delimiter ('PYEOF'): bash passes the body through with NO
+# expansion or quote-interpretation, unlike `python3 -c '...'` — which breaks
+# the moment the Python source itself needs a single quote (regex character
+# classes, str.strip(), etc. all do). Input travels via an env var, not stdin —
+# the heredoc IS python3's stdin (that's how `python3 -` gets its script), so
+# piping JSON in on top of it would just be discarded.
+candidates="$(INPUT_JSON="$input" python3 - <<'PYEOF' 2>/dev/null
+import json, os, re, sys
 
-[ -z "$file_path" ] && exit 0
+try:
+    obj = json.loads(os.environ.get("INPUT_JSON", ""))
+except Exception:
+    sys.exit(0)
+
+tool = obj.get("tool_name", "")
+ti = obj.get("tool_input", {})
+out = []
+QUOTES = "\"'"
+
+if tool == "Bash":
+    cmd = ti.get("command") or ""
+
+    # Redirection: `> path` / `>> path`, not `2>&1`, `&>`, `>=`, or a `[ a > b ]`
+    # test operator (single `>` inside `[ ... ]` is a string comparison, not a
+    # redirect — excluded by requiring the target look like a path, not `]`).
+    for m in re.finditer(r"(?<![&\d])>>?\s*([^\s|&;><)]+)", cmd):
+        tgt = m.group(1).strip(QUOTES)
+        if tgt and tgt not in ("/dev/null", "&1", "&2") and not tgt.startswith("&"):
+            out.append(tgt)
+
+    # sed -i / --in-place: grab all non-flag trailing tokens on that pipeline
+    # segment as candidate targets (sed accepts multiple files).
+    for seg in re.split(r"[|;]", cmd):
+        if re.search(r"\bsed\b.*(-i\b|--in-place\b)", seg):
+            for tok in seg.split():
+                if not tok.startswith("-") and tok != "sed" and "sed" not in tok:
+                    out.append(tok.strip(QUOTES))
+
+    # cp/mv/install/tee: last non-flag token is the destination. `tee FILE`'s
+    # one argument is both its first and last non-flag token, so this covers
+    # the common single-destination form; `tee a b` (writes both) only catches
+    # the last, which costs nothing beyond a miss.
+    for seg in re.split(r"[|;]", cmd):
+        toks = seg.split()
+        if not toks:
+            continue
+        head = toks[0].rsplit("/", 1)[-1]
+        if head in ("cp", "mv", "install", "tee"):
+            nonflags = [t for t in toks[1:] if not t.startswith("-")]
+            if nonflags:
+                out.append(nonflags[-1].strip(QUOTES))
+
+    # Python `open(path, "w"...)`/`"a"...` embedded in a heredoc — the pattern
+    # this rule exists for.
+    for m in re.finditer(r"open\(\s*[\"']([^\"']+)[\"']\s*,\s*[\"'][wax]", cmd):
+        out.append(m.group(1))
+else:
+    p = ti.get("file_path") or ti.get("notebook_path") or ""
+    if p:
+        out.append(p)
+
+sys.stdout.write("\n".join(o for o in out if "\n" not in o))
+PYEOF
+)"
+
+[ -z "$candidates" ] && exit 0
 
 # Need git to reason about worktrees at all.
 command -v git >/dev/null 2>&1 || exit 0
 
-# Resolve the nearest existing directory at/above the target (the file may not
-# exist yet on a Write). git -C needs a real directory to run in.
-dir="$file_path"
-[ -d "$dir" ] || dir="$(dirname "$dir")"
-while [ ! -d "$dir" ] && [ "$dir" != "/" ] && [ "$dir" != "." ]; do
-  dir="$(dirname "$dir")"
-done
-[ -d "$dir" ] || exit 0
-
-# Outside any git work tree -> not our concern.
-[ "$(git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] || exit 0
-
-# Already inside a LINKED worktree? git-dir and git-common-dir diverge there
-# (e.g. .git/worktrees/foo vs .git). Equal => main working tree. Both resolved
-# to absolute paths so the comparison is robust.
-gitdir="$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null)"
-common_rel="$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null)"
-case "$common_rel" in
-  /*) commondir="$common_rel" ;;
-  *)  commondir="$(cd "$dir" 2>/dev/null && cd "$common_rel" 2>/dev/null && pwd)" ;;
-esac
-if [ -n "$gitdir" ] && [ -n "$commondir" ] && [ "$gitdir" != "$commondir" ]; then
-  exit 0  # in a linked worktree — exactly what we want
-fi
-
-# Main working tree from here down. Find its root.
-root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)"
-[ -z "$root" ] && exit 0
-
-# Exempt the dotclaude config repo itself (see header). Locate this script's own
-# repo root via its real path (this file is reached through a ~/.claude symlink).
+# Resolve this script's own repo root ONCE (used by the config-repo exemption
+# below, checked per-candidate).
 self="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" 2>/dev/null && pwd)"
-if [ -n "$self" ]; then
-  selfroot="$(git -C "$self" rev-parse --show-toplevel 2>/dev/null)"
-  [ -n "$selfroot" ] && [ "$root" = "$selfroot" ] && exit 0
-fi
+selfroot=""
+[ -n "$self" ] && selfroot="$(git -C "$self" rev-parse --show-toplevel 2>/dev/null)"
 
-# Does this repo use the worktree convention (.worktrees/ gitignored)?
-git -C "$root" check-ignore -q ".worktrees/.probe" 2>/dev/null || exit 0
+# Check one candidate path; echoes a block reason and returns 2 on a hit, 0
+# otherwise. Isolated in a function so Bash's multiple candidates can each be
+# checked without repeating the Edit/Write single-path logic.
+check_one() {
+  file_path="$1"
 
-# Main tree + worktree-convention repo + not exempted -> block.
-echo "⛔ dotclaude worktree-guard blocked this edit." >&2
-echo "Reason: '$file_path' is in the MAIN working tree of a repo that uses the" >&2
-echo "  .worktrees/ convention. Parallel agents editing the main tree collide —" >&2
-echo "  uncommitted changes leak into every other agent's checkout." >&2
-echo "Fix: work in an isolated worktree, then edit there:" >&2
-echo "    git worktree add .worktrees/<short-name> -b feature/<short-name>" >&2
-echo "    cd .worktrees/<short-name>" >&2
-echo "Policy: ~/dotclaude/CLAUDE.md (Worktree-first). Deliberate main-tree edit?" >&2
-echo "  Re-run with WORKTREE_GUARD_OFF=1 set, or ask the user to run it via ! prefix." >&2
-exit 2
+  # Resolve the nearest existing directory at/above the target (the file may
+  # not exist yet on a Write). git -C needs a real directory to run in.
+  dir="$file_path"
+  [ -d "$dir" ] || dir="$(dirname "$dir")"
+  while [ ! -d "$dir" ] && [ "$dir" != "/" ] && [ "$dir" != "." ]; do
+    dir="$(dirname "$dir")"
+  done
+  [ -d "$dir" ] || return 0
+
+  # Outside any git work tree -> not our concern.
+  [ "$(git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] || return 0
+
+  # Already inside a LINKED worktree? git-dir and git-common-dir diverge there
+  # (e.g. .git/worktrees/foo vs .git). Equal => main working tree. Both
+  # resolved to absolute paths so the comparison is robust.
+  gitdir="$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null)"
+  common_rel="$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null)"
+  case "$common_rel" in
+    /*) commondir="$common_rel" ;;
+    *)  commondir="$(cd "$dir" 2>/dev/null && cd "$common_rel" 2>/dev/null && pwd)" ;;
+  esac
+  if [ -n "$gitdir" ] && [ -n "$commondir" ] && [ "$gitdir" != "$commondir" ]; then
+    return 0  # in a linked worktree — exactly what we want
+  fi
+
+  # Main working tree from here down. Find its root.
+  root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)"
+  [ -z "$root" ] && return 0
+
+  # Exempt the dotclaude config repo itself (see header).
+  [ -n "$selfroot" ] && [ "$root" = "$selfroot" ] && return 0
+
+  # Does this repo use the worktree convention (.worktrees/ gitignored)?
+  git -C "$root" check-ignore -q ".worktrees/.probe" 2>/dev/null || return 0
+
+  echo "⛔ dotclaude worktree-guard blocked this edit." >&2
+  echo "Reason: '$file_path' is in the MAIN working tree of a repo that uses the" >&2
+  echo "  .worktrees/ convention. Parallel agents editing the main tree collide —" >&2
+  echo "  uncommitted changes leak into every other agent's checkout." >&2
+  echo "Fix: work in an isolated worktree, then edit there:" >&2
+  echo "    git worktree add .worktrees/<short-name> -b feature/<short-name>" >&2
+  echo "    cd .worktrees/<short-name>" >&2
+  echo "Policy: ~/dotclaude/CLAUDE.md (Worktree-first). Deliberate main-tree edit?" >&2
+  echo "  Re-run with WORKTREE_GUARD_OFF=1 set, or ask the user to run it via ! prefix." >&2
+  return 2
+}
+
+blocked=0
+while IFS= read -r path; do
+  [ -z "$path" ] && continue
+  if ! check_one "$path"; then
+    blocked=1
+  fi
+done <<<"$candidates"
+
+exit $((blocked ? 2 : 0))

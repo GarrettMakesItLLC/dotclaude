@@ -76,6 +76,41 @@ check 0 Edit  file_path "$HERE/../CLAUDE.md"          # the dotclaude config rep
 git -C "$CONV" worktree add -q "$TMP/external-wt" -b feat-ext 2>/dev/null
 check 0 Edit file_path "$TMP/external-wt/x.ts"
 
+# --- Bash coverage (#92): the same guard, driven by scanning `command` for
+# write patterns instead of a single file_path.
+
+# Should BLOCK — the exact workaround #92 was filed for: a python3 heredoc
+# using open(path, "w") instead of Edit/Write.
+check 2 Bash command "python3 - <<'PYEOF'
+open('$CONV/src/via-python.ts', 'w').write('x')
+PYEOF"
+
+# Should BLOCK — plain shell redirection into the main tree.
+check 2 Bash command "echo hi > $CONV/src/redirected.ts"
+check 2 Bash command "printf x >> $CONV/src/appended.ts"
+
+# Should BLOCK — sed -i and cp/mv/tee destinations.
+check 2 Bash command "sed -i 's/a/b/' $CONV/src/existing.ts"
+check 2 Bash command "cp /tmp/whatever.ts $CONV/src/copied.ts"
+check 2 Bash command "mv /tmp/whatever.ts $CONV/src/moved.ts"
+check 2 Bash command "some-generator | tee $CONV/src/teed.ts"
+
+# Should ALLOW — a read-only Bash command with no write pattern at all.
+check 0 Bash command "cat $CONV/src/existing.ts"
+check 0 Bash command "git -C $CONV status"
+
+# Should ALLOW — redirection is present but targets a linked worktree, not the
+# main tree; proves Bash candidates go through the same worktree/config-repo
+# logic as Edit/Write, not a blanket "any write is bad".
+check 0 Bash command "echo hi > $CONV/.worktrees/wt/x.ts"
+
+# Should ALLOW — `2>&1` and `&>` must not be mistaken for a file redirect.
+check 0 Bash command "some-command 2>&1"
+check 0 Bash command "some-command &> /dev/null"
+
+# Should ALLOW — the escape hatch works for Bash too.
+check 0 Bash command "echo hi > $CONV/src/redirected.ts" 1
+
 # Should ALLOW — the config-repo exemption reached THROUGH a directory symlink,
 # exactly as production does (~/.claude/hooks -> dotclaude/hooks). Invokes the
 # guard via a symlinked parent dir so readlink -f must resolve the chain to find
