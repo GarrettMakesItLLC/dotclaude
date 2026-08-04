@@ -16,6 +16,7 @@ import {
   defaultBranch,
   deleteClaimLock,
   issueNumberForBranch,
+  latestClaimStamp,
   pullsForBranch,
   resolveClaimBranch,
   structuredError,
@@ -171,10 +172,11 @@ export function registerClaimTools(server: McpServer): void {
     {
       description:
         "Survey every claim currently held on the remote: the `issue-*` lock branches, each with " +
-        "its last commit (author + time) and any open PR. Call this BEFORE picking up work — a " +
-        "claim held by another machine lives in a local worktree you cannot see, but its pushed " +
-        "lock branch is visible here. A branch with a stale last commit and no PR is a candidate " +
-        "for `claim_release`.",
+        "who claimed it and when (from its stamp comment, when one was posted), its last commit " +
+        "(author + time), and any open PR. Call this BEFORE picking up work — a claim held by " +
+        "another machine lives in a local worktree you cannot see, but its pushed lock branch is " +
+        "visible here. A branch with a stale last commit and no PR is a candidate for " +
+        "`claim_release`.",
       inputSchema: {
         repo: repoParam,
         limit: z
@@ -204,19 +206,21 @@ export function registerClaimTools(server: McpServer): void {
 
         const rows = await Promise.all(
           branches.map(async ({ branch, sha }) => {
-            let commit: CommitResponse | null = null;
-            try {
-              commit = await ghRequest<CommitResponse>(
-                `/repos/${owner}/${name}/commits/${sha}`,
-              );
-            } catch {
-              // A ref whose commit is unreadable still counts as in-flight.
-            }
+            const issue = issueNumberForBranch(branch) ?? null;
+            const [commit, stamp] = await Promise.all([
+              ghRequest<CommitResponse>(`/repos/${owner}/${name}/commits/${sha}`).catch(
+                // A ref whose commit is unreadable still counts as in-flight.
+                () => null,
+              ),
+              issue ? latestClaimStamp(owner, name, issue, branch) : Promise.resolve(null),
+            ]);
             const pr = prByHead.get(branch);
             return {
               branch,
-              issue: issueNumberForBranch(branch) ?? null,
+              issue,
               sha,
+              claimed_by: stamp?.holder ?? null,
+              claimed_at: stamp?.claimed_at ?? null,
               last_commit_at: commit?.commit?.author?.date ?? null,
               last_commit_author: commit?.commit?.author?.name ?? null,
               last_commit_message: commit?.commit?.message?.split("\n")[0] ?? null,

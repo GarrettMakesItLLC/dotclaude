@@ -31,7 +31,9 @@ import { labelNames, slimComment, slimIssue, type RawIssue, type RawLabel } from
 import {
   acquireClaimLock,
   claimBranchName,
+  ClaimClosedError,
   ClaimConflictError,
+  stampClaim,
   structuredError,
 } from "../claim-lock.js";
 
@@ -433,12 +435,15 @@ export function registerIssueTools(server: McpServer): void {
     {
       description:
         "Claim an issue to begin work, taking a distributed lock first: creates the remote branch " +
-        "`issue-<N>-<slug>` at the default-branch head via an atomic ref create, then self-assigns " +
-        "the authenticated user and moves status to in-progress. If the branch already exists the " +
-        "issue is ALREADY CLAIMED (typically by another machine) — the call fails with the holder's " +
-        "branch, last commit and any open PR, and you must pick different work. Assignee alone " +
-        "cannot arbitrate this: every machine authenticates as the same user. Check out the " +
-        "returned branch instead of creating your own. Pass `caller_model` (your own model id, e.g. " +
+        "`issue-<N>-<slug>` at the default-branch head via an atomic ref create, stamps a claim " +
+        "comment on the issue (holder identity + timestamp), then self-assigns the authenticated " +
+        "user and moves status to in-progress. Refuses on a CLOSED issue — finished work, not " +
+        "available to claim. If the branch already exists the issue is ALREADY CLAIMED — the call " +
+        "fails with the holder's branch, last commit, any open PR, and — from the stamp — who holds " +
+        "it and when, so you can tell your own earlier session from another machine. Default to " +
+        "picking different work unless the stamp identifies THIS machine. Assignee alone cannot " +
+        "arbitrate this: every machine authenticates as the same user. Check out the returned " +
+        "branch instead of creating your own. Pass `caller_model` (your own model id, e.g. " +
         "\"claude-sonnet-5\") and, when the issue carries a `complexity:*` label calling for a " +
         "stronger model than you're running, the claim still succeeds but reports a " +
         "`model_mismatch` field flagging it — over-provisioned needs no action, under-provisioned " +
@@ -463,12 +468,29 @@ export function registerIssueTools(server: McpServer): void {
       try {
         const { owner, name } = await resolveRepo(repo);
         const issue = await ghRequest<RawIssue>(`/repos/${owner}/${name}/issues/${number}`);
+        if (issue.state === "closed") {
+          throw new ClaimClosedError(
+            `Issue #${number} is closed (${issue.state_reason ?? "closed"}) — it is finished work, ` +
+              "not available to claim.",
+            {
+              state: issue.state,
+              state_reason: issue.state_reason ?? null,
+              closed_at: issue.closed_at ?? null,
+            },
+          );
+        }
         const target = branch ?? claimBranchName(number, issue.title ?? "");
         const lock = await acquireClaimLock(owner, name, target, number);
 
         // The ref IS the lock. Once it exists the claim is held, so a failure in
-        // either step below is reported as a warning and never rolls the ref back.
+        // any step below is reported as a warning and never rolls the ref back.
         const warnings: string[] = [];
+        try {
+          await stampClaim(owner, name, number, target);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          warnings.push(`claim stamp not posted (the branch lock is held regardless): ${msg}`);
+        }
 
         const complexity = labelNames(issue.labels)
           .find((l) => l.startsWith("complexity:"))
@@ -517,6 +539,15 @@ export function registerIssueTools(server: McpServer): void {
             reason: "already-claimed",
             issue: number,
             ...err.holder,
+            message: err.message,
+          });
+        }
+        if (err instanceof ClaimClosedError) {
+          return structuredError({
+            claimed: false,
+            reason: "closed",
+            issue: number,
+            ...err.issue,
             message: err.message,
           });
         }

@@ -166,16 +166,27 @@ mutex, and the pushed branch simultaneously advertises the work.
 1. resolves the branch `issue-<N>-<title-slug>` (override with `branch`),
 2. creates that ref at the default-branch head — a `422` here means **already
    claimed**, and the call fails with the holder's branch, last commit
-   author/date and any open PR, so a live claim is distinguishable from an
-   abandoned one,
-3. only then self-assigns and sets `status:in-progress` — failures there are
-   reported in `_warnings` and never roll back the ref, because the ref is the
-   lock,
-4. returns the branch to `git fetch && git checkout` rather than creating your own.
+   author/date, any open PR, and — when a stamp was posted — who holds it and
+   when, so a live claim is distinguishable from an abandoned one,
+3. posts a claim-stamp comment on the issue (holder identity + timestamp,
+   `CLAIM_MACHINE_ID` env var or else `os.hostname()`) — best-effort, reported
+   in `_warnings` on failure; the ref is what actually holds the lock,
+4. self-assigns and sets `status:in-progress` — failures there are also
+   reported in `_warnings` and never roll back the ref,
+5. returns the branch to `git fetch && git checkout` rather than creating your own.
+
+The stamp exists because the ref alone answers "is this claimed?" but not "by
+whom" — every machine authenticates as the same GitHub user, so a conflict
+can't otherwise tell your own earlier session from another machine. On a
+conflict, the failure message says whether the stamp matches this machine
+(safe to investigate resuming) or a different one (default to picking
+different work; the mismatch alone is not evidence of abandonment).
 
 Before picking up work, call `work_in_flight` to see what the other machine
-already holds. To drop a dead claim, `claim_release` deletes the ref — refusing
-when the branch carries commits not merged anywhere unless `force: true`.
+already holds — each row includes `claimed_by`/`claimed_at` from the stamp,
+alongside last-commit detail and any open PR. To drop a dead claim,
+`claim_release` deletes the ref — refusing when the branch carries commits not
+merged anywhere unless `force: true`.
 
 The `claim-guard.sh` PreToolUse hook enforces the protocol at the first edit:
 on a branch named `issue-<N>-*` whose issue is not assigned with

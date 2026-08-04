@@ -272,6 +272,7 @@ describe("issue_claim", () => {
     branchBody?: unknown;
     prsBody?: unknown;
     issueLabels?: { name: string }[];
+    commentsBody?: unknown;
   }) {
     return async (url: string, init: { method?: string; body?: string }) => {
       const method = init.method ?? "GET";
@@ -295,8 +296,14 @@ describe("issue_claim", () => {
       if (method === "GET" && url.includes("/pulls")) {
         return makeResponse({ status: 200, body: opts.prsBody ?? [] });
       }
+      if (method === "GET" && url.includes("/issues/8/comments")) {
+        return makeResponse({ status: 200, body: opts.commentsBody ?? [] });
+      }
       if (method === "POST" && url.endsWith("/assignees")) {
         return makeResponse({ status: opts.assigneesStatus ?? 201, body: {} });
+      }
+      if (method === "POST" && url.endsWith("/issues/8/comments")) {
+        return makeResponse({ status: 201, body: { body: JSON.parse(init.body as string).body } });
       }
       if (method === "GET" && url.endsWith("/issues/8")) {
         return makeResponse({
@@ -340,9 +347,35 @@ describe("issue_claim", () => {
     expect(out.status).toBe("in-progress");
 
     const refIndex = calls.findIndex((c) => c === "POST /repos/octo/repo/git/refs");
+    const stampIndex = calls.findIndex((c) => c === "POST /repos/octo/repo/issues/8/comments");
     const assignIndex = calls.findIndex((c) => c.endsWith("/assignees"));
     expect(refIndex).toBeGreaterThanOrEqual(0);
+    expect(stampIndex).toBeGreaterThan(refIndex);
     expect(assignIndex).toBeGreaterThan(refIndex);
+  });
+
+  it("stamps the claim with a holder identity and timestamp, so a later conflict can tell who holds it", async () => {
+    const calls: string[] = [];
+    let stampBody = "";
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if ((init.method ?? "GET") === "POST" && url.endsWith("/issues/8/comments")) {
+        stampBody = JSON.parse(init.body as string).body as string;
+      }
+      return mockClaim({ refStatus: 201, calls })(url, init);
+    });
+
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8 });
+
+    expect(res.isError).toBeFalsy();
+    expect(stampBody).toContain("🔒 Claimed by");
+    const marker = /<!-- claim-lock: (\{.*?\}) -->/.exec(stampBody);
+    expect(marker).not.toBeNull();
+    const stamp = JSON.parse(marker![1]) as { branch: string; holder: string; claimed_at: string };
+    expect(stamp.branch).toBe("issue-8-fix-the-thing");
+    expect(typeof stamp.holder).toBe("string");
+    expect(stamp.holder.length).toBeGreaterThan(0);
+    expect(new Date(stamp.claimed_at).toString()).not.toBe("Invalid Date");
   });
 
   it("returns a structured already-claimed failure on a 422 from the ref POST, and never assigns", async () => {
@@ -382,6 +415,34 @@ describe("issue_claim", () => {
     expect(out.last_commit?.date).toBe("2026-07-20T00:00:00Z");
     expect(out.pull_request?.number).toBe(77);
     expect(calls.some((c) => c.endsWith("/assignees"))).toBe(false);
+  });
+
+  it("surfaces the holder's identity and claim time from the stamp comment on a conflict", async () => {
+    const calls: string[] = [];
+    const stamp = { branch: "issue-8-fix-the-thing", holder: "other-machine", claimed_at: "2026-08-01T10:00:00.000Z" };
+    fetchMock.mockImplementation(
+      mockClaim({
+        refStatus: 422,
+        calls,
+        commentsBody: [
+          { body: `🔒 Claimed by \`other-machine\` at ${stamp.claimed_at} (branch \`${stamp.branch}\`)\n<!-- claim-lock: ${JSON.stringify(stamp)} -->` },
+        ],
+      }),
+    );
+
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8 });
+
+    expect(res.isError).toBe(true);
+    const out = JSON.parse(res.content[0].text) as {
+      claimed_by: string | null;
+      claimed_at: string | null;
+      message: string;
+    };
+    expect(out.claimed_by).toBe("other-machine");
+    expect(out.claimed_at).toBe(stamp.claimed_at);
+    expect(out.message).toContain("other-machine");
+    expect(out.message).toContain("pick different work");
   });
 
   it("keeps the lock and reports a _warnings entry when the self-assign fails", async () => {
@@ -451,6 +512,49 @@ describe("issue_claim", () => {
 
     const noModel = await handler({ repo: "octo/repo", number: 8 });
     expect((JSON.parse(noModel.content[0].text) as { model_mismatch: string | null }).model_mismatch).toBeNull();
+  });
+
+  it("refuses to claim a closed issue, without creating the lock ref or self-assigning", async () => {
+    const calls: string[] = [];
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      const method = init.method ?? "GET";
+      calls.push(`${method} ${new URL(url).pathname}`);
+      if (method === "GET" && url.endsWith("/issues/8")) {
+        return makeResponse({
+          status: 200,
+          body: {
+            number: 8,
+            title: "Fix the thing!",
+            state: "closed",
+            state_reason: "completed",
+            closed_at: "2026-07-30T18:31:30Z",
+            labels: [{ name: "type:bug" }],
+          },
+        });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8 });
+
+    expect(res.isError).toBe(true);
+    const out = JSON.parse(res.content[0].text) as {
+      claimed: boolean;
+      reason: string;
+      issue: number;
+      state: string;
+      state_reason: string | null;
+      closed_at: string | null;
+    };
+    expect(out.claimed).toBe(false);
+    expect(out.reason).toBe("closed");
+    expect(out.issue).toBe(8);
+    expect(out.state).toBe("closed");
+    expect(out.state_reason).toBe("completed");
+    expect(out.closed_at).toBe("2026-07-30T18:31:30Z");
+    expect(calls.some((c) => c.endsWith("/git/refs"))).toBe(false);
+    expect(calls.some((c) => c.endsWith("/assignees"))).toBe(false);
   });
 });
 
