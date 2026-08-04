@@ -30,6 +30,53 @@ export function issueNumberForBranch(branch: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+interface IssueSummary {
+  title?: string;
+  state?: string;
+  state_reason?: string | null;
+  closed_at?: string | null;
+}
+
+/** Thrown when claiming an issue that is already closed — finished work, not startable. */
+export class ClaimClosedError extends Error {
+  constructor(
+    message: string,
+    readonly issue: {
+      state: string;
+      state_reason: string | null;
+      closed_at: string | null;
+    },
+  ) {
+    super(message);
+    this.name = "ClaimClosedError";
+  }
+}
+
+/**
+ * Refuse to start a claim on an issue that's already closed — finished work,
+ * not startable. Only `issue_claim` calls this: `claim_release` legitimately
+ * targets closed issues too (a merged PR closes the issue and leaves the lock
+ * ref behind), so the check does not belong in `resolveClaimBranch` itself.
+ */
+export async function assertIssueClaimable(
+  owner: string,
+  name: string,
+  number: number,
+): Promise<void> {
+  const issue = await ghRequest<IssueSummary>(`/repos/${owner}/${name}/issues/${number}`);
+  if (issue.state === "closed") {
+    throw new ClaimClosedError(
+      `Issue #${number} is closed (${issue.state_reason ?? "closed"}) — it is finished work, ` +
+        "not available to claim.",
+      {
+        state: issue.state,
+        state_reason: issue.state_reason ?? null,
+        closed_at: issue.closed_at ?? null,
+      },
+    );
+  }
+}
+
 /**
  * The lock branch for an issue: `branch` when given, otherwise derived from the
  * issue's current title.
@@ -41,9 +88,7 @@ export async function resolveClaimBranch(
   branch?: string,
 ): Promise<string> {
   if (branch) return branch;
-  const issue = await ghRequest<{ title?: string }>(
-    `/repos/${owner}/${name}/issues/${number}`,
-  );
+  const issue = await ghRequest<IssueSummary>(`/repos/${owner}/${name}/issues/${number}`);
   return claimBranchName(number, issue.title ?? "");
 }
 
