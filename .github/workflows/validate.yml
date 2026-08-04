@@ -245,10 +245,14 @@ jobs:
           npm run build
 
   ci-success:
-    # The single required check. A *skipped* job satisfies a required status check
-    # of the same name, so gating on the individual jobs would let a PR merge
-    # unverified. This job needs them all and fails on any non-success result,
-    # and adding or splitting a job never means editing the branch ruleset.
+    # `name: CI Success` (not the raw job id) is deliberate: it's the same
+    # required-status-check context every other repo in the fleet uses, so one
+    # ruleset definition (org-level or per-repo) stays portable across all of
+    # them. A *skipped* job satisfies a required status check of the same name,
+    # so gating on the individual jobs would let a PR merge unverified. This
+    # job needs them all and fails on any non-success result, and adding or
+    # splitting a job never means editing the branch ruleset.
+    name: CI Success
     if: always() && github.event_name == 'pull_request'
     needs: [validate, config-drift, commitlint, mcp-github]
     runs-on: ubuntu-latest
