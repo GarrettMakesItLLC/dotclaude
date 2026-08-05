@@ -111,6 +111,21 @@ check 0 Bash command "some-command &> /dev/null"
 # Should ALLOW — the escape hatch works for Bash too.
 check 0 Bash command "echo hi > $CONV/src/redirected.ts" 1
 
+# --- #140: heredoc bodies are DATA, not further shell syntax — a markdown
+# blockquote line ("> word") inside a quoted heredoc must not read as a
+# redirect, and prose words must not be mistaken for cp/mv/tee destinations.
+check 0 Bash command "gh pr create --title x --body \"\$(cat <<'EOF'
+Some prose mentioning graphify, Serena, and grep/Read as bare words.
+> A markdown blockquote line that looks like a redirect.
+EOF
+)\""
+
+# Should still BLOCK — a REAL redirect on the line that OPENS the heredoc
+# (outside the body) is unaffected by body-blanking.
+check 2 Bash command "cat >> $CONV/src/notes.md <<'EOF'
+> this blockquote line must not itself be scanned
+EOF"
+
 # Should ALLOW — the config-repo exemption reached THROUGH a directory symlink,
 # exactly as production does (~/.claude/hooks -> dotclaude/hooks). Invokes the
 # guard via a symlinked parent dir so readlink -f must resolve the chain to find

@@ -84,17 +84,43 @@ QUOTES = "\"'"
 if tool == "Bash":
     cmd = ti.get("command") or ""
 
+    # A quoted (or unquoted) heredoc body is data, passed through verbatim with
+    # no shell interpretation — a `>` at the start of a markdown blockquote
+    # line, or any other shell-metacharacter-looking prose, is not a redirect.
+    # Blank out heredoc body lines before scanning for write patterns so prose
+    # can't be mistaken for one; `blanked` is used for every pattern EXCEPT the
+    # open()-in-heredoc scan below, which deliberately reads heredoc bodies —
+    # that's the python3-heredoc escape hatch #92 was filed for.
+    def blank_heredoc_bodies(text):
+        lines = text.split("\n")
+        start_re = re.compile(r"<<-?\s*([\"']?)(\w+)\1")
+        i = 0
+        while i < len(lines):
+            m = start_re.search(lines[i])
+            if not m:
+                i += 1
+                continue
+            delim = m.group(2)
+            j = i + 1
+            while j < len(lines) and lines[j].strip() != delim:
+                lines[j] = ""
+                j += 1
+            i = j + 1
+        return "\n".join(lines)
+
+    blanked = blank_heredoc_bodies(cmd)
+
     # Redirection: `> path` / `>> path`, not `2>&1`, `&>`, `>=`, or a `[ a > b ]`
     # test operator (single `>` inside `[ ... ]` is a string comparison, not a
     # redirect — excluded by requiring the target look like a path, not `]`).
-    for m in re.finditer(r"(?<![&\d])>>?\s*([^\s|&;><)]+)", cmd):
+    for m in re.finditer(r"(?<![&\d])>>?\s*([^\s|&;><)]+)", blanked):
         tgt = m.group(1).strip(QUOTES)
         if tgt and tgt not in ("/dev/null", "&1", "&2") and not tgt.startswith("&"):
             out.append(tgt)
 
     # sed -i / --in-place: grab all non-flag trailing tokens on that pipeline
     # segment as candidate targets (sed accepts multiple files).
-    for seg in re.split(r"[|;]", cmd):
+    for seg in re.split(r"[|;]", blanked):
         if re.search(r"\bsed\b.*(-i\b|--in-place\b)", seg):
             for tok in seg.split():
                 if not tok.startswith("-") and tok != "sed" and "sed" not in tok:
@@ -104,7 +130,7 @@ if tool == "Bash":
     # one argument is both its first and last non-flag token, so this covers
     # the common single-destination form; `tee a b` (writes both) only catches
     # the last, which costs nothing beyond a miss.
-    for seg in re.split(r"[|;]", cmd):
+    for seg in re.split(r"[|;]", blanked):
         toks = seg.split()
         if not toks:
             continue
@@ -115,7 +141,8 @@ if tool == "Bash":
                 out.append(nonflags[-1].strip(QUOTES))
 
     # Python `open(path, "w"...)`/`"a"...` embedded in a heredoc — the pattern
-    # this rule exists for.
+    # this rule exists for. Deliberately scans the ORIGINAL (unblanked) command
+    # since this is the one pattern meant to be found inside a heredoc body.
     for m in re.finditer(r"open\(\s*[\"']([^\"']+)[\"']\s*,\s*[\"'][wax]", cmd):
         out.append(m.group(1))
 else:
