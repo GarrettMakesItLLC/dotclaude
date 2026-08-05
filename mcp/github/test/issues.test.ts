@@ -85,6 +85,305 @@ beforeEach(() => {
   setProjectSingleSelectMock.mockReset();
 });
 
+/**
+ * Runs issue_view → issue_view → <write tool> → issue_view for issue `number`.
+ * The mocked GET to `/issues/<number>` returns a version-tagged title that
+ * increments on every real network call (including any the write tool makes
+ * internally, e.g. `setIssueStatus`'s own read); the assertions only care
+ * that the second view is served from cache (same title as the first) and
+ * the post-write view is NOT (a different title — proof it re-fetched).
+ * `extraFetch` handles every request the write tool itself makes.
+ */
+async function expectIssueViewRefetchesAfterWrite(
+  toolName: string,
+  writeArgs: Record<string, unknown>,
+  extraFetch: (
+    url: string,
+    init: { method?: string; body?: string },
+  ) => Response | undefined | Promise<Response | undefined>,
+) {
+  const number = writeArgs.number as number;
+  let version = 0;
+  fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+    const method = init.method ?? "GET";
+    if (method === "GET" && url.endsWith(`/issues/${number}`)) {
+      version += 1;
+      return makeResponse({
+        status: 200,
+        body: { number, title: `v${version}`, labels: [{ name: "type:task" }] },
+      });
+    }
+    const custom = await extraFetch(url, init);
+    if (custom) return custom;
+    return makeResponse({ status: 500, body: { message: `unexpected ${method} ${url}` } });
+  });
+
+  const viewHandler = await getIssueHandler("issue_view");
+  const first = await viewHandler({ repo: "octo/repo", number });
+  expect(first.isError).toBeFalsy();
+  const firstTitle = (JSON.parse(first.content[0].text) as { title: string }).title;
+
+  const second = await viewHandler({ repo: "octo/repo", number });
+  expect((JSON.parse(second.content[0].text) as { title: string }).title).toBe(firstTitle);
+
+  const writeHandler = await getIssueHandler(toolName);
+  const writeRes = await writeHandler(writeArgs);
+  expect(writeRes.isError, `${toolName} failed: ${writeRes.content[0]?.text}`).toBeFalsy();
+
+  const third = await viewHandler({ repo: "octo/repo", number });
+  expect(third.isError).toBeFalsy();
+  expect((JSON.parse(third.content[0].text) as { title: string }).title).not.toBe(firstTitle);
+}
+
+describe("issue_view caching", () => {
+  it("caches a single issue for the process lifetime — a second view does not re-fetch", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({ status: 200, body: { number: 9, title: "Cached issue" } }),
+    );
+    const handler = await getIssueHandler("issue_view");
+
+    const first = await handler({ repo: "octo/repo", number: 9 });
+    const second = await handler({ repo: "octo/repo", number: 9 });
+
+    expect(first.isError).toBeFalsy();
+    expect(second.isError).toBeFalsy();
+    expect(JSON.parse(first.content[0].text)).toEqual(JSON.parse(second.content[0].text));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches different issue numbers independently", async () => {
+    fetchMock
+      .mockResolvedValueOnce(makeResponse({ status: 200, body: { number: 9, title: "Nine" } }))
+      .mockResolvedValueOnce(makeResponse({ status: 200, body: { number: 10, title: "Ten" } }));
+    const handler = await getIssueHandler("issue_view");
+
+    await handler({ repo: "octo/repo", number: 9 });
+    await handler({ repo: "octo/repo", number: 10 });
+    await handler({ repo: "octo/repo", number: 9 });
+    await handler({ repo: "octo/repo", number: 10 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("write tools invalidate the cached issue view", () => {
+  it("issue_update", async () => {
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_update",
+      { repo: "octo/repo", number: 9, title: "New title" },
+      async (url, init) => {
+        if (init.method === "PATCH" && url.endsWith("/issues/9")) {
+          return makeResponse({ status: 200, body: { number: 9, title: "New title" } });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("issue_set_type", async () => {
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_set_type",
+      { repo: "octo/repo", number: 9, type: "bug" },
+      async (url, init) => {
+        if (init.method === "PATCH" && url.endsWith("/issues/9")) {
+          return makeResponse({ status: 200, body: { number: 9, type: { name: "Bug" } } });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("issue_set_milestone", async () => {
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_set_milestone",
+      { repo: "octo/repo", number: 9, milestone: 4 },
+      async (url, init) => {
+        if (init.method === "PATCH" && url.endsWith("/issues/9")) {
+          return makeResponse({ status: 200, body: { number: 9 } });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("issue_set_labels", async () => {
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_set_labels",
+      { repo: "octo/repo", number: 9, labels: ["type:bug"] },
+      async (url, init) => {
+        if (init.method === "PUT" && url.endsWith("/issues/9/labels")) {
+          return makeResponse({ status: 200, body: [{ name: "type:bug" }] });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("issue_add_assignees", async () => {
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_add_assignees",
+      { repo: "octo/repo", number: 9, assignees: ["octocat"] },
+      async (url, init) => {
+        if (init.method === "POST" && url.endsWith("/issues/9/assignees")) {
+          return makeResponse({ status: 201, body: { number: 9, assignees: [{ login: "octocat" }] } });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("issue_remove_assignees", async () => {
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_remove_assignees",
+      { repo: "octo/repo", number: 9, assignees: ["octocat"] },
+      async (url, init) => {
+        if (init.method === "DELETE" && url.endsWith("/issues/9/assignees")) {
+          return makeResponse({ status: 200, body: { number: 9, assignees: [] } });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("issue_comment", async () => {
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_comment",
+      { repo: "octo/repo", number: 9, body: "a comment" },
+      async (url, init) => {
+        if (init.method === "POST" && url.endsWith("/issues/9/comments")) {
+          return makeResponse({ status: 201, body: { id: 1, html_url: "https://x", created_at: "now" } });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("issue_add_sub_issue (invalidates the parent)", async () => {
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_add_sub_issue",
+      { repo: "octo/repo", number: 9, sub_number: 12 },
+      async (url, init) => {
+        if (init.method === "GET" && url.endsWith("/issues/12")) {
+          return makeResponse({ status: 200, body: { number: 12, id: 999 } });
+        }
+        if (init.method === "POST" && url.endsWith("/issues/9/sub_issues")) {
+          return makeResponse({ status: 201, body: {} });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("issue_set_blocked_by", async () => {
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_set_blocked_by",
+      { repo: "octo/repo", number: 9, blocked_by: [3] },
+      async (url, init) => {
+        if (init.method === "GET" && url.endsWith("/issues/9/dependencies/blocked_by")) {
+          return makeResponse({ status: 200, body: [] });
+        }
+        if (init.method === "GET" && url.endsWith("/issues/3")) {
+          return makeResponse({ status: 200, body: { number: 3, id: 300 } });
+        }
+        if (init.method === "POST" && url.endsWith("/issues/9/dependencies/blocked_by")) {
+          return makeResponse({ status: 200, body: {} });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("issue_set_status", async () => {
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_set_status",
+      { repo: "octo/repo", number: 9, status: "in-review" },
+      async (url, init) => {
+        if (init.method === "PUT" && url.endsWith("/issues/9/labels")) {
+          const sent = JSON.parse(init.body as string).labels as string[];
+          return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("issue_set_effort", async () => {
+    findProjectItemMock.mockResolvedValue({ id: "PVTI_1", fields: {} });
+    getProjectFieldMock.mockResolvedValue({
+      id: "F_effort",
+      name: "Effort",
+      options: [{ id: "O_std", name: "Standard" }],
+    });
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_set_effort",
+      { repo: "octo/repo", number: 9, effort: "standard" },
+      async () => undefined,
+    );
+  });
+
+  it("issue_set_priority", async () => {
+    findProjectItemMock.mockResolvedValue({ id: "PVTI_2", fields: {} });
+    getProjectFieldMock.mockResolvedValue({
+      id: "F_priority",
+      name: "Priority",
+      options: [{ id: "O_high", name: "High" }],
+    });
+    await expectIssueViewRefetchesAfterWrite(
+      "issue_set_priority",
+      { repo: "octo/repo", number: 9, priority: "high" },
+      async () => undefined,
+    );
+  });
+
+  it("issue_claim", async () => {
+    let version = 0;
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      const method = init.method ?? "GET";
+      if (method === "GET" && url.endsWith("/issues/8")) {
+        version += 1;
+        return makeResponse({
+          status: 200,
+          body: { number: 8, title: `Fix the thing! v${version}`, labels: [{ name: "status:ready" }, { name: "type:bug" }] },
+        });
+      }
+      if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
+      if (method === "GET" && /\/repos\/octo\/repo$/.test(new URL(url).pathname)) {
+        return makeResponse({ status: 200, body: { default_branch: "main" } });
+      }
+      if (method === "GET" && url.endsWith("/git/ref/heads/main")) {
+        return makeResponse({ status: 200, body: { object: { sha: "basesha" } } });
+      }
+      if (method === "POST" && url.endsWith("/git/refs")) {
+        return makeResponse({ status: 201, body: { ref: JSON.parse(init.body as string).ref } });
+      }
+      if (method === "POST" && url.endsWith("/assignees")) {
+        return makeResponse({ status: 201, body: {} });
+      }
+      if (method === "POST" && url.endsWith("/issues/8/comments")) {
+        return makeResponse({ status: 201, body: { body: JSON.parse(init.body as string).body } });
+      }
+      if (method === "PUT" && url.endsWith("/labels")) {
+        const sent = JSON.parse(init.body as string).labels as string[];
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+      }
+      return makeResponse({ status: 500, body: { message: `unexpected ${method} ${url}` } });
+    });
+
+    const viewHandler = await getIssueHandler("issue_view");
+    const first = await viewHandler({ repo: "octo/repo", number: 8 });
+    const firstTitle = (JSON.parse(first.content[0].text) as { title: string }).title;
+    const second = await viewHandler({ repo: "octo/repo", number: 8 });
+    expect((JSON.parse(second.content[0].text) as { title: string }).title).toBe(firstTitle);
+
+    const claimHandler = await getIssueHandler("issue_claim");
+    const claimRes = await claimHandler({ repo: "octo/repo", number: 8 });
+    expect(claimRes.isError).toBeFalsy();
+
+    const third = await viewHandler({ repo: "octo/repo", number: 8 });
+    expect((JSON.parse(third.content[0].text) as { title: string }).title).not.toBe(firstTitle);
+  });
+});
+
 describe("issue_list — PR filtering across pages", () => {
   it("excludes pull_request items and returns up to limit real issues spanning pages", async () => {
     fetchMock

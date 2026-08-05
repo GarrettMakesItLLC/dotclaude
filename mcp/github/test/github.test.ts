@@ -236,6 +236,46 @@ describe("ghPaginate", () => {
   });
 });
 
+describe("cachedGet / invalidate", () => {
+  it("fetches once, then returns the cached value on subsequent calls with the same key", async () => {
+    const fetcher = vi.fn().mockResolvedValue({ n: 1 });
+    const first = await mod.cachedGet("issue:octo/repo#1", fetcher);
+    const second = await mod.cachedGet("issue:octo/repo#1", fetcher);
+    expect(first).toEqual({ n: 1 });
+    expect(second).toEqual({ n: 1 });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches independently for different keys", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce({ n: 1 }).mockResolvedValueOnce({ n: 2 });
+    const a = await mod.cachedGet("issue:octo/repo#1", fetcher);
+    const b = await mod.cachedGet("issue:octo/repo#2", fetcher);
+    expect(a).toEqual({ n: 1 });
+    expect(b).toEqual({ n: 2 });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidate clears the entry so the next cachedGet call refetches", async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce({ n: 1 }).mockResolvedValueOnce({ n: 2 });
+    await mod.cachedGet("issue:octo/repo#1", fetcher);
+    mod.invalidate("issue:octo/repo#1");
+    const after = await mod.cachedGet("issue:octo/repo#1", fetcher);
+    expect(after).toEqual({ n: 2 });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidating a key that was never cached is a no-op", () => {
+    expect(() => mod.invalidate("issue:octo/repo#999")).not.toThrow();
+  });
+});
+
+describe("cacheKey", () => {
+  it("builds a stable kind:repo#id string", () => {
+    expect(mod.cacheKey("issue", "octo/repo", 42)).toBe("issue:octo/repo#42");
+    expect(mod.cacheKey("pr", "octo/repo", "7")).toBe("pr:octo/repo#7");
+  });
+});
+
 describe("execGh", () => {
   it("returns trimmed stdout on success", async () => {
     execFileMock.mockImplementation((_c: string, args: string[], ...rest: unknown[]) => {

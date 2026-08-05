@@ -1,9 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
+  cacheKey,
+  cachedGet,
   errorResult,
   ghPaginate,
   ghRequest,
+  invalidate,
   jsonText,
   repoParam,
   resolveRepo,
@@ -72,7 +75,10 @@ export function registerPrTools(server: McpServer): void {
     },
     async ({ repo, number }) => {
       try {
-        const pr = await fetchPr(repo, number);
+        const { owner, name } = await resolveRepo(repo);
+        const pr = await cachedGet(cacheKey("pr", `${owner}/${name}`, number), () =>
+          fetchPr(repo, number),
+        );
         return jsonText(slimPr(pr, { body: true }));
       } catch (err) {
         return errorResult(err);
@@ -127,6 +133,7 @@ export function registerPrTools(server: McpServer): void {
           method: "PATCH",
           body: { title, body, base, state },
         });
+        invalidate(cacheKey("pr", `${owner}/${name}`, number));
         return jsonText(slimPr(data));
       } catch (err) {
         return errorResult(err);
@@ -151,6 +158,7 @@ export function registerPrTools(server: McpServer): void {
           `/repos/${owner}/${name}/issues/${number}/comments`,
           { method: "POST", body: { body } },
         );
+        invalidate(cacheKey("pr", `${owner}/${name}`, number));
         return jsonText(slimComment(data));
       } catch (err) {
         return errorResult(err);
@@ -182,6 +190,7 @@ export function registerPrTools(server: McpServer): void {
           `/repos/${owner}/${name}/pulls/${number}/requested_reviewers`,
           { method: "POST", body: { reviewers, team_reviewers } },
         );
+        invalidate(cacheKey("pr", `${owner}/${name}`, number));
         return jsonText({ number, requested_reviewers: actorLogins(data.requested_reviewers) });
       } catch (err) {
         return errorResult(err);
@@ -282,6 +291,7 @@ export function registerPrTools(server: McpServer): void {
             },
           },
         );
+        invalidate(cacheKey("pr", `${owner}/${name}`, number));
 
         const warnings: string[] = [];
         if (delete_branch && result.merged) {

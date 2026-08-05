@@ -1,6 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
+  cacheKey,
+  cachedGet,
   errorResult,
   ghPaginate,
   ghRequest,
@@ -43,7 +45,9 @@ export function registerRepoTools(server: McpServer): void {
     async ({ repo }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest<Repository>(`/repos/${owner}/${name}`);
+        const data = await cachedGet(cacheKey("repo", `${owner}/${name}`, "meta"), () =>
+          ghRequest<Repository>(`/repos/${owner}/${name}`),
+        );
         return jsonText({
           name: data.name,
           full_name: data.full_name,

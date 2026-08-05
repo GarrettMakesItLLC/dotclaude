@@ -13,6 +13,33 @@ let cachedRepo: string | null = null;
 let cachedViewer: string | null = null;
 
 /**
+ * Process-lifetime memo for single-object reads (`issue_view`, `pr_view`,
+ * `repo_get`) — same lifetime as `cachedToken`/`cachedRepo` above. Every write
+ * tool that touches the object a key names must call `invalidate` for that
+ * key after a successful write, before returning, or a later read in the same
+ * session goes stale.
+ */
+const objectCache = new Map<string, unknown>();
+
+/** Build the cache key for a single-object read: `kind:owner/name#id`. */
+export function cacheKey(kind: string, repo: string, id: number | string): string {
+  return `${kind}:${repo}#${id}`;
+}
+
+/** Return the cached value for `key`, or fetch it once and cache it. */
+export async function cachedGet<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  if (objectCache.has(key)) return objectCache.get(key) as T;
+  const value = await fetcher();
+  objectCache.set(key, value);
+  return value;
+}
+
+/** Drop `key` from the object cache — call after any write that changes it. */
+export function invalidate(key: string): void {
+  objectCache.delete(key);
+}
+
+/**
  * Fetch the GitHub token by spawning `gh auth token`.
  * Throws a clear, actionable error if `gh` is not authenticated.
  */

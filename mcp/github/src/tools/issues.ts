@@ -1,10 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
+  cacheKey,
+  cachedGet,
   errorResult,
   getViewerLogin,
   ghPaginate,
   ghRequest,
+  invalidate,
   jsonText,
   repoParam,
   resolveRepo,
@@ -123,6 +126,7 @@ async function applyProjectSingleSelect(
     );
   }
   await setProjectSingleSelect(item.id, field.id, option.id);
+  invalidate(cacheKey("issue", `${owner}/${name}`, number));
 }
 
 export function registerIssueTools(server: McpServer): void {
@@ -176,7 +180,9 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, number }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const data = await ghRequest<RawIssue>(`/repos/${owner}/${name}/issues/${number}`);
+        const data = await cachedGet(cacheKey("issue", `${owner}/${name}`, number), () =>
+          ghRequest<RawIssue>(`/repos/${owner}/${name}/issues/${number}`),
+        );
         return jsonText(slimIssue(data, { body: true }));
       } catch (err) {
         return errorResult(err);
@@ -233,6 +239,7 @@ export function registerIssueTools(server: McpServer): void {
           method: "PATCH",
           body: { title, body, state, state_reason },
         });
+        invalidate(cacheKey("issue", `${owner}/${name}`, number));
         return jsonText(slimIssue(data));
       } catch (err) {
         return errorResult(err);
@@ -257,6 +264,7 @@ export function registerIssueTools(server: McpServer): void {
           `/repos/${owner}/${name}/issues/${number}/comments`,
           { method: "POST", body: { body } },
         );
+        invalidate(cacheKey("issue", `${owner}/${name}`, number));
         return jsonText(slimComment(data));
       } catch (err) {
         return errorResult(err);
@@ -281,6 +289,7 @@ export function registerIssueTools(server: McpServer): void {
           `/repos/${owner}/${name}/issues/${number}/labels`,
           { method: "PUT", body: { labels } },
         );
+        invalidate(cacheKey("issue", `${owner}/${name}`, number));
         return jsonText({ number, labels: labelNames(data) });
       } catch (err) {
         return errorResult(err);
@@ -306,6 +315,7 @@ export function registerIssueTools(server: McpServer): void {
           `/repos/${owner}/${name}/issues/${number}/assignees`,
           { method: "POST", body: { assignees: resolved } },
         );
+        invalidate(cacheKey("issue", `${owner}/${name}`, number));
         return jsonText(slimIssue(data));
       } catch (err) {
         return errorResult(err);
@@ -331,6 +341,7 @@ export function registerIssueTools(server: McpServer): void {
           `/repos/${owner}/${name}/issues/${number}/assignees`,
           { method: "DELETE", body: { assignees: resolved } },
         );
+        invalidate(cacheKey("issue", `${owner}/${name}`, number));
         return jsonText(slimIssue(data));
       } catch (err) {
         return errorResult(err);
@@ -355,6 +366,7 @@ export function registerIssueTools(server: McpServer): void {
           method: "PATCH",
           body: { type: nativeTypeName(type) },
         });
+        invalidate(cacheKey("issue", `${owner}/${name}`, number));
         return jsonText({ number, type });
       } catch (err) {
         return errorResult(err);
@@ -431,6 +443,7 @@ export function registerIssueTools(server: McpServer): void {
           `/repos/${owner}/${name}/issues/${number}/sub_issues`,
           { method: "POST", body: { sub_issue_id: child.id } },
         );
+        invalidate(cacheKey("issue", `${owner}/${name}`, number));
         return jsonText({ parent: number, sub_issue: sub_number, linked: true });
       } catch (err) {
         return errorResult(err);
@@ -501,6 +514,7 @@ export function registerIssueTools(server: McpServer): void {
           added.push(blockerNumber);
         }
 
+        if (added.length) invalidate(cacheKey("issue", `${owner}/${name}`, number));
         return jsonText({ number, blocked_by, added, already_linked });
       } catch (err) {
         return errorResult(err);
@@ -631,6 +645,8 @@ export function registerIssueTools(server: McpServer): void {
           warnings.push(`status:in-progress not set (the branch lock is held regardless): ${msg}`);
         }
 
+        invalidate(cacheKey("issue", `${owner}/${name}`, number));
+
         const result = {
           claimed: true,
           issue: number,
@@ -732,6 +748,7 @@ export function registerIssueTools(server: McpServer): void {
           method: "PATCH",
           body: { milestone },
         });
+        invalidate(cacheKey("issue", `${owner}/${name}`, number));
         return jsonText(slimIssue(data));
       } catch (err) {
         return errorResult(err);

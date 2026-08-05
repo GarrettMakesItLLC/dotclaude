@@ -63,6 +63,134 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 
+describe("pr_view caching", () => {
+  it("caches a single PR for the process lifetime — a second view does not re-fetch", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({ status: 200, body: { number: 42, title: "Cached PR" } }),
+    );
+    const handler = await getPrHandler("pr_view");
+
+    const first = await handler({ repo: "octo/repo", number: 42 });
+    const second = await handler({ repo: "octo/repo", number: 42 });
+
+    expect(first.isError).toBeFalsy();
+    expect(second.isError).toBeFalsy();
+    expect(JSON.parse(first.content[0].text)).toEqual(JSON.parse(second.content[0].text));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches different PR numbers independently", async () => {
+    fetchMock
+      .mockResolvedValueOnce(makeResponse({ status: 200, body: { number: 42, title: "A" } }))
+      .mockResolvedValueOnce(makeResponse({ status: 200, body: { number: 43, title: "B" } }));
+    const handler = await getPrHandler("pr_view");
+
+    await handler({ repo: "octo/repo", number: 42 });
+    await handler({ repo: "octo/repo", number: 43 });
+    await handler({ repo: "octo/repo", number: 42 });
+    await handler({ repo: "octo/repo", number: 43 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * Runs pr_view → pr_view → <write tool> → pr_view for PR `number`, the PR
+ * analogue of the issue helper in issues.test.ts: the second view must be
+ * served from cache, and the post-write view must re-fetch.
+ */
+async function expectPrViewRefetchesAfterWrite(
+  toolName: string,
+  writeArgs: Record<string, unknown>,
+  extraFetch: (
+    url: string,
+    init: { method?: string; body?: string },
+  ) => Response | undefined | Promise<Response | undefined>,
+) {
+  const number = writeArgs.number as number;
+  let version = 0;
+  fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+    const method = init.method ?? "GET";
+    if (method === "GET" && url.endsWith(`/pulls/${number}`)) {
+      version += 1;
+      return makeResponse({ status: 200, body: { number, title: `v${version}` } });
+    }
+    const custom = await extraFetch(url, init);
+    if (custom) return custom;
+    return makeResponse({ status: 500, body: { message: `unexpected ${method} ${url}` } });
+  });
+
+  const viewHandler = await getPrHandler("pr_view");
+  const first = await viewHandler({ repo: "octo/repo", number });
+  expect(first.isError).toBeFalsy();
+  const firstTitle = (JSON.parse(first.content[0].text) as { title: string }).title;
+
+  const second = await viewHandler({ repo: "octo/repo", number });
+  expect((JSON.parse(second.content[0].text) as { title: string }).title).toBe(firstTitle);
+
+  const writeHandler = await getPrHandler(toolName);
+  const writeRes = await writeHandler(writeArgs);
+  expect(writeRes.isError, `${toolName} failed: ${writeRes.content[0]?.text}`).toBeFalsy();
+
+  const third = await viewHandler({ repo: "octo/repo", number });
+  expect(third.isError).toBeFalsy();
+  expect((JSON.parse(third.content[0].text) as { title: string }).title).not.toBe(firstTitle);
+}
+
+describe("write tools invalidate the cached PR view", () => {
+  it("pr_update", async () => {
+    await expectPrViewRefetchesAfterWrite(
+      "pr_update",
+      { repo: "octo/repo", number: 42, title: "New title" },
+      async (url, init) => {
+        if (init.method === "PATCH" && url.endsWith("/pulls/42")) {
+          return makeResponse({ status: 200, body: { number: 42, title: "New title" } });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("pr_comment", async () => {
+    await expectPrViewRefetchesAfterWrite(
+      "pr_comment",
+      { repo: "octo/repo", number: 42, body: "a comment" },
+      async (url, init) => {
+        if (init.method === "POST" && url.endsWith("/issues/42/comments")) {
+          return makeResponse({ status: 201, body: { id: 1, html_url: "https://x", created_at: "now" } });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("pr_request_review", async () => {
+    await expectPrViewRefetchesAfterWrite(
+      "pr_request_review",
+      { repo: "octo/repo", number: 42, reviewers: ["octocat"] },
+      async (url, init) => {
+        if (init.method === "POST" && url.endsWith("/pulls/42/requested_reviewers")) {
+          return makeResponse({ status: 201, body: { requested_reviewers: [{ login: "octocat" }] } });
+        }
+        return undefined;
+      },
+    );
+  });
+
+  it("pr_merge", async () => {
+    await expectPrViewRefetchesAfterWrite(
+      "pr_merge",
+      { repo: "octo/repo", number: 42, method: "squash" },
+      async (url, init) => {
+        if (init.method === "PUT" && url.endsWith("/pulls/42/merge")) {
+          return makeResponse({ status: 200, body: { merged: true, sha: "abc123" } });
+        }
+        return undefined;
+      },
+    );
+  });
+});
+
 describe("pr_open_for_issue", () => {
   it("appends Closes #N to the PR body and sets status:in-review after creating the PR", async () => {
     let putBody: string | undefined;

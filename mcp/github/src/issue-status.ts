@@ -1,4 +1,4 @@
-import { ghRequest } from "./github.js";
+import { cacheKey, ghRequest, invalidate } from "./github.js";
 import { STATUS_LABEL_NAMES, statusLabel, type IssueStatus } from "./labels.js";
 import { labelNames, type RawLabel } from "./slim.js";
 
@@ -43,5 +43,6 @@ export async function setIssueStatus(
         "did not take effect.",
     );
   }
+  invalidate(cacheKey("issue", `${owner}/${name}`, number));
   return { number, labels: appliedNames };
 }
