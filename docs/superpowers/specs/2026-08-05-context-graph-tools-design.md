@@ -81,10 +81,14 @@ Add to `references/scaffold/`:
   stale, same double-coverage reasoning as `dotrepo-sync.sh` (hook) plus
   `link-doctor.sh` (verify) for the symlink case.
 
-Opt-in, not forced: a repo gets the scaffold gitignore lines and no-op hook
-guards regardless (cheap, inert), but only starts actually running `graphify` once
-someone runs `graphify install` in it — same "no-op if irrelevant" pattern already
-used for the husky hooks.
+**Superseded during rollout**: this section originally scoped `graphify install`
+as a manual per-repo opt-in, deferred past the pilot. Garrett wants it automatic
+for every developer touching any repo, not a step someone has to remember — so
+`bootstrapping-a-product-repo`'s scaffold step now runs `graphify install --project`
+for real as part of scaffolding, same as the pilot and the fleet rollout that
+followed it. The gitignore lines and no-op hook guards still exist underneath
+(harmless if a repo predates this convention and hasn't run the install yet),
+but the intended state fleet-wide is "already on," not "available if opted in."
 
 ### 3. Decision rule (`rules/context-tools.md`, new)
 
