@@ -56,6 +56,44 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
 });
 
+describe("repo_get caching", () => {
+  it("caches a repo's metadata for the process lifetime — a second call does not re-fetch", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({
+        status: 200,
+        body: { name: "repo", full_name: "octo/repo", default_branch: "main", private: false },
+      }),
+    );
+    const handler = await getRepoHandler("repo_get");
+
+    const first = await handler({ repo: "octo/repo" });
+    const second = await handler({ repo: "octo/repo" });
+
+    expect(first.isError).toBeFalsy();
+    expect(second.isError).toBeFalsy();
+    expect(JSON.parse(first.content[0].text)).toEqual(JSON.parse(second.content[0].text));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches different repos independently", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        makeResponse({ status: 200, body: { name: "repo", full_name: "octo/repo" } }),
+      )
+      .mockResolvedValueOnce(
+        makeResponse({ status: 200, body: { name: "other", full_name: "octo/other" } }),
+      );
+    const handler = await getRepoHandler("repo_get");
+
+    await handler({ repo: "octo/repo" });
+    await handler({ repo: "octo/other" });
+    await handler({ repo: "octo/repo" });
+    await handler({ repo: "octo/other" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("repo_file_read", () => {
   it("decodes the base64 content and returns the text with its metadata", async () => {
     fetchMock.mockImplementation(async (url: string) => {
