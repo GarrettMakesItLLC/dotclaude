@@ -99,6 +99,27 @@ pre-fetches it, but the MCP server itself still only looks for `chrome`, so
 browser tools remain unusable until the plugin's own config gains a
 `--browser=chromium` override upstream.
 
+### Vercel plugin gap — no env-var read/write tool
+
+`mcp__plugin_vercel_vercel__*` has no tool to list or set a project's
+`Environment Variables` (compare Railway's `list-variables`/`set-variables`).
+The plugin's source is the marketplace package, not this repo, so there is
+nothing here to patch — tracked as
+[dotclaude#97](https://github.com/GarrettMakesItLLC/dotclaude/issues/97).
+
+Workaround, in order of preference:
+
+1. **`vercel env` CLI**, if installed (`npm i -g vercel`, then `vercel link`
+   once per project): `vercel env ls`, `vercel env add <NAME> <environment>`,
+   `vercel env rm <NAME> <environment>`. The bundled `vercel` plugin ships an
+   `/env` command and an `env-vars` skill that already wrap these — reach for
+   those first.
+2. **Vercel dashboard**, manual: Project → Settings → Environment Variables.
+   Always available, no install step.
+
+Neither needs a manually-minted `VERCEL_TOKEN`; both exist specifically
+because the MCP can't do this yet.
+
 ## Custom MCPs vendored in this repo
 
 Source lives in `mcp/`; `bootstrap.sh` installs deps, builds, and registers each

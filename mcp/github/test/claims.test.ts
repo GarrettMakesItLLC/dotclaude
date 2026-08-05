@@ -93,7 +93,8 @@ describe("claim_release", () => {
         return makeResponse({ status: 200, body: {} });
       }
       if (init.method === "PUT" && url.endsWith("/labels")) {
-        return makeResponse({ status: 200, body: [] });
+        const sent = (JSON.parse(init.body ?? "{}") as { labels: string[] }).labels;
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
       }
       return makeResponse({ status: 500 });
     });
@@ -126,7 +127,7 @@ describe("claim_release", () => {
       }
       if (init.method === "PUT" && url.endsWith("/labels")) {
         sentLabels = (JSON.parse(init.body ?? "{}") as { labels: string[] }).labels;
-        return makeResponse({ status: 200, body: [] });
+        return makeResponse({ status: 200, body: sentLabels.map((n) => ({ name: n })) });
       }
       if (init.method === "DELETE") return makeResponse({ status: 204 });
       return makeResponse({ status: 500 });
@@ -201,7 +202,7 @@ describe("claim_release", () => {
         return makeResponse({ status: 204 });
       }
       if (init.method === "PUT" && url.endsWith("/labels")) {
-        return makeResponse({ status: 200, body: [] });
+        return makeResponse({ status: 200, body: [{ name: "status:ready" }] });
       }
       return makeResponse({ status: 500 });
     };
@@ -246,7 +247,7 @@ describe("claim_release", () => {
         return makeResponse({ status: 204 });
       }
       if (init.method === "PUT" && url.endsWith("/labels")) {
-        return makeResponse({ status: 200, body: [] });
+        return makeResponse({ status: 200, body: [{ name: "status:ready" }] });
       }
       return makeResponse({ status: 500 });
     });

@@ -150,7 +150,8 @@ describe("pr_open_for_issue", () => {
         return makeResponse({ status: 200, body: { labels: [] } });
       }
       if (init.method === "PUT" && url.endsWith("/issues/9/labels")) {
-        return makeResponse({ status: 200, body: [] });
+        const sent = JSON.parse(init.body as string).labels as string[];
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
       }
       return makeResponse({ status: 500 });
     });
@@ -181,7 +182,8 @@ describe("pr_open_for_issue", () => {
         return makeResponse({ status: 200, body: { labels: [] } });
       }
       if (init.method === "PUT" && url.endsWith("/issues/1/labels")) {
-        return makeResponse({ status: 200, body: [] });
+        const sent = JSON.parse(init.body as string).labels as string[];
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
       }
       return makeResponse({ status: 500 });
     });
