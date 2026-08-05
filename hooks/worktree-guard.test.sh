@@ -126,6 +126,33 @@ check 2 Bash command "cat >> $CONV/src/notes.md <<'EOF'
 > this blockquote line must not itself be scanned
 EOF"
 
+# --- #143: a leading `cd <dir> &&` changes the effective directory a
+# relative write-target resolves against — it must not be judged against the
+# hook process's own cwd.
+
+# Should ALLOW — cd into a linked worktree, then write a RELATIVE path; the
+# write lands inside the worktree, not the main tree.
+check 0 Bash command "cd $CONV/.worktrees/wt && cat >> notes.md <<'EOF'
+some content
+EOF"
+
+# Should BLOCK — cd into the MAIN tree, then a relative write still lands in
+# the main tree.
+check 2 Bash command "cd $CONV/src && cat >> notes.md <<'EOF'
+some content
+EOF"
+
+# Should ALLOW — chained cd's (cd a && cd b) accumulate into the worktree.
+check 0 Bash command "cd $CONV && cd .worktrees/wt && echo hi > notes.md"
+
+# Should ALLOW — an unresolvable `cd` target (a variable) makes the guard
+# refuse to judge anything relative afterward, rather than guess a root.
+check 0 Bash command "cd \$SOME_VAR && echo hi > notes.md"
+
+# Should still BLOCK — an ABSOLUTE write-target after an unresolvable `cd`
+# is unaffected (never depended on the tracked base to begin with).
+check 2 Bash command "cd \$SOME_VAR && echo hi > $CONV/src/absolute.md"
+
 # Should ALLOW — the config-repo exemption reached THROUGH a directory symlink,
 # exactly as production does (~/.claude/hooks -> dotclaude/hooks). Invokes the
 # guard via a symlinked parent dir so readlink -f must resolve the chain to find
