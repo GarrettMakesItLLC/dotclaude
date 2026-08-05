@@ -21,9 +21,14 @@ export type IssueType = (typeof ISSUE_TYPES)[number];
 /**
  * How much judgment a task takes, and which model it calls for. Orthogonal to
  * type/status/source — a bug fix and a feature can each be trivial or complex.
+ * Lives on the shared Project's Effort field, not a label (see project.ts).
  */
-export const ISSUE_COMPLEXITIES = ["trivial", "standard", "complex"] as const;
-export type IssueComplexity = (typeof ISSUE_COMPLEXITIES)[number];
+export const ISSUE_EFFORTS = ["trivial", "standard", "complex"] as const;
+export type IssueEffort = (typeof ISSUE_EFFORTS)[number];
+
+/** Lives on the shared Project's Priority field, not a label. */
+export const ISSUE_PRIORITIES = ["urgent", "high", "medium", "low"] as const;
+export type IssuePriority = (typeof ISSUE_PRIORITIES)[number];
 
 /**
  * Marker labels — orthogonal to status/type/source, and to each other. `epic`
@@ -74,19 +79,10 @@ const TYPE_STYLES: Record<IssueType, LabelStyle> = {
   task: { color: "bfd4f2", description: "Chore / maintenance / non-feature work" },
 };
 
-const COMPLEXITY_STYLES: Record<IssueComplexity, LabelStyle> = {
-  trivial: {
-    color: "8d6e63",
-    description: "Mechanical, single-file, no judgment calls — a Haiku-class task",
-  },
-  standard: {
-    color: "4db6ac",
-    description: "Bounded scope, known patterns — the default, Sonnet-class task",
-  },
-  complex: {
-    color: "e07a5f",
-    description: "Cross-cutting, ambiguous, or one-way-door — an Opus-class task",
-  },
+const RETIRED_EFFORT_COLORS: Record<IssueEffort, string> = {
+  trivial: "8d6e63",
+  standard: "4db6ac",
+  complex: "e07a5f",
 };
 
 const MARKER_STYLES: Record<IssueMarker, LabelStyle> = {
@@ -109,16 +105,11 @@ export function typeLabel(type: IssueType): string {
   return `type:${type}`;
 }
 
-/** The `complexity:*` label name for a complexity value. */
-export function complexityLabel(complexity: IssueComplexity): string {
-  return `complexity:${complexity}`;
-}
-
-/** Model tiers, weakest first — matches the minimum a complexity label calls for. */
+/** Model tiers, weakest first — matches the minimum an effort tier calls for. */
 const MODEL_TIERS = ["haiku", "sonnet", "opus"] as const;
 type ModelTier = (typeof MODEL_TIERS)[number];
 
-const COMPLEXITY_MIN_TIER: Record<IssueComplexity, ModelTier> = {
+const EFFORT_MIN_TIER: Record<IssueEffort, ModelTier> = {
   trivial: "haiku",
   standard: "sonnet",
   complex: "opus",
@@ -136,21 +127,21 @@ function modelTier(modelId: string): ModelTier | null {
 
 /**
  * A human-readable warning when `callerModel` is under-provisioned for
- * `complexity`, or null when it meets or exceeds the minimum (including when
+ * `effort`, or null when it meets or exceeds the minimum (including when
  * either input is unrecognized — silence, not a false positive, is the safe
  * failure mode for a heuristic this coarse).
  */
-export function complexityModelMismatch(
-  complexity: IssueComplexity,
+export function effortModelMismatch(
+  effort: IssueEffort,
   callerModel: string,
 ): string | null {
   const caller = modelTier(callerModel);
   if (!caller) return null;
-  const required = COMPLEXITY_MIN_TIER[complexity];
+  const required = EFFORT_MIN_TIER[effort];
   if (MODEL_TIERS.indexOf(caller) >= MODEL_TIERS.indexOf(required)) return null;
   return (
-    `caller is running "${callerModel}" (${caller}-tier) but this issue is labeled ` +
-    `complexity:${complexity}, which calls for ${required}-tier or stronger.`
+    `caller is running "${callerModel}" (${caller}-tier) but this issue carries an ` +
+    `Effort of ${effort}, which calls for ${required}-tier or stronger.`
   );
 }
 
@@ -167,8 +158,6 @@ export function sourceLabel(source: IssueSource): string {
 /** The full label taxonomy provisioned into every repo. */
 export const ISSUE_LABELS: LabelSpec[] = [
   ...ISSUE_STATUSES.map((s) => ({ name: statusLabel(s), ...STATUS_STYLES[s] })),
-  ...ISSUE_TYPES.map((t) => ({ name: typeLabel(t), ...TYPE_STYLES[t] })),
-  ...ISSUE_COMPLEXITIES.map((c) => ({ name: complexityLabel(c), ...COMPLEXITY_STYLES[c] })),
   ...ISSUE_SOURCES.map((s) => ({ name: sourceLabel(s), ...SOURCE_STYLES[s] })),
   ...ISSUE_MARKERS.map((m) => ({ name: m, ...MARKER_STYLES[m] })),
 ];
@@ -182,6 +171,16 @@ export const DEPRECATED_LABELS: LabelSpec[] = [
   { name: "bug", color: "ededed", description: "DEPRECATED historical label — use type:bug on new work" },
   { name: "enhancement", color: "ededed", description: "DEPRECATED historical label — use type:feature on new work" },
   { name: "documentation", color: "ededed", description: "DEPRECATED historical label — use type:task on new work" },
+  ...ISSUE_TYPES.map((t) => ({
+    name: typeLabel(t),
+    color: TYPE_STYLES[t].color,
+    description: `DEPRECATED — use the native GitHub issue type instead of ${typeLabel(t)}`,
+  })),
+  ...ISSUE_EFFORTS.map((e) => ({
+    name: `complexity:${e}`,
+    color: RETIRED_EFFORT_COLORS[e],
+    description: `DEPRECATED — use the Effort project field instead of complexity:${e}`,
+  })),
 ];
 
 /**

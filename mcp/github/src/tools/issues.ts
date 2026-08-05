@@ -13,19 +13,20 @@ import {
   ISSUE_SOURCES,
   ISSUE_STATUSES,
   ISSUE_TYPES,
-  ISSUE_COMPLEXITIES,
+  ISSUE_EFFORTS,
+  ISSUE_PRIORITIES,
   typeLabel,
   nativeTypeName,
   statusLabel,
   sourceLabel,
-  complexityLabel,
-  complexityModelMismatch,
+  effortModelMismatch,
   TRUSTED_SOURCES,
-  type IssueComplexity,
+  type IssueEffort,
   type IssueSource,
   type IssueStatus,
   type IssueType,
 } from "../labels.js";
+import { findProjectItem, getProjectField, setProjectSingleSelect } from "../project.js";
 import { setIssueStatus } from "../issue-status.js";
 import { labelNames, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";
 import {
@@ -86,6 +87,35 @@ async function ensureMilestone(
     { method: "POST", body: { title, description, due_on } },
   );
   return created.number;
+}
+
+/**
+ * Resolve a repo issue to its shared-project item, find the named single-select
+ * field, and set it to the option matching `optionValue` (case-insensitive).
+ * Throws if the issue isn't a project item, or the field has no such option —
+ * callers that want best-effort behavior (issue_open) catch around this;
+ * callers that want a hard failure (issue_set_effort/issue_set_priority) let
+ * it propagate to their own try/catch.
+ */
+async function applyProjectSingleSelect(
+  owner: string,
+  name: string,
+  number: number,
+  fieldName: string,
+  optionValue: string,
+): Promise<void> {
+  const item = await findProjectItem(owner, name, number);
+  if (!item) {
+    throw new Error(
+      `Issue #${number} in ${owner}/${name} is not on the GarrettMakesItLLC — Work project — add it first.`,
+    );
+  }
+  const field = await getProjectField(fieldName);
+  const option = field.options?.find((o) => o.name.toLowerCase() === optionValue);
+  if (!option) {
+    throw new Error(`${fieldName} field has no "${optionValue}" option.`);
+  }
+  await setProjectSingleSelect(item.id, field.id, option.id);
 }
 
 export function registerIssueTools(server: McpServer): void {
@@ -304,8 +334,7 @@ export function registerIssueTools(server: McpServer): void {
   server.registerTool(
     "issue_set_type",
     {
-      description:
-        "Set an issue's type (bug/feature/task): applies the native GitHub issue type (best-effort) and the matching type:* label, replacing any existing type:* label.",
+      description: "Set an issue's native GitHub issue type (bug/feature/task). No label written — native type is the only source of truth.",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number."),
@@ -315,30 +344,11 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, number, type }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-
-        // Native issue type — org-configured, may not exist on this owner. Best-effort.
-        try {
-          await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
-            method: "PATCH",
-            body: { type: nativeTypeName(type) },
-          });
-        } catch {
-          // Owner lacks native issue types; the label below is the universal fallback.
-        }
-
-        // Replace any existing type:* label, preserving all others.
-        const issue = await ghRequest<{ labels: { name: string }[] }>(
-          `/repos/${owner}/${name}/issues/${number}`,
-        );
-        const kept = issue.labels
-          .map((l) => l.name)
-          .filter((n) => !n.startsWith("type:"));
-        const next = [...kept, typeLabel(type)];
-        const data = await ghRequest<RawLabel[]>(
-          `/repos/${owner}/${name}/issues/${number}/labels`,
-          { method: "PUT", body: { labels: next } },
-        );
-        return jsonText({ number, type, labels: labelNames(data) });
+        await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
+          method: "PATCH",
+          body: { type: nativeTypeName(type) },
+        });
+        return jsonText({ number, type });
       } catch (err) {
         return errorResult(err);
       }
@@ -346,33 +356,46 @@ export function registerIssueTools(server: McpServer): void {
   );
 
   server.registerTool(
-    "issue_set_complexity",
+    "issue_set_effort",
     {
       description:
-        "Set an issue's complexity:* label (trivial/standard/complex), replacing any existing " +
-        "complexity:* label. No native GitHub field to mirror — label only, unlike issue_set_type.",
+        "Set an issue's Effort field on the shared GarrettMakesItLLC — Work project " +
+        "(trivial/standard/complex) — the model-tier signal for subagent dispatch. The issue must " +
+        "already be a project item.",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number."),
-        complexity: z.enum(ISSUE_COMPLEXITIES).describe("Complexity tier."),
+        effort: z.enum(ISSUE_EFFORTS).describe("Effort tier."),
       },
     },
-    async ({ repo, number, complexity }) => {
+    async ({ repo, number, effort }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
+        await applyProjectSingleSelect(owner, name, number, "Effort", effort);
+        return jsonText({ number, effort });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
 
-        const issue = await ghRequest<{ labels: { name: string }[] }>(
-          `/repos/${owner}/${name}/issues/${number}`,
-        );
-        const kept = issue.labels
-          .map((l) => l.name)
-          .filter((n) => !n.startsWith("complexity:"));
-        const next = [...kept, complexityLabel(complexity)];
-        const data = await ghRequest<RawLabel[]>(
-          `/repos/${owner}/${name}/issues/${number}/labels`,
-          { method: "PUT", body: { labels: next } },
-        );
-        return jsonText({ number, complexity, labels: labelNames(data) });
+  server.registerTool(
+    "issue_set_priority",
+    {
+      description:
+        "Set an issue's Priority field on the shared GarrettMakesItLLC — Work project " +
+        "(urgent/high/medium/low). The issue must already be a project item.",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Issue number."),
+        priority: z.enum(ISSUE_PRIORITIES).describe("Priority tier."),
+      },
+    },
+    async ({ repo, number, priority }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        await applyProjectSingleSelect(owner, name, number, "Priority", priority);
+        return jsonText({ number, priority });
       } catch (err) {
         return errorResult(err);
       }
@@ -444,7 +467,7 @@ export function registerIssueTools(server: McpServer): void {
         "picking different work unless the stamp identifies THIS machine. Assignee alone cannot " +
         "arbitrate this: every machine authenticates as the same user. Check out the returned " +
         "branch instead of creating your own. Pass `caller_model` (your own model id, e.g. " +
-        "\"claude-sonnet-5\") and, when the issue carries a `complexity:*` label calling for a " +
+        "\"claude-sonnet-5\") and, when the issue carries an Effort field value calling for a " +
         "stronger model than you're running, the claim still succeeds but reports a " +
         "`model_mismatch` field flagging it — over-provisioned needs no action, under-provisioned " +
         "is worth surfacing to the owner rather than silently proceeding.",
@@ -460,7 +483,7 @@ export function registerIssueTools(server: McpServer): void {
           .optional()
           .describe(
             "The claiming agent's own model id (e.g. \"claude-sonnet-5\"), self-reported — this " +
-              "tool has no other way to know it. Omit to skip the complexity/model check entirely.",
+              "tool has no other way to know it. Omit to skip the effort/model check entirely.",
           ),
       },
     },
@@ -492,11 +515,10 @@ export function registerIssueTools(server: McpServer): void {
           warnings.push(`claim stamp not posted (the branch lock is held regardless): ${msg}`);
         }
 
-        const complexity = labelNames(issue.labels)
-          .find((l) => l.startsWith("complexity:"))
-          ?.slice("complexity:".length) as IssueComplexity | undefined;
+        const item = await findProjectItem(owner, name, number);
+        const effort = item?.fields.effort as IssueEffort | undefined;
         const modelMismatch =
-          complexity && caller_model ? complexityModelMismatch(complexity, caller_model) : null;
+          effort && caller_model ? effortModelMismatch(effort, caller_model) : null;
 
         let assignee: string | null = null;
         try {
@@ -661,13 +683,19 @@ export function registerIssueTools(server: McpServer): void {
               "name which app, for reports cross-filed elsewhere. `owner` is trusted, so his defects " +
               "start `ready` instead of awaiting verification.",
           ),
-        complexity: z
-          .enum(ISSUE_COMPLEXITIES)
+        effort: z
+          .enum(ISSUE_EFFORTS)
           .optional()
           .describe(
-            "How much judgment the task takes: trivial (Haiku-class), standard (Sonnet-class, " +
-              "the default), or complex (Opus-class, cross-cutting/ambiguous/one-way-door).",
+            "How much judgment the task takes: trivial (Haiku-class), standard (Sonnet-class, the " +
+              "default), or complex (Opus-class). Set best-effort after creation — if the issue hasn't " +
+              "landed on the shared project yet, this is reported in `_warnings` rather than failing " +
+              "the whole call.",
           ),
+        priority: z
+          .enum(ISSUE_PRIORITIES)
+          .optional()
+          .describe("Urgent/high/medium/low. Same best-effort timing as effort."),
         milestone: z
           .string()
           .optional()
@@ -684,15 +712,13 @@ export function registerIssueTools(server: McpServer): void {
           .describe('Usernames to assign, or "@me". Default: unassigned.'),
       },
     },
-    async ({ repo, title, body, type, status, source, complexity, milestone, parent, assignees }) => {
+    async ({ repo, title, body, type, status, source, effort, priority, milestone, parent, assignees }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
         const effectiveStatus: IssueStatus = status ?? defaultStatus(source, type);
 
         const labels = [statusLabel(effectiveStatus)];
-        if (type) labels.push(typeLabel(type));
         if (source) labels.push(sourceLabel(source));
-        if (complexity) labels.push(complexityLabel(complexity));
 
         const created = await ghRequest<{ number: number; id: number }>(
           `/repos/${owner}/${name}/issues`,
@@ -746,6 +772,23 @@ export function registerIssueTools(server: McpServer): void {
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             warnings.push(`parent #${parent} not linked: ${msg}`);
+          }
+        }
+
+        if (effort) {
+          try {
+            await applyProjectSingleSelect(owner, name, number, "Effort", effort);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            warnings.push(`effort "${effort}" not set: ${msg}`);
+          }
+        }
+        if (priority) {
+          try {
+            await applyProjectSingleSelect(owner, name, number, "Priority", priority);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            warnings.push(`priority "${priority}" not set: ${msg}`);
           }
         }
 
