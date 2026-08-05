@@ -319,7 +319,7 @@ describe("issue_claim", () => {
         const sent = JSON.parse(init.body as string).labels as string[];
         expect(sent).toEqual(expect.arrayContaining(["type:bug", "status:in-progress"]));
         expect(sent).not.toContain("status:ready");
-        return makeResponse({ status: 200, body: { number: 8 } });
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
       }
       return makeResponse({ status: 500 });
     };
@@ -464,6 +464,34 @@ describe("issue_claim", () => {
     expect(out._warnings[0]).toContain("self-assign");
     // The ref is the lock — it must NOT be rolled back when assignment fails.
     expect(calls.some((c) => c.startsWith("DELETE"))).toBe(false);
+  });
+
+  it("reports status:null with a _warnings entry when the labels PUT returns 2xx but silently drops status:in-progress", async () => {
+    const calls: string[] = [];
+    const base = mockClaim({ refStatus: 201, calls });
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      const method = init.method ?? "GET";
+      if (method === "PUT" && url.endsWith("/labels")) {
+        // GitHub returned 2xx, but the applied set omits status:in-progress —
+        // a silent no-op the caller must not report as a successful claim.
+        return makeResponse({ status: 200, body: [{ name: "type:bug" }] });
+      }
+      return base(url, init);
+    });
+
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8 });
+
+    expect(res.isError).toBeFalsy();
+    const out = JSON.parse(res.content[0].text) as {
+      claimed: boolean;
+      status: string | null;
+      _warnings: string[];
+    };
+    expect(out.claimed).toBe(true);
+    expect(out.status).toBeNull();
+    expect(out._warnings).toHaveLength(1);
+    expect(out._warnings[0]).toContain("status:in-progress");
   });
 
   it("uses an explicit branch override instead of deriving one from the title", async () => {
