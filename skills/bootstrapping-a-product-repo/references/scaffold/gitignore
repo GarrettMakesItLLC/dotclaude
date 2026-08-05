@@ -1,16 +1,45 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Build outputs
 dist/
 build/
-coverage/
+.next/
 .turbo/
+*.tsbuildinfo
 
+# Test
+coverage/
+playwright-report/
+test-results/
+
+# Environment — every dotenv file, at any depth. Only the *.example registries
+# are tracked; a secret in git history is not fixable by a later commit.
 .env
-.env.*
-!.env.example
+**/.env
+**/.env.*
+!**/.env.example
 
+# Editor / OS
 .DS_Store
-*.log
+*.swp
+*.swo
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Vercel
+.vercel
+
+# Git worktrees
 .worktrees/
 .claude/settings.local.json
 
