@@ -12,7 +12,7 @@
 set -uo pipefail
 
 DOTCLAUDE_DIR="${DOTCLAUDE_DIR:-$HOME/dotclaude}"
-DOTFILES_DIR="${DOTFILES_DIR:-$HOME/workspace/dotfiles}"
+DOTFILES_DIR="${DOTFILES_DIR:-$HOME/dotfiles}"
 
 notes=()
 
