@@ -32,6 +32,21 @@ async function fetchToken(): Promise<string> {
   }
 }
 
+/**
+ * Run a `gh` subcommand and return its trimmed stdout. Used only for the
+ * handful of operations REST has no equivalent for (Projects v2 fields) —
+ * everything else goes through `ghRequest`, never this.
+ */
+export async function execGh(args: string[]): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("gh", args);
+    return stdout.trim();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`gh ${args.join(" ")} failed: ${message}`);
+  }
+}
+
 async function getToken(): Promise<string> {
   if (cachedToken) return cachedToken;
   cachedToken = await fetchToken();

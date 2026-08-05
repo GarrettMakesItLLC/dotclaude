@@ -234,3 +234,27 @@ describe("ghPaginate", () => {
     expect(result).toEqual([{ keep: true }, { keep: true }, { keep: true }]);
   });
 });
+
+describe("execGh", () => {
+  it("returns trimmed stdout on success", async () => {
+    execFileMock.mockImplementation((_c: string, args: string[], cb: (e: unknown, o?: unknown) => void) => {
+      if (args[0] === "project" && args[1] === "field-list") {
+        return cb(null, { stdout: '{"fields":[]}\n', stderr: "" });
+      }
+      cb(new Error(`unexpected gh args: ${args.join(" ")}`));
+    });
+    const { execGh } = await import("../src/github.js");
+    const out = await execGh(["project", "field-list", "2", "--owner", "acme", "--format", "json"]);
+    expect(out).toBe('{"fields":[]}');
+  });
+
+  it("wraps a failing gh invocation with the args in the message", async () => {
+    execFileMock.mockImplementation((_c: string, _a: string[], cb: (e: unknown) => void) => {
+      cb(new Error("exit status 1"));
+    });
+    const { execGh } = await import("../src/github.js");
+    await expect(execGh(["project", "bogus"])).rejects.toThrow(
+      "gh project bogus failed: exit status 1",
+    );
+  });
+});
