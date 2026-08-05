@@ -56,8 +56,8 @@ from `dotfiles`, which clones this repo and runs the script below as one of its
 steps:
 
 ```bash
-git clone git@github.com:GarrettMakesItLLC/dotfiles.git ~/workspace/dotfiles
-bash ~/workspace/dotfiles/bootstrap/device.sh
+git clone git@github.com:GarrettMakesItLLC/dotfiles.git ~/dotfiles
+bash ~/dotfiles/bootstrap/device.sh
 ```
 
 For this config alone:
