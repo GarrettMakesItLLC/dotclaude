@@ -50,6 +50,43 @@ machine. Plugins not listed ship skills only.
 | Sentry | `sentry` | OAuth (Sentry account) |
 | Playwright | `playwright` | None — drives a local browser |
 
+### Railway `get-logs` on build logs — token-limit workaround
+
+`get-logs` with `types: ["build"]` (or `["build", "deploy"]`) can exceed the
+context token limit even at `limit: 100`–`200`, because each Metal/Railpack
+build log entry duplicates a large base64 `data` attribute alongside the
+already-decoded `message` field. The documented `filter` param (Loki-style)
+does not reliably narrow build logs server-side — a `filter: "error"` call has
+returned zero matches on a log later confirmed to contain matching lines when
+read unfiltered. Don't retry with a smaller `limit` expecting it to fix this —
+the fix is downstream of the tool's own overflow handling, below.
+
+Workaround (skip straight to this instead of burning a token-limit error
+first):
+
+1. Call `get-logs` as usual. On overflow it writes the full JSON to a local
+   file and reports the path (under
+   `~/.claude/projects/*/tool-results/mcp-plugin_railway_railway-get-logs-*.txt`).
+2. Filter that file instead of loading it into context — keep only entries
+   where `severity == "error"` or `message` contains `error`/`fail`
+   (case-insensitive):
+
+   ```bash
+   python3 -c "
+   import json
+   data = json.load(open('<path-from-step-1>'))
+   for e in data:
+       msg = e.get('message', '')
+       if e.get('severity') == 'error' or 'error' in msg.lower() or 'fail' in msg.lower():
+           print(msg)
+   "
+   ```
+
+This is a gap in the `railway` plugin MCP, not this repo — its source isn't
+vendored here to patch. Tracked at
+[#95](https://github.com/GarrettMakesItLLC/dotclaude/issues/95); revisit once
+a plugin update adds a compact/fields option or fixes server-side filtering.
+
 ## Custom MCPs vendored in this repo
 
 Source lives in `mcp/`; `bootstrap.sh` installs deps, builds, and registers each
