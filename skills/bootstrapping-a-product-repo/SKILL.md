@@ -135,6 +135,13 @@ cd .worktrees/bootstrap
 supplies those to every repo that does not define its own — a local copy is drift, and it has to be
 updated in five places forever.
 
+**Run `graphify install --project` in this same PR, not later.** The context-tools scaffold
+(`.husky/post-merge`/`post-checkout`, the `graphify` CI job — see `rules/context-tools.md`) ships
+inert until a repo has an actual graph; every developer on every repo should have this working from
+day one, not as a manual step someone remembers or forgets. Run it, commit the `.claude/skills/graphify/`
+marker and `graphify-out`'s gitignored build alongside the rest of the scaffold, and verify the hooks
+pick it up (same check as any other scaffold file — see the traps below).
+
 ### Traps in this step
 
 - **`husky init` writes `npm test` as the pre-commit hook**, which fails on every commit when there

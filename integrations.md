@@ -138,9 +138,11 @@ run `graphify update` after every pull/checkout, and `.github/workflows/ci.yml`
 re-runs `graphify update` + `graphify export callflow-html` on every push to
 `main`, so the published call-flow view is never more than one push stale.
 `graphify-out/` is gitignored (generated, regenerable) — none of this ever
-requires a manual reindex. Both are opt-in per repo (`graphify install`); the
-scaffold ships the gitignore lines and no-op hook guards regardless, cheap and
-inert until a repo opts in — see `bootstrapping-a-product-repo`.
+requires a manual reindex. Every product repo runs `graphify install --project`
+as part of its scaffold, not as a later manual step — see
+`bootstrapping-a-product-repo`. A repo predating this convention, or bootstrapped
+outside the standard flow, is the only case where the hooks/CI still no-op
+until someone runs `graphify install --project` by hand.
 
 ## Custom MCPs vendored in this repo
 
