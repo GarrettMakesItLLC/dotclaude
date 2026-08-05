@@ -62,20 +62,32 @@ with `claude mcp add --scope user`.
 Missing a capability, or a tool that keeps failing? The **`closing-tool-gaps`** skill covers unblocking
 now and adding the tool so the gap closes for everyone.
 
-## GitHub org permissions — `admin:org` not granted
+## GitHub org-level rulesets — branch protection
 
-The `gh` token (`gh auth token`, what `github-rest` reuses) lacks the `admin:org`
-scope, which blocks organization-level rulesets — a single ruleset applied at
-the `GarrettMakesItLLC` org level, inherited by every repo. Until that scope is
-granted, branch protection is **repo-level rulesets**, set by hand per repo, and
-they drift: AdventureOS and RedThread were each missing rulesets other repos
-already carried, caught only by manual audit.
+The `gh` token (`gh auth token`, what `github-rest` reuses) carries `admin:org`,
+so branch protection lives at the **organization** level, inherited by every
+repo in `GarrettMakesItLLC` automatically — including one created later. Four
+org rulesets:
 
-Every repo should carry the same three rulesets — `StagePR`, `ProdPR`, and
-`Copilot review for default branch` — with `allowed_merge_methods` set: squash
-on the default branch, merge-commit only on `main`. Setting that field
-structurally rules out squashing a promotion (which breaks version
-computation) rather than leaving it a documented hope enforced by nothing.
+- `Branch integrity (all repos)` — deletion + non-fast-forward, every repo.
+- `Copilot review for default branch (all repos)` — every repo's default branch.
+  Currently a no-op: Copilot has 0 assigned seats org-wide (`gh api
+  orgs/GarrettMakesItLLC/copilot/billing`), so nothing actually runs the review
+  until a seat is assigned.
+- `StagePR (all repos)` / `ProdPR (all repos)` — squash-only + required `CI
+  Success` check on `~DEFAULT_BRANCH`, merge-commit-only + required `CI Success`
+  on `refs/heads/main`. **Excludes** the single-tier repos (`dotclaude`,
+  `dotfiles`, `ci`, and `.github`, which carries no CI at all — templates and an
+  org profile, nothing a workflow would verify) — for them `~DEFAULT_BRANCH` and
+  `main` are the same branch, and StagePR's squash-only would fight ProdPR's
+  merge-commit-only on it. Each keeps its own repo-level ruleset instead: squash
+  + required `CI Success`, no merge queue.
+
+**`merge_queue` cannot be an org-level rule** (the API 422s on it) — it stays a
+thin repo-level ruleset per two-tier repo, `StagePR`/`ProdPR` in name only, now
+holding nothing but the `merge_queue` rule. Everything else those used to carry
+(deletion, non-fast-forward, the pull_request/merge-method rule, required
+status checks) moved to the org-level rulesets above.
 
 ## claude.ai OAuth connectors — reconnect on a fresh machine
 

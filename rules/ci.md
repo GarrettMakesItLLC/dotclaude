@@ -94,7 +94,7 @@ A workflow needing not-yet-provisioned secrets or a data-plane ships **off by de
 
 ## Branch rulesets
 
-Every repo carries the same three rulesets: `StagePR`, `ProdPR`, and `Copilot review for default branch`. Set `allowed_merge_methods` on each — squash on the default branch, merge-commit only on `main` — so squashing a promotion (which breaks version computation) is structurally impossible rather than a documented hope. Org-level rulesets aren't available yet (`integrations.md`), so this is set by hand, per repo.
+Branch protection is org-level, applied automatically to every repo — see `integrations.md` for the exact ruleset breakdown. `allowed_merge_methods` is squash on the default branch, merge-commit only on `main`, so squashing a promotion (which breaks version computation) is structurally impossible rather than a documented hope. A two-tier repo also keeps a thin repo-level ruleset carrying nothing but `merge_queue` — the one rule type that can't live at org level.
 
 ## Other
 
