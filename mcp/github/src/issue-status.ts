@@ -8,6 +8,13 @@ import { labelNames, type RawLabel } from "./slim.js";
  * Shared by `issue_set_status`, `issue_claim`, and `pr_open_for_issue` so the
  * GET→filter→PUT sequence lives in exactly one place.
  *
+ * Verifies the requested status label is actually present in the PUT
+ * response before returning — a 2xx from `/labels` is not proof the write
+ * took effect, and a caller (`issue_claim` in particular) that trusts a
+ * silent-but-ineffective write reports `status:in-progress` while the issue
+ * stays on its previous label. Throwing here routes that case through the
+ * same error handling as any other failed write, instead of a false success.
+ *
  * Returns the resulting label names — the endpoint's full label objects are the
  * raw payload `issue_set_status` would otherwise surface.
  */
@@ -28,5 +35,13 @@ export async function setIssueStatus(
     `/repos/${owner}/${name}/issues/${number}/labels`,
     { method: "PUT", body: { labels: next } },
   );
-  return { number, labels: labelNames(applied) };
+  const appliedNames = labelNames(applied);
+  if (status && !appliedNames.includes(statusLabel(status))) {
+    throw new Error(
+      `GitHub returned 2xx for the labels PUT on issue #${number}, but the response omits ` +
+        `${statusLabel(status)} — applied labels: [${appliedNames.join(", ")}]. The status write ` +
+        "did not take effect.",
+    );
+  }
+  return { number, labels: appliedNames };
 }
