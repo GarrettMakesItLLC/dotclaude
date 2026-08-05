@@ -327,7 +327,7 @@ This is one task, not five, because they share a single import block in `issues.
 - Consumes: `findProjectItem`, `getProjectField`, `setProjectSingleSelect` from `project.ts` (Task 2).
 - Produces:
   - `labels.ts`: `ISSUE_EFFORTS = ["trivial","standard","complex"] as const`, `IssueEffort`; `ISSUE_PRIORITIES = ["urgent","high","medium","low"] as const`, `IssuePriority`; `effortModelMismatch(effort: IssueEffort, callerModel: string): string | null` (replaces `complexityModelMismatch`); `ISSUE_LABELS` drops the `type:*`/`complexity:*` axes; `DEPRECATED_LABELS` gains six entries. `typeLabel`/`nativeTypeName`/`ISSUE_TYPES`/`IssueType` unchanged.
-  - `issues.ts`: `issue_set_type` no longer touches labels; `issue_set_effort` replaces `issue_set_complexity`, writing the Effort project field; new `issue_set_priority` writes the Priority project field; `issue_claim`'s model-mismatch check reads Effort off the project item; `issue_open` drops the `type:*`/`complexity:*` label pushes and gains optional `effort`/`priority` params set best-effort after creation.
+  - `issues.ts`: a shared internal `applyProjectSingleSelect(owner, name, number, fieldName, optionValue)` helper (not exported — module-private) does the resolve-item/resolve-field/resolve-option/set sequence once; `issue_set_effort` (replaces `issue_set_complexity`), `issue_set_priority` (new), and `issue_open`'s best-effort effort/priority blocks all call it instead of duplicating that sequence. `issue_set_type` no longer touches labels; `issue_claim`'s model-mismatch check reads Effort off the project item; `issue_open` drops the `type:*`/`complexity:*` label pushes and gains optional `effort`/`priority` params.
 
 #### Step 1: Write every failing test first
 
@@ -657,7 +657,40 @@ async ({ repo, number, type }) => {
 },
 ```
 
-**`issue_set_complexity` → `issue_set_effort`** (currently lines 348-380) — replace the whole block:
+**`issue_set_complexity` → `issue_set_effort`** (currently lines 348-380) — first add a module-private helper above `registerIssueTools` (or as a top-level function in the file, alongside `defaultStatus`/`resolveAssignees`) that both new tools and `issue_open` share:
+
+```ts
+/**
+ * Resolve a repo issue to its shared-project item, find the named single-select
+ * field, and set it to the option matching `optionValue` (case-insensitive).
+ * Throws if the issue isn't a project item, or the field has no such option —
+ * callers that want best-effort behavior (issue_open) catch around this;
+ * callers that want a hard failure (issue_set_effort/issue_set_priority) let
+ * it propagate to their own try/catch.
+ */
+async function applyProjectSingleSelect(
+  owner: string,
+  name: string,
+  number: number,
+  fieldName: string,
+  optionValue: string,
+): Promise<void> {
+  const item = await findProjectItem(owner, name, number);
+  if (!item) {
+    throw new Error(
+      `Issue #${number} in ${owner}/${name} is not on the GarrettMakesItLLC — Work project — add it first.`,
+    );
+  }
+  const field = await getProjectField(fieldName);
+  const option = field.options?.find((o) => o.name.toLowerCase() === optionValue);
+  if (!option) {
+    throw new Error(`${fieldName} field has no "${optionValue}" option.`);
+  }
+  await setProjectSingleSelect(item.id, field.id, option.id);
+}
+```
+
+Then replace the `issue_set_complexity` block with both new tools, each a thin wrapper around the helper:
 
 ```ts
 server.registerTool(
@@ -676,18 +709,7 @@ server.registerTool(
   async ({ repo, number, effort }) => {
     try {
       const { owner, name } = await resolveRepo(repo);
-      const item = await findProjectItem(owner, name, number);
-      if (!item) {
-        throw new Error(
-          `Issue #${number} in ${owner}/${name} is not on the GarrettMakesItLLC — Work project — add it first.`,
-        );
-      }
-      const field = await getProjectField("Effort");
-      const option = field.options?.find((o) => o.name.toLowerCase() === effort);
-      if (!option) {
-        throw new Error(`Effort field has no "${effort}" option.`);
-      }
-      await setProjectSingleSelect(item.id, field.id, option.id);
+      await applyProjectSingleSelect(owner, name, number, "Effort", effort);
       return jsonText({ number, effort });
     } catch (err) {
       return errorResult(err);
@@ -710,18 +732,7 @@ server.registerTool(
   async ({ repo, number, priority }) => {
     try {
       const { owner, name } = await resolveRepo(repo);
-      const item = await findProjectItem(owner, name, number);
-      if (!item) {
-        throw new Error(
-          `Issue #${number} in ${owner}/${name} is not on the GarrettMakesItLLC — Work project — add it first.`,
-        );
-      }
-      const field = await getProjectField("Priority");
-      const option = field.options?.find((o) => o.name.toLowerCase() === priority);
-      if (!option) {
-        throw new Error(`Priority field has no "${priority}" option.`);
-      }
-      await setProjectSingleSelect(item.id, field.id, option.id);
+      await applyProjectSingleSelect(owner, name, number, "Priority", priority);
       return jsonText({ number, priority });
     } catch (err) {
       return errorResult(err);
@@ -749,8 +760,9 @@ effort: z
   .optional()
   .describe(
     "How much judgment the task takes: trivial (Haiku-class), standard (Sonnet-class, the " +
-      "default), or complex (Opus-class). Set best-effort after creation, once the issue has " +
-      "landed on the shared project — silently skipped if it hasn't yet.",
+      "default), or complex (Opus-class). Set best-effort after creation — if the issue hasn't " +
+      "landed on the shared project yet, this is reported in `_warnings` rather than failing " +
+      "the whole call.",
   ),
 priority: z
   .enum(ISSUE_PRIORITIES)
@@ -767,17 +779,12 @@ if (source) labels.push(sourceLabel(source));
 
 (`type` is still applied via the native-type PATCH a few lines below, unchanged — only its label push is removed.)
 
-After the existing `parent` best-effort block, before the final `ghRequest` re-fetch, add:
+After the existing `parent` best-effort block, before the final `ghRequest` re-fetch, add — reusing the same `applyProjectSingleSelect` helper `issue_set_effort`/`issue_set_priority` use, just caught locally instead of propagated, since creation enrichment is best-effort:
 
 ```ts
 if (effort) {
   try {
-    const item = await findProjectItem(owner, name, number);
-    if (item) {
-      const field = await getProjectField("Effort");
-      const option = field.options?.find((o) => o.name.toLowerCase() === effort);
-      if (option) await setProjectSingleSelect(item.id, field.id, option.id);
-    }
+    await applyProjectSingleSelect(owner, name, number, "Effort", effort);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     warnings.push(`effort "${effort}" not set: ${msg}`);
@@ -785,12 +792,7 @@ if (effort) {
 }
 if (priority) {
   try {
-    const item = await findProjectItem(owner, name, number);
-    if (item) {
-      const field = await getProjectField("Priority");
-      const option = field.options?.find((o) => o.name.toLowerCase() === priority);
-      if (option) await setProjectSingleSelect(item.id, field.id, option.id);
-    }
+    await applyProjectSingleSelect(owner, name, number, "Priority", priority);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     warnings.push(`priority "${priority}" not set: ${msg}`);
