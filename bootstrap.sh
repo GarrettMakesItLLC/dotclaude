@@ -276,6 +276,43 @@ if command -v claude >/dev/null 2>&1; then
 fi
 
 # --------------------------------------------------------------------------
+# Context-graph tools for app-repo sessions: Serena (LSP-backed symbol
+# navigation, self-indexes live — no freshness plumbing needed) and Graphify
+# (local tree-sitter knowledge graph, kept fresh per-repo by the scaffold's
+# husky hooks + CI step). Decision rule: rules/context-tools.md. Both are
+# per-machine installs, not per-repo state, same tier as the rest of this
+# script. Neither is wired into dotclaude itself — see
+# skills/bootstrapping-a-product-repo for the per-repo scaffold.
+# --------------------------------------------------------------------------
+if command -v uv >/dev/null 2>&1; then
+  echo
+  echo "→ Installing Graphify (local knowledge-graph CLI)"
+  # PyPI package is graphifyy (double-y); the command it installs is graphify.
+  uv tool install graphifyy
+
+  echo
+  echo "→ Installing Serena (LSP-backed symbol navigation)"
+  uv tool install -p 3.13 serena-agent
+
+  if command -v claude >/dev/null 2>&1; then
+    echo
+    echo "→ Registering serena MCP (Serena symbol navigation, user scope)"
+    if claude mcp get serena >/dev/null 2>&1; then
+      echo "  already registered: serena (run \`claude mcp remove serena\` to re-add)"
+    else
+      claude mcp add --scope user serena -- serena start-mcp-server --context claude-code --project-from-cwd
+      echo "  registered: serena (user scope)"
+    fi
+  else
+    echo "  NOTE: \`claude\` CLI not found — register manually:"
+    echo "        claude mcp add --scope user serena -- serena start-mcp-server --context claude-code --project-from-cwd"
+  fi
+else
+  echo
+  echo "  WARNING: uv not found — skipping Graphify + Serena install. Install uv (https://docs.astral.sh/uv/getting-started/installation/), then re-run bootstrap." >&2
+fi
+
+# --------------------------------------------------------------------------
 # Plugins are declared in settings.json (enabledPlugins + extraKnownMarketplaces).
 # Claude Code auto-installs them on first launch from the official marketplace.
 # --------------------------------------------------------------------------

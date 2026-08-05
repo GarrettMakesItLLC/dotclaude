@@ -1,0 +1,6 @@
+# Keeps the Graphify call-graph snapshot current after `git pull`/merge, for
+# repos that have opted in (someone ran `graphify install` and `graphify-out/`
+# already exists locally). True no-op otherwise — see rules/context-tools.md.
+if command -v graphify >/dev/null 2>&1 && [ -d graphify-out ]; then
+  graphify update . >/dev/null 2>&1 || true
+fi

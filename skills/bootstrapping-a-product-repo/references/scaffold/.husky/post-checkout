@@ -1,0 +1,6 @@
+# Same guarded call as post-merge, covering branch switches (post-merge alone
+# misses these). True no-op unless this repo has opted into Graphify — see
+# rules/context-tools.md.
+if command -v graphify >/dev/null 2>&1 && [ -d graphify-out ]; then
+  graphify update . >/dev/null 2>&1 || true
+fi

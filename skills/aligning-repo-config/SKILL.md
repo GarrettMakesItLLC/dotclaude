@@ -80,6 +80,7 @@ A repo `CLAUDE.md` is **testable**, and a confidently wrong instruction costs mo
 - **Labels** — `labels_ensure` once per repo, so the taxonomy the issue skill assumes exists.
 - **MCP** — `.mcp.json` only for a server this repo alone needs.
 - **Integrations** — cross-check `~/dotclaude/integrations.md`'s roster against what the repo actually uses (its `package.json`/CI for Supabase, Railway, Vercel, Sentry, etc.). A used integration undocumented there is a gap to file back against `integrations.md`, not something to re-document per repo.
+- **Context-graph scaffold** — the `graphify-out/`/`.serena/` gitignore lines, `.husky/post-merge` + `.husky/post-checkout`, and the `ci.yml` Graphify step (`bootstrapping-a-product-repo`'s `references/scaffold/`) are cheap and inert until a repo opts in — check for them and add if missing, same as any other scaffold drift.
 
 ## 6. Ship it
 

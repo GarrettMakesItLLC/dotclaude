@@ -13,7 +13,9 @@ on:
   # cache ever exists and every feature PR starts cold. Two branches each green
   # on a stale base can also break once merged, and only `dev` sees that tree.
   push:
-    branches: [dev]
+    # `main`: full validation as the post-merge safety net (rules/ci.md), and
+    # what gates the Graphify snapshot job below (opted-in repos only).
+    branches: [dev, main]
   # Tier 2 (merge-queue lane): uncomment once this repo has a suite too slow
   # for the PR gate (e2e, a11y), and update ci-success per the comment on
   # that job below. Requires enabling the merge queue on the branch ruleset;
@@ -197,3 +199,52 @@ jobs:
     #                 sys.exit(1)
     #         PYEOF
     #         echo "All required jobs succeeded."
+
+  # CI-side freshness redundancy for the post-merge/post-checkout husky hooks
+  # (.husky/): those only fire on a machine that has the graphify CLI
+  # installed and pulls locally, so this is what guarantees the published
+  # call-flow view is never more than one push stale — same double-coverage
+  # reasoning as dotrepo-sync.sh (hook) + link-doctor.sh (verify) in
+  # dotclaude. graphify-out/ itself is gitignored (rules/context-tools.md),
+  # so a fresh checkout never has it; the opt-in signal is the committed
+  # `.claude/skills/graphify/` directory that `graphify install --project`
+  # writes. Not part of `ci-success` — this never gates a PR, only publishes
+  # a snapshot after merge, and is a true no-op (steps skipped, not failed)
+  # on a repo that hasn't opted in.
+  graphify:
+    name: Graphify call-flow snapshot
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Graphify opt-in
+        id: graphify-check
+        run: |
+          if [ -d .claude/skills/graphify ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install uv
+        if: steps.graphify-check.outputs.enabled == 'true'
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Update graph and export call-flow HTML
+        if: steps.graphify-check.outputs.enabled == 'true'
+        run: |
+          uv tool install graphifyy
+          graphify update .
+          graphify export callflow-html
+
+      - name: Upload call-flow HTML artifact
+        if: steps.graphify-check.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: graphify-callflow-html
+          path: graphify-out/*-callflow.html
+          retention-days: 30
