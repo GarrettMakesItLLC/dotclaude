@@ -17,6 +17,7 @@
     ],
     "defaultMode": "bypassPermissions"
   },
+  "model": "sonnet",
   "hooks": {
     "SessionStart": [
       {
@@ -118,7 +119,8 @@
     "code-review@claude-plugins-official": true,
     "commit-commands@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
-    "security-guidance@claude-plugins-official": true
+    "security-guidance@claude-plugins-official": true,
+    "serena@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
@@ -132,6 +134,5 @@
   "effortLevel": "medium",
   "promptSuggestionEnabled": false,
   "skipDangerousModePermissionPrompt": true,
-  "precomputeCompactionEnabled": true,
-  "model": "sonnet"
+  "precomputeCompactionEnabled": true
 }
