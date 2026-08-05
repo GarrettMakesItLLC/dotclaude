@@ -284,6 +284,22 @@ echo "→ Plugins declared in settings.json (auto-install on next \`claude\` lau
 grep -E '@claude-plugins-official' "$REPO_DIR/settings.json" | sed -E 's/[[:space:]]*"([^"]+)".*/    \1/'
 
 # --------------------------------------------------------------------------
+# The playwright plugin's @playwright/mcp defaults to the 'chrome' channel,
+# which needs a system install at /opt/google/chrome/chrome — root-only, and
+# unavailable in a sandbox like WSL2 without a password prompt. The plugin's
+# own .mcp.json (in the marketplace package, not this repo) has no
+# --browser/--executable-path override, so there's no way to point it at a
+# different channel from here. Pre-fetching the bundled, no-root Chromium
+# build at least makes `npx playwright install chromium` a no-op later —
+# see integrations.md for the remaining gap.
+# --------------------------------------------------------------------------
+if grep -q '"playwright@claude-plugins-official": true' "$REPO_DIR/settings.json" && command -v npx >/dev/null 2>&1; then
+  echo
+  echo "→ Pre-fetching bundled Chromium for the playwright plugin (no root needed)"
+  npx --yes playwright install chromium || echo "  WARNING: chromium prefetch failed — run 'npx playwright install chromium' manually" >&2
+fi
+
+# --------------------------------------------------------------------------
 # GitHub issue label taxonomy (status:*/type:*/source:*, see
 # skills/managing-work-with-issues). This is per-repo, not per-machine — it
 # needs a repo checkout and network access, so it doesn't belong in this
