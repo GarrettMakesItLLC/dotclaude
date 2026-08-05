@@ -188,6 +188,43 @@ describe("issue_add_sub_issue", () => {
   });
 });
 
+describe("issue_set_blocked_by", () => {
+  it("resolves each blocker's database id and posts a dependency per issue, skipping duplicates", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "GET" && url.endsWith("/dependencies/blocked_by")) {
+        return makeResponse({ status: 200, body: [{ number: 3, id: 300 }] });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/3")) {
+        return makeResponse({ status: 200, body: { number: 3, id: 300 } });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/4")) {
+        return makeResponse({ status: 200, body: { number: 4, id: 400 } });
+      }
+      if (init.method === "POST" && url.endsWith("/dependencies/blocked_by")) {
+        expect(init.body).toBe('{"issue_id":400}');
+        return makeResponse({ status: 200, body: {} });
+      }
+      throw new Error(`unexpected fetch: ${init.method} ${url}`);
+    });
+    const handler = await getIssueHandler("issue_set_blocked_by");
+    const res = await handler({ repo: "octo/repo", number: 9, blocked_by: [3, 4] });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text)).toEqual({ number: 9, blocked_by: [3, 4], added: [4], already_linked: [3] });
+  });
+});
+
+describe("issue_list_blocked_by", () => {
+  it("returns the issue numbers an issue is blocked by", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({ status: 200, body: [{ number: 3 }, { number: 4 }] }),
+    );
+    const handler = await getIssueHandler("issue_list_blocked_by");
+    const res = await handler({ repo: "octo/repo", number: 9 });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text)).toEqual({ number: 9, blocked_by: [3, 4] });
+  });
+});
+
 describe("issue_set_status", () => {
   it("accepts every taxonomy status — including waiting — on the tools that take one", async () => {
     const { ISSUE_STATUSES } = await import("../src/labels.js");

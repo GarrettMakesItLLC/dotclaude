@@ -454,6 +454,73 @@ export function registerIssueTools(server: McpServer): void {
   );
 
   server.registerTool(
+    "issue_set_blocked_by",
+    {
+      description:
+        "Mark an issue as blocked by one or more other issues, in the same repo, using GitHub's " +
+        "native issue-dependencies relationship. Already-linked blockers are reported separately " +
+        "and not re-posted.",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("The blocked issue's number."),
+        blocked_by: z
+          .array(z.number().int().positive())
+          .min(1)
+          .describe("Issue numbers, in the same repo, that block this one."),
+      },
+    },
+    async ({ repo, number, blocked_by }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const existing = await ghRequest<{ number: number }[]>(
+          `/repos/${owner}/${name}/issues/${number}/dependencies/blocked_by`,
+        );
+        const existingNumbers = new Set(existing.map((i) => i.number));
+        const already_linked = blocked_by.filter((n) => existingNumbers.has(n));
+        const toAdd = blocked_by.filter((n) => !existingNumbers.has(n));
+
+        const added: number[] = [];
+        for (const blockerNumber of toAdd) {
+          const blocker = await ghRequest<{ id: number }>(
+            `/repos/${owner}/${name}/issues/${blockerNumber}`,
+          );
+          await ghRequest(`/repos/${owner}/${name}/issues/${number}/dependencies/blocked_by`, {
+            method: "POST",
+            body: { issue_id: blocker.id },
+          });
+          added.push(blockerNumber);
+        }
+
+        return jsonText({ number, blocked_by, added, already_linked });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "issue_list_blocked_by",
+    {
+      description: "List the issue numbers (same repo) that block a given issue.",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Issue number."),
+      },
+    },
+    async ({ repo, number }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const data = await ghRequest<{ number: number }[]>(
+          `/repos/${owner}/${name}/issues/${number}/dependencies/blocked_by`,
+        );
+        return jsonText({ number, blocked_by: data.map((i) => i.number) });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
     "issue_claim",
     {
       description:
