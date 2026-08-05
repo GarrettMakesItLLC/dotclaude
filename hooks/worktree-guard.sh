@@ -110,35 +110,72 @@ if tool == "Bash":
 
     blanked = blank_heredoc_bodies(cmd)
 
-    # Redirection: `> path` / `>> path`, not `2>&1`, `&>`, `>=`, or a `[ a > b ]`
-    # test operator (single `>` inside `[ ... ]` is a string comparison, not a
-    # redirect — excluded by requiring the target look like a path, not `]`).
-    for m in re.finditer(r"(?<![&\d])>>?\s*([^\s|&;><)]+)", blanked):
-        tgt = m.group(1).strip(QUOTES)
-        if tgt and tgt not in ("/dev/null", "&1", "&2") and not tgt.startswith("&"):
-            out.append(tgt)
+    # Track a leading `cd <dir>` chain (`cd a && cd b && write relfile`) so a
+    # RELATIVE write-target is resolved against the directory the shell would
+    # actually be in at that point, not the hook process's own cwd (#143) —
+    # e.g. `cd /repo/.worktrees/foo && cat >> notes.md` must resolve notes.md
+    # inside the worktree, not wherever this hook happens to run from.
+    # Segmenting on &&/||/|/;/newline (order preserved) lets us walk the
+    # command left-to-right and update the effective directory as we go.
+    # have_base flips false (stop tracking, judge nothing relative from here
+    # on — refuse to guess rather than guess wrong) the moment a `cd` target
+    # isn't staticaly resolvable (`cd -`, `cd` with no args, a `$VAR`).
+    effective = ""
+    have_base = False
 
-    # sed -i / --in-place: grab all non-flag trailing tokens on that pipeline
-    # segment as candidate targets (sed accepts multiple files).
-    for seg in re.split(r"[|;]", blanked):
+    def join(base, target):
+        if target.startswith("/"):
+            return target
+        if not have_base:
+            return None
+        return base.rstrip("/") + "/" + target if base else "/" + target
+
+    segs_ordered = [s for s in re.split(r"(&&|\|\||\||;|\n)", blanked) if s not in ("&&", "||", "|", ";", "\n")]
+    per_seg = []  # (base_or_None, segment_text)
+    for seg in segs_ordered:
+        toks = seg.split()
+        if toks and toks[0] == "cd":
+            if len(toks) == 2 and not toks[1].startswith("$") and toks[1] != "-":
+                resolved = join(effective, toks[1].strip(QUOTES))
+                if resolved is not None:
+                    effective, have_base = resolved, True
+                else:
+                    have_base = False
+            else:
+                have_base = False
+            continue
+        per_seg.append((effective if have_base else None, seg))
+
+    for base, seg in per_seg:
+        # Redirection: `> path` / `>> path`, not `2>&1`, `&>`, `>=`, or a
+        # `[ a > b ]` test operator (single `>` inside `[ ... ]` is a string
+        # comparison, not a redirect — excluded by requiring the target look
+        # like a path, not `]`).
+        for m in re.finditer(r"(?<![&\d])>>?\s*([^\s|&;><)]+)", seg):
+            tgt = m.group(1).strip(QUOTES)
+            if tgt and tgt not in ("/dev/null", "&1", "&2") and not tgt.startswith("&"):
+                out.append(f"{base}\t{tgt}" if base else tgt)
+
+        # sed -i / --in-place: grab all non-flag trailing tokens on that
+        # pipeline segment as candidate targets (sed accepts multiple files).
         if re.search(r"\bsed\b.*(-i\b|--in-place\b)", seg):
             for tok in seg.split():
                 if not tok.startswith("-") and tok != "sed" and "sed" not in tok:
-                    out.append(tok.strip(QUOTES))
+                    tgt = tok.strip(QUOTES)
+                    out.append(f"{base}\t{tgt}" if base else tgt)
 
-    # cp/mv/install/tee: last non-flag token is the destination. `tee FILE`'s
-    # one argument is both its first and last non-flag token, so this covers
-    # the common single-destination form; `tee a b` (writes both) only catches
-    # the last, which costs nothing beyond a miss.
-    for seg in re.split(r"[|;]", blanked):
+        # cp/mv/install/tee: last non-flag token is the destination. `tee
+        # FILE`'s one argument is both its first and last non-flag token, so
+        # this covers the common single-destination form; `tee a b` (writes
+        # both) only catches the last, which costs nothing beyond a miss.
         toks = seg.split()
-        if not toks:
-            continue
-        head = toks[0].rsplit("/", 1)[-1]
-        if head in ("cp", "mv", "install", "tee"):
-            nonflags = [t for t in toks[1:] if not t.startswith("-")]
-            if nonflags:
-                out.append(nonflags[-1].strip(QUOTES))
+        if toks:
+            head = toks[0].rsplit("/", 1)[-1]
+            if head in ("cp", "mv", "install", "tee"):
+                nonflags = [t for t in toks[1:] if not t.startswith("-")]
+                if nonflags:
+                    tgt = nonflags[-1].strip(QUOTES)
+                    out.append(f"{base}\t{tgt}" if base else tgt)
 
     # Python `open(path, "w"...)`/`"a"...` embedded in a heredoc — the pattern
     # this rule exists for. Deliberately scans the ORIGINAL (unblanked) command
@@ -219,8 +256,16 @@ check_one() {
 }
 
 blocked=0
-while IFS= read -r path; do
-  [ -z "$path" ] && continue
+while IFS=$'\t' read -r a b; do
+  [ -z "$a" ] && continue
+  # A tracked cd-base arrives as "base<TAB>relative-path"; no base is just
+  # "path" (b empty) — read splits on the FIRST tab only via IFS, so a path
+  # containing no tab lands entirely in $a.
+  if [ -n "$b" ]; then
+    path="$a/$b"
+  else
+    path="$a"
+  fi
   if ! check_one "$path"; then
     blocked=1
   fi
