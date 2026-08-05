@@ -17,7 +17,11 @@ export interface ProjectField {
 
 export interface ProjectItemInfo {
   id: string;
-  /** Every field's current value, keyed by the field's lowercased name (e.g. `effort`, `status`). */
+  /**
+   * Every field's current value, keyed by the field's lowercased name (e.g.
+   * `effort`, `status`), plus `labels`/`title`/`repository` — everything on
+   * the raw item except `id`/`content`.
+   */
   fields: Record<string, unknown>;
 }
 
@@ -28,22 +32,42 @@ interface RawProjectItem {
 }
 
 let cachedFields: ProjectField[] | null = null;
+let cachedItems: RawProjectItem[] | null = null;
 
-async function listProjectFields(): Promise<ProjectField[]> {
-  if (cachedFields) return cachedFields;
+async function fetchProjectFields(): Promise<ProjectField[]> {
   const out = await execGh([
     "project", "field-list", String(PROJECT_NUMBER),
     "--owner", PROJECT_OWNER, "--format", "json",
   ]);
   const parsed = JSON.parse(out) as { fields: ProjectField[] };
-  cachedFields = parsed.fields;
-  return cachedFields;
+  return parsed.fields;
 }
 
-/** A named custom field on the shared work project. Throws if no field has that exact name. */
+async function fetchProjectItems(): Promise<RawProjectItem[]> {
+  const out = await execGh([
+    "project", "item-list", String(PROJECT_NUMBER),
+    "--owner", PROJECT_OWNER, "--format", "json", "--limit", "1000",
+  ]);
+  const parsed = JSON.parse(out) as { items: RawProjectItem[] };
+  return parsed.items;
+}
+
+/**
+ * A named custom field on the shared work project. Throws if no field has that
+ * exact name.
+ *
+ * Caches the field list for the process lifetime, but a cache miss triggers one
+ * refetch before giving up — a field created after this process started (e.g.
+ * by separate schema-setup work) must not be permanently invisible just because
+ * an earlier lookup cached the list without it.
+ */
 export async function getProjectField(name: string): Promise<ProjectField> {
-  const fields = await listProjectFields();
-  const field = fields.find((f) => f.name === name);
+  if (!cachedFields) cachedFields = await fetchProjectFields();
+  let field = cachedFields.find((f) => f.name === name);
+  if (!field) {
+    cachedFields = await fetchProjectFields();
+    field = cachedFields.find((f) => f.name === name);
+  }
   if (!field) {
     throw new Error(
       `Project field "${name}" not found on GarrettMakesItLLC — Work (#${PROJECT_NUMBER}).`,
@@ -52,21 +76,38 @@ export async function getProjectField(name: string): Promise<ProjectField> {
   return field;
 }
 
-/** The shared work project's item for a repo issue, or null if it isn't a project item. */
+function matchItem(
+  items: RawProjectItem[],
+  owner: string,
+  repo: string,
+  issueNumber: number,
+): RawProjectItem | undefined {
+  return items.find(
+    (item) =>
+      item.content?.number === issueNumber && item.content?.repository === `${owner}/${repo}`,
+  );
+}
+
+/**
+ * The shared work project's item for a repo issue, or null if it isn't a
+ * project item.
+ *
+ * Caches the item list for the process lifetime, but a cache miss triggers one
+ * refetch before giving up — an issue added to the project after this process
+ * started must not be permanently invisible just because an earlier lookup
+ * cached the list without it.
+ */
 export async function findProjectItem(
   owner: string,
   repo: string,
   issueNumber: number,
 ): Promise<ProjectItemInfo | null> {
-  const out = await execGh([
-    "project", "item-list", String(PROJECT_NUMBER),
-    "--owner", PROJECT_OWNER, "--format", "json", "--limit", "1000",
-  ]);
-  const parsed = JSON.parse(out) as { items: RawProjectItem[] };
-  const match = parsed.items.find(
-    (item) =>
-      item.content?.number === issueNumber && item.content?.repository === `${owner}/${repo}`,
-  );
+  if (!cachedItems) cachedItems = await fetchProjectItems();
+  let match = matchItem(cachedItems, owner, repo, issueNumber);
+  if (!match) {
+    cachedItems = await fetchProjectItems();
+    match = matchItem(cachedItems, owner, repo, issueNumber);
+  }
   if (!match) return null;
   const { id, content: _content, ...fields } = match;
   return { id, fields };

@@ -15,7 +15,6 @@ import {
   ISSUE_TYPES,
   ISSUE_EFFORTS,
   ISSUE_PRIORITIES,
-  typeLabel,
   nativeTypeName,
   statusLabel,
   sourceLabel,
@@ -91,7 +90,10 @@ async function ensureMilestone(
 
 /**
  * Resolve a repo issue to its shared-project item, find the named single-select
- * field, and set it to the option matching `optionValue` (case-insensitive).
+ * field, and set it to the option matching `optionValue`. The match is
+ * case-insensitive on both sides — option names on the project are
+ * capitalized (e.g. "Complex") while callers pass the lowercase enum value,
+ * but a caller passing mixed case is matched too.
  * Throws if the issue isn't a project item, or the field has no such option —
  * callers that want best-effort behavior (issue_open) catch around this;
  * callers that want a hard failure (issue_set_effort/issue_set_priority) let
@@ -111,9 +113,14 @@ async function applyProjectSingleSelect(
     );
   }
   const field = await getProjectField(fieldName);
-  const option = field.options?.find((o) => o.name.toLowerCase() === optionValue);
+  const option = field.options?.find(
+    (o) => o.name.toLowerCase() === optionValue.toLowerCase(),
+  );
   if (!option) {
-    throw new Error(`${fieldName} field has no "${optionValue}" option.`);
+    const available = field.options?.map((o) => o.name).join(", ") ?? "(no options)";
+    throw new Error(
+      `${fieldName} field has no "${optionValue}" option. Available options: ${available}.`,
+    );
   }
   await setProjectSingleSelect(item.id, field.id, option.id);
 }
@@ -479,6 +486,9 @@ export function registerIssueTools(server: McpServer): void {
         const already_linked = blocked_by.filter((n) => existingNumbers.has(n));
         const toAdd = blocked_by.filter((n) => !existingNumbers.has(n));
 
+        // If a POST partway through this loop fails, the caller loses track of which
+        // blockers already succeeded before the error — a retry has to re-derive that
+        // from `already_linked`, which does work today. Low-severity; not fixed here.
         const added: number[] = [];
         for (const blockerNumber of toAdd) {
           const blocker = await ghRequest<{ id: number }>(
@@ -582,10 +592,22 @@ export function registerIssueTools(server: McpServer): void {
           warnings.push(`claim stamp not posted (the branch lock is held regardless): ${msg}`);
         }
 
-        const item = await findProjectItem(owner, name, number);
-        const effort = item?.fields.effort as IssueEffort | undefined;
-        const modelMismatch =
-          effort && caller_model ? effortModelMismatch(effort, caller_model) : null;
+        let modelMismatch: string | null = null;
+        if (caller_model) {
+          try {
+            const item = await findProjectItem(owner, name, number);
+            const rawEffort = item?.fields.effort;
+            const effort =
+              typeof rawEffort === "string" &&
+              (ISSUE_EFFORTS as readonly string[]).includes(rawEffort.toLowerCase())
+                ? (rawEffort.toLowerCase() as IssueEffort)
+                : undefined;
+            modelMismatch = effort ? effortModelMismatch(effort, caller_model) : null;
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            warnings.push(`effort/model-mismatch check skipped: ${msg}`);
+          }
+        }
 
         let assignee: string | null = null;
         try {
@@ -803,14 +825,16 @@ export function registerIssueTools(server: McpServer): void {
         const warnings: string[] = [];
 
         if (type) {
-          // Native issue type — org-configured, may not exist on this owner. Best-effort.
+          // Native issue type — org-configured, may not exist on this owner. Best-effort:
+          // there is no label fallback, so a failure here means the issue has no type set.
           try {
             await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
               method: "PATCH",
               body: { type: nativeTypeName(type) },
             });
-          } catch {
-            // Owner lacks native issue types; the type:* label already applied is the fallback.
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            warnings.push(`native type "${nativeTypeName(type)}" not set: ${msg}`);
           }
         }
 

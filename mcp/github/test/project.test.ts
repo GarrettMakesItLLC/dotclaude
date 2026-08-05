@@ -4,9 +4,10 @@ const execFileMock = vi.fn();
 vi.mock("node:child_process", () => ({ execFile: execFileMock }));
 
 function ghSuccess(stdout: string) {
-  execFileMock.mockImplementation((_c: string, _a: string[], cb: (e: unknown, o?: unknown) => void) =>
-    cb(null, { stdout, stderr: "" }),
-  );
+  execFileMock.mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
+    const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+    cb(null, { stdout, stderr: "" });
+  });
 }
 
 beforeEach(() => {
@@ -35,6 +36,30 @@ describe("getProjectField", () => {
     const { getProjectField } = await import("../src/project.js");
     await expect(getProjectField("Nope")).rejects.toThrow('Project field "Nope" not found');
   });
+
+  it("caches the field list across calls, but a miss triggers one refetch before giving up", async () => {
+    execFileMock
+      .mockImplementationOnce((_c: string, _a: string[], ...rest: unknown[]) => {
+        const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+        cb(null, { stdout: JSON.stringify({ fields: [] }), stderr: "" });
+      })
+      .mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
+        const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+        cb(null, {
+          stdout: JSON.stringify({ fields: [{ id: "F_effort", name: "Effort" }] }),
+          stderr: "",
+        });
+      });
+    const { getProjectField } = await import("../src/project.js");
+    // First call: cache is empty, fetches (miss — the once-only empty list), then a
+    // cache-miss refetch (the default impl, which has Effort) succeeds.
+    const field = await getProjectField("Effort");
+    expect(field.id).toBe("F_effort");
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+    // Second call: field is in the (now-populated) cache — no further fetch needed.
+    await getProjectField("Effort");
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("findProjectItem", () => {
@@ -57,12 +82,39 @@ describe("findProjectItem", () => {
     const { findProjectItem } = await import("../src/project.js");
     expect(await findProjectItem("acme", "widgets", 999)).toBeNull();
   });
+
+  it("caches the item list across calls, but a miss triggers one refetch before giving up null", async () => {
+    execFileMock
+      .mockImplementationOnce((_c: string, _a: string[], ...rest: unknown[]) => {
+        const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+        cb(null, { stdout: JSON.stringify({ items: [] }), stderr: "" });
+      })
+      .mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
+        const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+        cb(null, {
+          stdout: JSON.stringify({
+            items: [{ id: "PVTI_9", content: { number: 5, repository: "acme/widgets" }, status: "Todo" }],
+          }),
+          stderr: "",
+        });
+      });
+    const { findProjectItem } = await import("../src/project.js");
+    // First call: cache is empty, fetches (miss — the once-only empty list), then a
+    // cache-miss refetch (the default impl, which has the item) succeeds.
+    const item = await findProjectItem("acme", "widgets", 5);
+    expect(item?.id).toBe("PVTI_9");
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+    // Second call: item is in the (now-populated) cache — no further fetch needed.
+    await findProjectItem("acme", "widgets", 5);
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("setProjectSingleSelect", () => {
   it("shells out to gh project item-edit with the item/project/field/option ids", async () => {
     let calledArgs: string[] = [];
-    execFileMock.mockImplementation((_c: string, args: string[], cb: (e: unknown, o?: unknown) => void) => {
+    execFileMock.mockImplementation((_c: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
       calledArgs = args;
       cb(null, { stdout: "{}", stderr: "" });
     });

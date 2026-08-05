@@ -335,7 +335,6 @@ describe("issue_claim", () => {
     assigneesStatus?: number;
     branchBody?: unknown;
     prsBody?: unknown;
-    issueLabels?: { name: string }[];
     commentsBody?: unknown;
   }) {
     return async (url: string, init: { method?: string; body?: string }) => {
@@ -375,7 +374,7 @@ describe("issue_claim", () => {
           body: {
             number: 8,
             title: "Fix the thing!",
-            labels: opts.issueLabels ?? [{ name: "status:ready" }, { name: "type:bug" }],
+            labels: [{ name: "status:ready" }, { name: "type:bug" }],
           },
         });
       }
@@ -572,7 +571,7 @@ describe("issue_claim", () => {
 
   it("flags model_mismatch when caller_model is under-provisioned for the issue's Effort field", async () => {
     const calls: string[] = [];
-    findProjectItemMock.mockResolvedValue({ id: "PVTI_3", fields: { effort: "complex" } });
+    findProjectItemMock.mockResolvedValue({ id: "PVTI_3", fields: { effort: "Complex" } });
     fetchMock.mockImplementation(mockClaim({ refStatus: 201, calls }));
 
     const handler = await getIssueHandler("issue_claim");
@@ -585,7 +584,7 @@ describe("issue_claim", () => {
 
   it("reports no mismatch when caller_model meets the effort, or when either is absent", async () => {
     const calls: string[] = [];
-    findProjectItemMock.mockResolvedValue({ id: "PVTI_3", fields: { effort: "complex" } });
+    findProjectItemMock.mockResolvedValue({ id: "PVTI_3", fields: { effort: "Complex" } });
     fetchMock.mockImplementation(mockClaim({ refStatus: 201, calls }));
     const handler = await getIssueHandler("issue_claim");
 

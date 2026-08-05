@@ -39,7 +39,9 @@ async function fetchToken(): Promise<string> {
  */
 export async function execGh(args: string[]): Promise<string> {
   try {
-    const { stdout } = await execFileAsync("gh", args);
+    const { stdout } = await execFileAsync("gh", args, {
+      maxBuffer: 32 * 1024 * 1024,
+    });
     return stdout.trim();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
