@@ -19,6 +19,7 @@ teams/
 telemetry/
 .credentials.json
 .worktrees/
+.serena/
 
 # OS noise
 .DS_Store
