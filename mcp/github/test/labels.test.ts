@@ -92,7 +92,10 @@ describe("labels_ensure", () => {
     // Attempted for all three, applied to the two that exist.
     expect(patched).toContain("bug");
     expect(patched).toContain("documentation");
-    expect(summary.deprecated).toBe(2);
+    // The fixture 404s only on `/enhancement`; every other DEPRECATED_LABELS entry
+    // (8 of the 9 — bug, documentation, the three type:* and three complexity:*
+    // retirees) PATCHes as if it already exists on this repo.
+    expect(summary.deprecated).toBe(8);
     // A deprecated label is never brought into existence.
     expect(posted).not.toContain("bug");
     expect(posted).not.toContain("enhancement");
@@ -268,19 +271,35 @@ const DEPRECATED_LABELS_FIXTURE = [
   { name: "bug", color: "ededed", description: "DEPRECATED historical label — use type:bug on new work" },
   { name: "enhancement", color: "ededed", description: "DEPRECATED historical label — use type:feature on new work" },
   { name: "documentation", color: "ededed", description: "DEPRECATED historical label — use type:task on new work" },
+  { name: "type:bug", color: "d73a4a", description: "DEPRECATED — use the native GitHub issue type instead of type:bug" },
+  { name: "type:feature", color: "a2eeef", description: "DEPRECATED — use the native GitHub issue type instead of type:feature" },
+  { name: "type:task", color: "bfd4f2", description: "DEPRECATED — use the native GitHub issue type instead of type:task" },
+  { name: "complexity:trivial", color: "8d6e63", description: "DEPRECATED — use the Effort project field instead of complexity:trivial" },
+  { name: "complexity:standard", color: "4db6ac", description: "DEPRECATED — use the Effort project field instead of complexity:standard" },
+  { name: "complexity:complex", color: "e07a5f", description: "DEPRECATED — use the Effort project field instead of complexity:complex" },
 ];
 
 describe("taxonomy", () => {
-  it("provisions exactly one label per status, type, source and marker value", async () => {
-    const { ISSUE_LABELS, ISSUE_STATUSES, ISSUE_TYPES, ISSUE_COMPLEXITIES, ISSUE_SOURCES, ISSUE_MARKERS } =
-      await import("../src/labels.js");
+  it("provisions exactly one label per status, source and marker value — no type or complexity axis", async () => {
+    const { ISSUE_LABELS, ISSUE_STATUSES, ISSUE_SOURCES, ISSUE_MARKERS } = await import("../src/labels.js");
     expect(ISSUE_LABELS.map((l) => l.name)).toEqual([
       ...ISSUE_STATUSES.map((s) => `status:${s}`),
-      ...ISSUE_TYPES.map((t) => `type:${t}`),
-      ...ISSUE_COMPLEXITIES.map((c) => `complexity:${c}`),
       ...ISSUE_SOURCES.map((s) => `source:${s}`),
       ...ISSUE_MARKERS,
     ]);
+  });
+
+  it("retires type:* and complexity:* into DEPRECATED_LABELS", async () => {
+    const { DEPRECATED_LABELS, ISSUE_TYPES, ISSUE_EFFORTS, typeLabel } = await import("../src/labels.js");
+    const names = DEPRECATED_LABELS.map((l) => l.name);
+    for (const t of ISSUE_TYPES) expect(names).toContain(typeLabel(t));
+    for (const e of ISSUE_EFFORTS) expect(names).toContain(`complexity:${e}`);
+  });
+
+  it("includes an Effort axis with exactly three tiers and a Priority axis with four", async () => {
+    const { ISSUE_EFFORTS, ISSUE_PRIORITIES } = await import("../src/labels.js");
+    expect([...ISSUE_EFFORTS].sort()).toEqual(["complex", "standard", "trivial"]);
+    expect([...ISSUE_PRIORITIES].sort()).toEqual(["high", "low", "medium", "urgent"]);
   });
 
   it("keeps the deprecated and removable sets disjoint from the canonical one", async () => {
@@ -310,35 +329,26 @@ describe("taxonomy", () => {
     expect(STATUS_LABEL_NAMES).toEqual(ISSUE_STATUSES.map((s) => `status:${s}`));
   });
 
-  it("includes a complexity:* axis with exactly three tiers", async () => {
-    const { ISSUE_COMPLEXITIES, ISSUE_LABELS, complexityLabel } = await import("../src/labels.js");
-    expect([...ISSUE_COMPLEXITIES].sort()).toEqual(["complex", "standard", "trivial"]);
-    for (const c of ISSUE_COMPLEXITIES) {
-      expect(ISSUE_LABELS.some((l) => l.name === complexityLabel(c))).toBe(true);
-    }
-    expect(complexityLabel("trivial")).toBe("complexity:trivial");
-  });
 });
 
-describe("complexityModelMismatch", () => {
+describe("effortModelMismatch", () => {
   it("flags an under-provisioned caller", async () => {
-    const { complexityModelMismatch } = await import("../src/labels.js");
-    const msg = complexityModelMismatch("complex", "claude-sonnet-5");
+    const { effortModelMismatch } = await import("../src/labels.js");
+    const msg = effortModelMismatch("complex", "claude-sonnet-5");
     expect(msg).not.toBeNull();
-    expect(msg).toContain("complexity:complex");
-    expect(msg).toContain("sonnet-tier");
+    expect(msg).toContain("Effort of complex");
     expect(msg).toContain("opus-tier or stronger");
   });
 
   it("says nothing about an exactly-matched or over-provisioned caller", async () => {
-    const { complexityModelMismatch } = await import("../src/labels.js");
-    expect(complexityModelMismatch("standard", "claude-sonnet-5")).toBeNull();
-    expect(complexityModelMismatch("trivial", "claude-opus-5")).toBeNull();
+    const { effortModelMismatch } = await import("../src/labels.js");
+    expect(effortModelMismatch("standard", "claude-sonnet-5")).toBeNull();
+    expect(effortModelMismatch("trivial", "claude-opus-5")).toBeNull();
   });
 
   it("stays silent when the caller's model id isn't recognized, rather than guessing", async () => {
-    const { complexityModelMismatch } = await import("../src/labels.js");
-    expect(complexityModelMismatch("complex", "gpt-4")).toBeNull();
-    expect(complexityModelMismatch("complex", "")).toBeNull();
+    const { effortModelMismatch } = await import("../src/labels.js");
+    expect(effortModelMismatch("complex", "gpt-4")).toBeNull();
+    expect(effortModelMismatch("complex", "")).toBeNull();
   });
 });

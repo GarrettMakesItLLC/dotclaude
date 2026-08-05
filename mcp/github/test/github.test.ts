@@ -13,7 +13,8 @@ vi.mock("node:child_process", () => ({
  */
 function setGhResponses(responder: (args: string[]) => string): void {
   execFileMock.mockImplementation(
-    (_cmd: string, args: string[], cb: (err: unknown, out?: unknown) => void) => {
+    (_cmd: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (err: unknown, out?: unknown) => void;
       try {
         const stdout = responder(args);
         cb(null, { stdout, stderr: "" });
@@ -232,5 +233,43 @@ describe("ghPaginate", () => {
     });
 
     expect(result).toEqual([{ keep: true }, { keep: true }, { keep: true }]);
+  });
+});
+
+describe("execGh", () => {
+  it("returns trimmed stdout on success", async () => {
+    execFileMock.mockImplementation((_c: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+      if (args[0] === "project" && args[1] === "field-list") {
+        return cb(null, { stdout: '{"fields":[]}\n', stderr: "" });
+      }
+      cb(new Error(`unexpected gh args: ${args.join(" ")}`));
+    });
+    const { execGh } = await import("../src/github.js");
+    const out = await execGh(["project", "field-list", "2", "--owner", "acme", "--format", "json"]);
+    expect(out).toBe('{"fields":[]}');
+  });
+
+  it("wraps a failing gh invocation with the args in the message", async () => {
+    execFileMock.mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (e: unknown) => void;
+      cb(new Error("exit status 1"));
+    });
+    const { execGh } = await import("../src/github.js");
+    await expect(execGh(["project", "bogus"])).rejects.toThrow(
+      "gh project bogus failed: exit status 1",
+    );
+  });
+
+  it("passes a 32MB maxBuffer so large project item-list output doesn't overflow the default 1MB limit", async () => {
+    let capturedOptions: { maxBuffer?: number } | undefined;
+    execFileMock.mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+      if (rest.length > 1) capturedOptions = rest[0] as { maxBuffer?: number };
+      cb(null, { stdout: "ok\n", stderr: "" });
+    });
+    const { execGh } = await import("../src/github.js");
+    await execGh(["project", "item-list"]);
+    expect(capturedOptions?.maxBuffer).toBe(32 * 1024 * 1024);
   });
 });

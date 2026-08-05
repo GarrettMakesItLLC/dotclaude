@@ -93,19 +93,25 @@ Issues:
   and set `status:in-progress`. See [Claiming work](#claiming-work).
 - `issue_set_status` — set the single `status:*` label (or clear it), preserving
   all other labels. Accepts any status in the taxonomy (`src/labels.ts`).
-- `issue_set_type` — set bug/feature/task as the native issue type
-  (best-effort) plus a `type:*` label.
-- `issue_set_complexity` — set the single `complexity:*` label (trivial/
-  standard/complex), preserving all other labels.
+- `issue_set_type` — set bug/feature/task as the native GitHub issue type. A
+  hard PATCH of the native type only — no label written.
+- `issue_set_effort` / `issue_set_priority` — set the Effort (trivial/
+  standard/complex) or Priority (urgent/high/medium/low) field on the shared
+  GarrettMakesItLLC — Work project. The issue must already be a project item.
 - `issue_set_milestone` / `milestone_ensure` — attach an issue to a milestone,
   finding or creating it by title.
 - `issue_add_sub_issue` / `issue_list_sub_issues` — manage parent/child issue
   relationships.
+- `issue_set_blocked_by` / `issue_list_blocked_by` — set or list GitHub's
+  native issue-dependencies "blocked by" relationship for issues in the same
+  repo. `issue_set_blocked_by` skips blockers already linked and reports them
+  separately from newly-added ones.
 - `issue_open` — create a fully-formed issue in one call: composes
-  `status:*`/`type:*`/`source:*`/`complexity:*` labels, sets the native issue type
-  (best-effort), finds-or-creates and attaches a milestone by title, and
-  nests it under a `parent` as a sub-issue. Composes the granular tools above
-  so agents don't have to hand-compose fields across several calls.
+  `status:*`/`source:*` labels, sets the native issue type (best-effort),
+  finds-or-creates and attaches a milestone by title, sets Effort/Priority on
+  the shared project (best-effort), and nests it under a `parent` as a
+  sub-issue. Composes the granular tools above so agents don't have to
+  hand-compose fields across several calls.
 
 Claims:
 
@@ -119,7 +125,7 @@ Claims:
 Labels:
 
 - `labels_ensure` — idempotently provision the canonical taxonomy (`status:*`,
-  `type:*`, `source:*`, `complexity:*`, and the markers `epic` / `launch-blocker`) into a repo,
+  `source:*`, and the markers `epic` / `launch-blocker`) into a repo,
   and retitle GitHub's colliding stock labels (`bug`, `enhancement`,
   `documentation`) as deprecated where they already exist.
 - `labels_audit` — read-only drift report: missing canonical labels, stock
@@ -150,6 +156,12 @@ across pages of 100. For `issue_list` the GitHub `/issues` endpoint mixes in
 pull requests; those are filtered out and pages are followed until `limit` real
 issues are collected, so PR-heavy repos still return a full result. Pagination
 is bounded to 10 pages per call.
+
+Effort and Priority live as custom fields on the shared `GarrettMakesItLLC — Work`
+GitHub Project (Projects v2), not as labels — `issue_set_effort`,
+`issue_set_priority`, and `issue_open`'s `effort`/`priority` params all shell
+out to `gh project` under the hood, so they require `gh` CLI auth with the
+`project` scope (`gh auth refresh -s project` if it's missing).
 
 ## Claiming work
 

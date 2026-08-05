@@ -5,6 +5,15 @@ vi.mock("node:child_process", () => ({
   execFile: execFileMock,
 }));
 
+const findProjectItemMock = vi.fn();
+const getProjectFieldMock = vi.fn();
+const setProjectSingleSelectMock = vi.fn();
+vi.mock("../src/project.js", () => ({
+  findProjectItem: findProjectItemMock,
+  getProjectField: getProjectFieldMock,
+  setProjectSingleSelect: setProjectSingleSelectMock,
+}));
+
 function makeResponse(opts: {
   status: number;
   body?: unknown;
@@ -71,6 +80,9 @@ beforeEach(() => {
   );
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
+  findProjectItemMock.mockReset();
+  getProjectFieldMock.mockReset();
+  setProjectSingleSelectMock.mockReset();
 });
 
 describe("issue_list — PR filtering across pages", () => {
@@ -176,6 +188,43 @@ describe("issue_add_sub_issue", () => {
   });
 });
 
+describe("issue_set_blocked_by", () => {
+  it("resolves each blocker's database id and posts a dependency per issue, skipping duplicates", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "GET" && url.endsWith("/dependencies/blocked_by")) {
+        return makeResponse({ status: 200, body: [{ number: 3, id: 300 }] });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/3")) {
+        return makeResponse({ status: 200, body: { number: 3, id: 300 } });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/4")) {
+        return makeResponse({ status: 200, body: { number: 4, id: 400 } });
+      }
+      if (init.method === "POST" && url.endsWith("/dependencies/blocked_by")) {
+        expect(init.body).toBe('{"issue_id":400}');
+        return makeResponse({ status: 200, body: {} });
+      }
+      throw new Error(`unexpected fetch: ${init.method} ${url}`);
+    });
+    const handler = await getIssueHandler("issue_set_blocked_by");
+    const res = await handler({ repo: "octo/repo", number: 9, blocked_by: [3, 4] });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text)).toEqual({ number: 9, blocked_by: [3, 4], added: [4], already_linked: [3] });
+  });
+});
+
+describe("issue_list_blocked_by", () => {
+  it("returns the issue numbers an issue is blocked by", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({ status: 200, body: [{ number: 3 }, { number: 4 }] }),
+    );
+    const handler = await getIssueHandler("issue_list_blocked_by");
+    const res = await handler({ repo: "octo/repo", number: 9 });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text)).toEqual({ number: 9, blocked_by: [3, 4] });
+  });
+});
+
 describe("issue_set_status", () => {
   it("accepts every taxonomy status — including waiting — on the tools that take one", async () => {
     const { ISSUE_STATUSES } = await import("../src/labels.js");
@@ -211,51 +260,66 @@ describe("issue_set_status", () => {
 });
 
 describe("issue_set_type", () => {
-  it("PATCHes native type then replaces type:* labels, preserving non-type labels", async () => {
+  it("sets the native type and touches no labels", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
-      if (init.method === "PATCH" && /\/issues\/7$/.test(url)) {
-        expect(init.body).toContain('"type":"Bug"');
-        return makeResponse({ status: 200, body: {} });
+      if (init.method === "PATCH" && url.includes("/issues/9") && !url.includes("/labels")) {
+        expect(init.body).toBe('{"type":"Bug"}');
+        return makeResponse({ status: 200, body: { number: 9, type: { name: "Bug" } } });
       }
-      if (init.method === "GET" && url.endsWith("/issues/7")) {
-        return makeResponse({ status: 200, body: { labels: [{ name: "type:feature" }, { name: "status:ready" }] } });
-      }
-      if (init.method === "PUT" && url.endsWith("/labels")) {
-        const sent = JSON.parse((init.body as string)).labels as string[];
-        expect(sent).toContain("type:bug");
-        expect(sent).toContain("status:ready");
-        expect(sent).not.toContain("type:feature");
-        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
-      }
-      return makeResponse({ status: 500 });
+      throw new Error(`unexpected fetch: ${init.method} ${url}`);
     });
     const handler = await getIssueHandler("issue_set_type");
-    const res = await handler({ repo: "octo/repo", number: 7, type: "bug" });
+    const res = await handler({ repo: "octo/repo", number: 9, type: "bug" });
     expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text)).toEqual({ number: 9, type: "bug" });
   });
 });
 
-describe("issue_set_complexity", () => {
-  it("replaces complexity:* labels, preserving non-complexity labels", async () => {
-    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
-      if (init.method === "GET" && url.endsWith("/issues/7")) {
-        return makeResponse({
-          status: 200,
-          body: { labels: [{ name: "complexity:trivial" }, { name: "status:ready" }] },
-        });
-      }
-      if (init.method === "PUT" && url.endsWith("/labels")) {
-        const sent = JSON.parse(init.body as string).labels as string[];
-        expect(sent).toContain("complexity:complex");
-        expect(sent).toContain("status:ready");
-        expect(sent).not.toContain("complexity:trivial");
-        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
-      }
-      return makeResponse({ status: 500 });
+describe("issue_set_effort", () => {
+  it("resolves the project item and field, then sets the option", async () => {
+    findProjectItemMock.mockResolvedValue({ id: "PVTI_1", fields: {} });
+    getProjectFieldMock.mockResolvedValue({
+      id: "F_effort",
+      name: "Effort",
+      options: [{ id: "O_std", name: "Standard" }, { id: "O_triv", name: "Trivial" }],
     });
-    const handler = await getIssueHandler("issue_set_complexity");
-    const res = await handler({ repo: "octo/repo", number: 7, complexity: "complex" });
+    const handler = await getIssueHandler("issue_set_effort");
+    const res = await handler({ repo: "octo/repo", number: 9, effort: "standard" });
     expect(res.isError).toBeFalsy();
+    expect(setProjectSingleSelectMock).toHaveBeenCalledWith("PVTI_1", "F_effort", "O_std");
+    expect(JSON.parse(res.content[0].text)).toEqual({ number: 9, effort: "standard" });
+  });
+
+  it("errors clearly when the issue isn't a project item", async () => {
+    findProjectItemMock.mockResolvedValue(null);
+    const handler = await getIssueHandler("issue_set_effort");
+    const res = await handler({ repo: "octo/repo", number: 9, effort: "standard" });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain("not on the GarrettMakesItLLC — Work project");
+  });
+});
+
+describe("issue_set_priority", () => {
+  it("resolves the project item and field, then sets the option", async () => {
+    findProjectItemMock.mockResolvedValue({ id: "PVTI_2", fields: {} });
+    getProjectFieldMock.mockResolvedValue({
+      id: "F_priority",
+      name: "Priority",
+      options: [{ id: "O_high", name: "High" }, { id: "O_low", name: "Low" }],
+    });
+    const handler = await getIssueHandler("issue_set_priority");
+    const res = await handler({ repo: "octo/repo", number: 11, priority: "high" });
+    expect(res.isError).toBeFalsy();
+    expect(setProjectSingleSelectMock).toHaveBeenCalledWith("PVTI_2", "F_priority", "O_high");
+    expect(JSON.parse(res.content[0].text)).toEqual({ number: 11, priority: "high" });
+  });
+
+  it("errors clearly when the issue isn't a project item", async () => {
+    findProjectItemMock.mockResolvedValue(null);
+    const handler = await getIssueHandler("issue_set_priority");
+    const res = await handler({ repo: "octo/repo", number: 11, priority: "high" });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain("not on the GarrettMakesItLLC — Work project");
   });
 });
 
@@ -271,7 +335,6 @@ describe("issue_claim", () => {
     assigneesStatus?: number;
     branchBody?: unknown;
     prsBody?: unknown;
-    issueLabels?: { name: string }[];
     commentsBody?: unknown;
   }) {
     return async (url: string, init: { method?: string; body?: string }) => {
@@ -311,7 +374,7 @@ describe("issue_claim", () => {
           body: {
             number: 8,
             title: "Fix the thing!",
-            labels: opts.issueLabels ?? [{ name: "status:ready" }, { name: "type:bug" }],
+            labels: [{ name: "status:ready" }, { name: "type:bug" }],
           },
         });
       }
@@ -506,33 +569,23 @@ describe("issue_claim", () => {
     expect(out.branch).toBe("issue-8-custom");
   });
 
-  it("flags model_mismatch when caller_model is under-provisioned for the issue's complexity:* label", async () => {
+  it("flags model_mismatch when caller_model is under-provisioned for the issue's Effort field", async () => {
     const calls: string[] = [];
-    fetchMock.mockImplementation(
-      mockClaim({
-        refStatus: 201,
-        calls,
-        issueLabels: [{ name: "type:bug" }, { name: "complexity:complex" }],
-      }),
-    );
+    findProjectItemMock.mockResolvedValue({ id: "PVTI_3", fields: { effort: "Complex" } });
+    fetchMock.mockImplementation(mockClaim({ refStatus: 201, calls }));
 
     const handler = await getIssueHandler("issue_claim");
     const res = await handler({ repo: "octo/repo", number: 8, caller_model: "claude-sonnet-5" });
 
     expect(res.isError).toBeFalsy();
     const out = JSON.parse(res.content[0].text) as { model_mismatch: string | null };
-    expect(out.model_mismatch).toContain("complexity:complex");
+    expect(out.model_mismatch).toContain("Effort of complex");
   });
 
-  it("reports no mismatch when caller_model meets the complexity, or when either is absent", async () => {
+  it("reports no mismatch when caller_model meets the effort, or when either is absent", async () => {
     const calls: string[] = [];
-    fetchMock.mockImplementation(
-      mockClaim({
-        refStatus: 201,
-        calls,
-        issueLabels: [{ name: "type:bug" }, { name: "complexity:complex" }],
-      }),
-    );
+    findProjectItemMock.mockResolvedValue({ id: "PVTI_3", fields: { effort: "Complex" } });
+    fetchMock.mockImplementation(mockClaim({ refStatus: 201, calls }));
     const handler = await getIssueHandler("issue_claim");
 
     const matched = await handler({ repo: "octo/repo", number: 8, caller_model: "claude-opus-5" });
@@ -587,13 +640,14 @@ describe("issue_claim", () => {
 });
 
 describe("issue_open", () => {
-  it("composes type/source labels on create, defaults feedback (source set, no status) to status:blocked, and sends the native-type PATCH", async () => {
+  it("composes status/source labels on create, defaults feedback (source set, no status) to status:blocked, and sends the native-type PATCH", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
       if (init.method === "POST" && url.endsWith("/issues")) {
         const sent = JSON.parse(init.body as string) as { labels: string[] };
         expect(sent.labels).toEqual(
-          expect.arrayContaining(["status:blocked", "type:bug", "source:redthread"]),
+          expect.arrayContaining(["status:blocked", "source:redthread"]),
         );
+        expect(sent.labels).not.toContain("type:bug");
         expect(sent.labels).not.toContain("status:ready");
         return makeResponse({ status: 201, body: { number: 42, id: 8001, labels: sent.labels } });
       }
@@ -640,8 +694,9 @@ describe("issue_open", () => {
       if (init.method === "POST" && url.endsWith("/issues")) {
         const sent = JSON.parse(init.body as string) as { labels: string[] };
         expect(sent.labels).toEqual(
-          expect.arrayContaining(["status:ready", "type:bug", "source:owner"]),
+          expect.arrayContaining(["status:ready", "source:owner"]),
         );
+        expect(sent.labels).not.toContain("type:bug");
         expect(sent.labels).not.toContain("status:blocked");
         return makeResponse({ status: 201, body: { number: 46, id: 8005, labels: sent.labels } });
       }
@@ -668,8 +723,9 @@ describe("issue_open", () => {
       if (init.method === "POST" && url.endsWith("/issues")) {
         const sent = JSON.parse(init.body as string) as { labels: string[] };
         expect(sent.labels).toEqual(
-          expect.arrayContaining(["status:blocked", "type:feature", "source:owner"]),
+          expect.arrayContaining(["status:blocked", "source:owner"]),
         );
+        expect(sent.labels).not.toContain("type:feature");
         expect(sent.labels).not.toContain("status:ready");
         return makeResponse({ status: 201, body: { number: 47, id: 8006, labels: sent.labels } });
       }
@@ -696,8 +752,9 @@ describe("issue_open", () => {
       if (init.method === "POST" && url.endsWith("/issues")) {
         const sent = JSON.parse(init.body as string) as { labels: string[] };
         expect(sent.labels).toEqual(
-          expect.arrayContaining(["status:blocked", "type:bug", "source:user-feedback"]),
+          expect.arrayContaining(["status:blocked", "source:user-feedback"]),
         );
+        expect(sent.labels).not.toContain("type:bug");
         return makeResponse({ status: 201, body: { number: 48, id: 8007, labels: sent.labels } });
       }
       if (init.method === "PATCH" && url.endsWith("/issues/48")) {
@@ -827,21 +884,36 @@ describe("issue_open", () => {
     expect(issue._warnings[0]).toContain('milestone "v2"');
   });
 
-  it("includes complexity:* in the label set when complexity is passed", async () => {
+});
+
+describe("issue_open effort/priority", () => {
+  it("sets effort and priority best-effort after creation, and drops the type:* label", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
       if (init.method === "POST" && url.endsWith("/issues")) {
-        const body = JSON.parse(init.body as string);
-        expect(body.labels).toContain("complexity:complex");
-        return makeResponse({ status: 201, body: { number: 42, id: 1001 } });
+        expect(init.body).not.toContain("type:");
+        return makeResponse({ status: 201, body: { number: 20, id: 555 } });
       }
-      if (init.method === "GET" && url.endsWith("/issues/42")) {
-        return makeResponse({ status: 200, body: { number: 42, labels: [{ name: "complexity:complex" }] } });
+      if (init.method === "PATCH" && url.includes("/issues/20") && init.body === '{"type":"Feature"}') {
+        return makeResponse({ status: 200, body: {} });
       }
-      return makeResponse({ status: 500 });
+      if (init.method === "GET" && url.endsWith("/issues/20")) {
+        return makeResponse({ status: 200, body: { number: 20 } });
+      }
+      throw new Error(`unexpected fetch: ${init.method} ${url}`);
     });
+    findProjectItemMock.mockResolvedValue({ id: "PVTI_4", fields: {} });
+    getProjectFieldMock.mockImplementation(async (name: string) =>
+      name === "Effort"
+        ? { id: "F_effort", name: "Effort", options: [{ id: "O_std", name: "Standard" }] }
+        : { id: "F_priority", name: "Priority", options: [{ id: "O_high", name: "High" }] },
+    );
     const handler = await getIssueHandler("issue_open");
-    const res = await handler({ repo: "octo/repo", title: "Something hard", complexity: "complex" });
+    const res = await handler({
+      repo: "octo/repo", title: "t", type: "feature", effort: "standard", priority: "high",
+    });
     expect(res.isError).toBeFalsy();
+    expect(setProjectSingleSelectMock).toHaveBeenCalledWith("PVTI_4", "F_effort", "O_std");
+    expect(setProjectSingleSelectMock).toHaveBeenCalledWith("PVTI_4", "F_priority", "O_high");
   });
 });
 
