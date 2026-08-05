@@ -96,19 +96,37 @@ directory is added and needs a link. `/dotclaude-sync` does the pull plus
 
 ## Org-level repos
 
-Four repos sit above the per-project level, shared across every product repo in `GarrettMakesItLLC`:
+Repos above the per-project level are shared across every product repo in `GarrettMakesItLLC`, and
+split into two kinds:
 
 | Repo | What |
 |------|------|
 | `GarrettMakesItLLC/dotclaude` | This repo — Claude Code config, synced across machines. |
 | `GarrettMakesItLLC/dotfiles` | Shell and git config across machines. Sibling to this repo; a machine bootstraps from `dotfiles`, which clones this repo as one of its steps (see "Setup on a new machine" above). |
-| `GarrettMakesItLLC/.github` | Org-wide issue/PR templates and org profile. Per-repo copies of the templates are redundant once a repo has none of its own — see "Setup on a new machine" above. |
-| `GarrettMakesItLLC/ci` | Shared composite actions and reusable workflows for product-repo CI, tagged `@v1`. See `rules/ci.md`. |
+| `GarrettMakesItLLC/.github` | Org-wide issue/PR templates, org profile, and community-health defaults (`CODEOWNERS`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`, `FUNDING.yml`). Per-repo copies are redundant once a repo has none of its own — see "Setup on a new machine" above. |
+| `GarrettMakesItLLC/ci` | Shared composite actions and reusable workflows for product-repo CI/CD, tagged `@v1`. See `rules/ci.md`. |
 | `GarrettMakesItLLC/platform` | The shared `@gmi/*` package layer (tsconfig, eslint/prettier/commitlint config, design system, interop contracts) consumed by the product repos. |
+| `GarrettMakesIt/GarrettMakesIt` | Personal org profile — a *different* GitHub org (`GarrettMakesIt`, not `GarrettMakesItLLC`). |
 
 A convention or config change worth sharing across product repos belongs in one
 of these, not copy-pasted per repo — same reasoning as `rules/` being hoisted
 here once a rule repeats 3+ times (see "Per-repo overrides" below).
+
+### Local checkout layout
+
+`~/workspace/` holds every checkout except `dotclaude` and `dotfiles` — those bootstrap the machine
+itself, so they stay at the special locations "Setup on a new machine" clones them to, not inside
+`workspace/`. Everything else splits by whether it's a daily-work product or shared infrastructure:
+
+```
+~/workspace/
+  MuscleBuddy/, RedThreadEvents/, NetWorthy/, AdventureOS/   # product repos — top level
+  Tools/
+    ci/, platform/, .github/, GarrettMakesIt/                # org-level repos from the table above
+```
+
+A new product repo clones to `~/workspace/<Name>` (the `bootstrapping-a-product-repo` skill). A new
+org-level repo clones to `~/workspace/Tools/<name>`.
 
 ## Per-repo overrides
 
