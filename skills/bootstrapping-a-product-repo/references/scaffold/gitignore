@@ -13,3 +13,10 @@ coverage/
 
 .worktrees/
 .claude/settings.local.json
+
+# Context-graph tools (rules/context-tools.md, integrations.md): regenerable
+# local data, kept fresh by the post-merge/post-checkout hooks + CI instead
+# of being committed.
+graphify-out/
+.serena/cache/
+.serena/*.local.yml

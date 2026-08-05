@@ -120,6 +120,28 @@ Workaround, in order of preference:
 Neither needs a manually-minted `VERCEL_TOKEN`; both exist specifically
 because the MCP can't do this yet.
 
+## Per-project context tools
+
+Registered/installed once per machine by `bootstrap.sh`; which one to reach
+for in a given app repo: `rules/context-tools.md`. Not wired into `dotclaude`
+itself — too small and markdown-heavy for either to pay off.
+
+| Tool | Surface | Tool prefix | Used for |
+|------|---------|-------------|----------|
+| **Serena** | MCP server (`claude mcp add --scope user serena -- serena start-mcp-server --context claude-code --project-from-cwd`) | `mcp__serena__*` | LSP-backed symbol navigation and refactors — `find_symbol`, `find_referencing_symbols`, `rename_symbol` |
+| **Graphify** | Claude Code skill (`graphify install`), not an MCP | `/graphify` | Local tree-sitter knowledge graph — impact analysis, call graphs, shortest path between two symbols |
+
+**Freshness contract.** Serena self-indexes live via the language server on
+first use — no reindex step, no staleness to track. Graphify is
+snapshot-based: a repo's `.husky/post-merge` and `.husky/post-checkout` hooks
+run `graphify update` after every pull/checkout, and `.github/workflows/ci.yml`
+re-runs `graphify update` + `graphify export callflow-html` on every push to
+`main`, so the published call-flow view is never more than one push stale.
+`graphify-out/` is gitignored (generated, regenerable) — none of this ever
+requires a manual reindex. Both are opt-in per repo (`graphify install`); the
+scaffold ships the gitignore lines and no-op hook guards regardless, cheap and
+inert until a repo opts in — see `bootstrapping-a-product-repo`.
+
 ## Custom MCPs vendored in this repo
 
 Source lives in `mcp/`; `bootstrap.sh` installs deps, builds, and registers each
