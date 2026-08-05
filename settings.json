@@ -24,6 +24,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/dotrepo-sync.sh"
+          },
+          {
+            "type": "command",
             "command": "\"$HOME\"/.claude/hooks/link-doctor.sh"
           },
           {
