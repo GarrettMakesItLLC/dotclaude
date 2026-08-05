@@ -87,6 +87,18 @@ vendored here to patch. Tracked at
 [#95](https://github.com/GarrettMakesItLLC/dotclaude/issues/95); revisit once
 a plugin update adds a compact/fields option or fixes server-side filtering.
 
+**Playwright in a sandbox without root** (WSL2, containers): `@playwright/mcp`
+defaults to the `chrome` channel at `/opt/google/chrome/chrome`, which needs a
+root-only system install. The plugin's `.mcp.json` (in the marketplace
+package at `~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/playwright/.mcp.json`,
+not vendored in this repo) hardcodes `npx @playwright/mcp@latest` with no
+`--browser`/`--executable-path` override, so there's no session-level way to
+point it at a different channel. Workaround: `npx playwright install
+chromium` (bundled build, no `--with-deps`, no root) — `bootstrap.sh`
+pre-fetches it, but the MCP server itself still only looks for `chrome`, so
+browser tools remain unusable until the plugin's own config gains a
+`--browser=chromium` override upstream.
+
 ## Custom MCPs vendored in this repo
 
 Source lives in `mcp/`; `bootstrap.sh` installs deps, builds, and registers each
