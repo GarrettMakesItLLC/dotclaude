@@ -14,6 +14,8 @@ Own each task end-to-end — plan → implement → test → self-review → add
 
 Stop and ask only for: one-way doors (framework, data model, auth model, public API shape); or genuinely ambiguous intent where reasonable engineers would build *different* things — and only after trying code, docs, and my MCPs (Notion specs) first. In doubt between asking and proceeding, proceed.
 
+**A skill's own prompt is not an exception to this.** When a skill's instructions literally end in a "which approach?"-style question (e.g. superpowers:writing-plans' execution-choice handoff) and one option is marked recommended/default, that's still a checkpoint question — answer it yourself, state the choice in one line, and proceed. Don't let a skill's literal wording override the no-checkpoint-questions default; skills describe *what* to decide, not license to ask *me* to decide it.
+
 ## Finish what you find
 
 Whatever you turn up while working — a bug, a failing or skipped test, a stale doc, an unhandled case, a rough edge in the code you just touched — is part of the work. **Fix it in this change and commit it with the rest.** Not a `TODO`, not a "follow-up PR", not a note in the summary.
