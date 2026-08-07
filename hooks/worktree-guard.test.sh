@@ -164,6 +164,22 @@ if ! printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$HERE/../CLA
   fail=1
 fi
 
+# --- NetWorthy#223: a Bash command that merely REFERENCES a credential-shaped
+# env var name (e.g. $NW_DATABASE_URL, the documented `export DATABASE_URL=
+# $NW_DATABASE_URL` pattern from that repo's agent-credentials skill) must not
+# be treated as a write pattern by this hook — it has no env-var-name
+# deny-list at all, only the write-pattern scan above. The block reported in
+# #223 was traced to Claude Code's own built-in worktree-isolation Bash
+# safety check (compiled into the CLI binary, outside this repo) misfiring on
+# that variable name — NOT to this script. These are characterization tests:
+# they must keep passing so a future "fix" for #223 doesn't get misdirected
+# into this hook.
+check 0 Bash command 'export DATABASE_URL="$NW_DATABASE_URL"'
+check 0 Bash command 'export XYZ="$NW_DATABASE_URL"'
+check 0 Bash command 'echo "$NW_DATABASE_URL" | wc -c'
+check 0 Bash command 'export FOO=bar'
+check 0 Bash command 'export XYZ="$HOME"'
+
 if [ "$fail" = 0 ]; then
   echo "worktree-guard: all cases passed"
 fi

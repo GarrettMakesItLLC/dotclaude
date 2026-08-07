@@ -47,6 +47,19 @@
 #     input). Both are guarded; the escape hatch + config-repo exemption cover
 #     the legitimate main-session cases.
 #   - Bash coverage is pattern-based, not a real shell parse — see above.
+#
+# NOT THE CAUSE OF NetWorthy#223: a Bash command merely referencing a
+# credential-shaped env var name (`export DATABASE_URL=$NW_DATABASE_URL`) was
+# reported blocked with a "worktree-isolated agent's git operations must
+# target its own worktree" message inside a worktree-isolated agent. This
+# script has no env-var-name deny-list — it only scans for write-target
+# PATTERNS (redirects, sed -i, cp/mv/tee, open(...,"w")), none of which those
+# commands contain, and it was confirmed to exit 0 (allow) on all of them
+# (see worktree-guard.test.sh). That error string does not appear anywhere in
+# this repo; it is compiled into the Claude Code CLI binary itself — a
+# separate, built-in worktree-isolation Bash-safety check for agents
+# dispatched with `isolation: "worktree"`, outside this repo's source. Tracked
+# as a vendor gap, not fixed here.
 
 set -uo pipefail
 
