@@ -130,6 +130,27 @@ export interface ClaimHolder {
   claimed_at: string | null;
 }
 
+/**
+ * Thrown when claiming an issue that still has open sub-issues — an epic
+ * exists to be decomposed, not implemented directly. Claiming it anyway has
+ * caused real collisions (#148): a second machine claims one of the epic's
+ * sub-issues later, sees no conflict (the lock is keyed per issue number, and
+ * that sub-issue was never claimed), and builds on top of work already done
+ * under the epic's own claim.
+ */
+export class ClaimEpicError extends Error {
+  constructor(
+    message: string,
+    readonly epic: {
+      open_sub_issues: number;
+      total_sub_issues: number;
+    },
+  ) {
+    super(message);
+    this.name = "ClaimEpicError";
+  }
+}
+
 /** Thrown when the lock ref already exists — the issue is claimed elsewhere. */
 export class ClaimConflictError extends Error {
   constructor(
