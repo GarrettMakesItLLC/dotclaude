@@ -37,6 +37,35 @@ describe("getProjectField", () => {
     await expect(getProjectField("Nope")).rejects.toThrow('Project field "Nope" not found');
   });
 
+  it("retries once on gh's intermittent \"unknown owner type\" error, then succeeds", async () => {
+    execFileMock
+      .mockImplementationOnce((_c: string, _a: string[], ...rest: unknown[]) => {
+        const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+        cb(new Error("unknown owner type"), undefined);
+      })
+      .mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
+        const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+        cb(null, {
+          stdout: JSON.stringify({ fields: [{ id: "F_effort", name: "Effort" }] }),
+          stderr: "",
+        });
+      });
+    const { getProjectField } = await import("../src/project.js");
+    const field = await getProjectField("Effort");
+    expect(field.id).toBe("F_effort");
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a real failure unrelated to the owner-type race", async () => {
+    execFileMock.mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+      cb(new Error("some other gh failure"), undefined);
+    });
+    const { getProjectField } = await import("../src/project.js");
+    await expect(getProjectField("Effort")).rejects.toThrow("some other gh failure");
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+  });
+
   it("caches the field list across calls, but a miss triggers one refetch before giving up", async () => {
     execFileMock
       .mockImplementationOnce((_c: string, _a: string[], ...rest: unknown[]) => {

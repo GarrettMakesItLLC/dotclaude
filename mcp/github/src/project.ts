@@ -34,8 +34,26 @@ interface RawProjectItem {
 let cachedFields: ProjectField[] | null = null;
 let cachedItems: RawProjectItem[] | null = null;
 
+/**
+ * `gh project field-list`/`item-list --owner <org>` intermittently fails with
+ * "unknown owner type" — reproduced across multiple concurrent agent sessions
+ * (#147) but not on a single isolated invocation, which points at a race in
+ * gh's own owner-type resolution under concurrent `gh` processes sharing one
+ * `~/.config/gh`, not a wrong flag. One retry clears it in practice; a second
+ * failure is treated as real.
+ */
+async function execGhProjectCmd(args: string[]): Promise<string> {
+  try {
+    return await execGh(args);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes("unknown owner type")) throw err;
+    return execGh(args);
+  }
+}
+
 async function fetchProjectFields(): Promise<ProjectField[]> {
-  const out = await execGh([
+  const out = await execGhProjectCmd([
     "project", "field-list", String(PROJECT_NUMBER),
     "--owner", PROJECT_OWNER, "--format", "json",
   ]);
@@ -44,7 +62,7 @@ async function fetchProjectFields(): Promise<ProjectField[]> {
 }
 
 async function fetchProjectItems(): Promise<RawProjectItem[]> {
-  const out = await execGh([
+  const out = await execGhProjectCmd([
     "project", "item-list", String(PROJECT_NUMBER),
     "--owner", PROJECT_OWNER, "--format", "json", "--limit", "1000",
   ]);
