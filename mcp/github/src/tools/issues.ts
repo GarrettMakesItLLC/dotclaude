@@ -36,6 +36,7 @@ import {
   claimBranchName,
   ClaimClosedError,
   ClaimConflictError,
+  ClaimEpicError,
   stampClaim,
   structuredError,
 } from "../claim-lock.js";
@@ -552,7 +553,9 @@ export function registerIssueTools(server: McpServer): void {
         "`issue-<N>-<slug>` at the default-branch head via an atomic ref create, stamps a claim " +
         "comment on the issue (holder identity + timestamp), then self-assigns the authenticated " +
         "user and moves status to in-progress. Refuses on a CLOSED issue — finished work, not " +
-        "available to claim. If the branch already exists the issue is ALREADY CLAIMED — the call " +
+        "available to claim. Refuses on an issue with open sub-issues — an epic is meant to be " +
+        "decomposed, not implemented directly; claim a specific sub-issue instead. If the branch " +
+        "already exists the issue is ALREADY CLAIMED — the call " +
         "fails with the holder's branch, last commit, any open PR, and — from the stamp — who holds " +
         "it and when, so you can tell your own earlier session from another machine. Default to " +
         "picking different work unless the stamp identifies THIS machine. Assignee alone cannot " +
@@ -591,6 +594,17 @@ export function registerIssueTools(server: McpServer): void {
               state_reason: issue.state_reason ?? null,
               closed_at: issue.closed_at ?? null,
             },
+          );
+        }
+        const subTotal = issue.sub_issues_summary?.total ?? 0;
+        const subCompleted = issue.sub_issues_summary?.completed ?? 0;
+        const openSubIssues = subTotal - subCompleted;
+        if (openSubIssues > 0) {
+          throw new ClaimEpicError(
+            `Issue #${number} has ${openSubIssues} open sub-issue(s) — it's an epic, meant to be ` +
+              "decomposed, not implemented directly. Claim a specific sub-issue instead " +
+              "(issue_list_sub_issues to see them).",
+            { open_sub_issues: openSubIssues, total_sub_issues: subTotal },
           );
         }
         const target = branch ?? claimBranchName(number, issue.title ?? "");
@@ -675,6 +689,15 @@ export function registerIssueTools(server: McpServer): void {
             reason: "closed",
             issue: number,
             ...err.issue,
+            message: err.message,
+          });
+        }
+        if (err instanceof ClaimEpicError) {
+          return structuredError({
+            claimed: false,
+            reason: "epic",
+            issue: number,
+            ...err.epic,
             message: err.message,
           });
         }

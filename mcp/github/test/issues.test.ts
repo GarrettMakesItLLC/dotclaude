@@ -936,6 +936,83 @@ describe("issue_claim", () => {
     expect(calls.some((c) => c.endsWith("/git/refs"))).toBe(false);
     expect(calls.some((c) => c.endsWith("/assignees"))).toBe(false);
   });
+
+  it("refuses to claim an epic with open sub-issues, without creating the lock ref or self-assigning", async () => {
+    const calls: string[] = [];
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      const method = init.method ?? "GET";
+      calls.push(`${method} ${new URL(url).pathname}`);
+      if (method === "GET" && url.endsWith("/issues/8")) {
+        return makeResponse({
+          status: 200,
+          body: {
+            number: 8,
+            title: "S2 — content & discovery",
+            labels: [{ name: "epic" }],
+            sub_issues_summary: { total: 5, completed: 2 },
+          },
+        });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8 });
+
+    expect(res.isError).toBe(true);
+    const out = JSON.parse(res.content[0].text) as {
+      claimed: boolean;
+      reason: string;
+      issue: number;
+      open_sub_issues: number;
+      total_sub_issues: number;
+      message: string;
+    };
+    expect(out.claimed).toBe(false);
+    expect(out.reason).toBe("epic");
+    expect(out.issue).toBe(8);
+    expect(out.open_sub_issues).toBe(3);
+    expect(out.total_sub_issues).toBe(5);
+    expect(out.message).toContain("sub-issue");
+    expect(calls.some((c) => c.endsWith("/git/refs"))).toBe(false);
+    expect(calls.some((c) => c.endsWith("/assignees"))).toBe(false);
+  });
+
+  it("allows claiming an issue whose sub-issues are all completed", async () => {
+    const calls: string[] = [];
+    fetchMock.mockImplementation(
+      mockClaim({
+        refStatus: 201,
+        calls,
+        branchBody: { commit: { sha: "x" } },
+      }),
+    );
+    // Override the /issues/8 GET the shared mockClaim helper returns, to add a
+    // fully-completed sub_issues_summary.
+    const base = mockClaim({ refStatus: 201, calls });
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      const method = init.method ?? "GET";
+      if (method === "GET" && url.endsWith("/issues/8")) {
+        return makeResponse({
+          status: 200,
+          body: {
+            number: 8,
+            title: "Fix the thing!",
+            labels: [{ name: "status:ready" }],
+            sub_issues_summary: { total: 3, completed: 3 },
+          },
+        });
+      }
+      return base(url, init);
+    });
+
+    const handler = await getIssueHandler("issue_claim");
+    const res = await handler({ repo: "octo/repo", number: 8 });
+
+    expect(res.isError).toBeFalsy();
+    const out = JSON.parse(res.content[0].text) as { claimed: boolean };
+    expect(out.claimed).toBe(true);
+  });
 });
 
 describe("issue_open", () => {
