@@ -120,7 +120,7 @@ itself, so they stay at the special locations "Setup on a new machine" clones th
 
 ```
 ~/workspace/
-  MuscleBuddy/, RedThreadEvents/, NetWorthy/, AdventureOS/   # product repos — top level
+  <AppOne>/, <AppTwo>/, ...   # product repos — top level
   Tools/
     ci/, platform/, .github/, GarrettMakesIt/                # org-level repos from the table above
 ```
