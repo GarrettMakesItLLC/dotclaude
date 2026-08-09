@@ -47,6 +47,9 @@
 #     input). Both are guarded; the escape hatch + config-repo exemption cover
 #     the legitimate main-session cases.
 #   - Bash coverage is pattern-based, not a real shell parse — see above.
+#   - A write-target whose LEADING path segment is a shell expansion (`$D/x`,
+#     `` `pwd`/x ``) is allowed through unjudged: nothing here knows where it
+#     points, and guessing resolves it into whatever tree the session runs in.
 #
 # NOT THE CAUSE OF NetWorthy#223: a Bash command merely referencing a
 # credential-shaped env var name (`export DATABASE_URL=$NW_DATABASE_URL`) was
@@ -220,6 +223,23 @@ selfroot=""
 # checked without repeating the Edit/Write single-path logic.
 check_one() {
   file_path="$1"
+
+  # A candidate the shell would expand before writing — `$VAR/x`, `` `cmd`/x ``
+  # — is unresolvable here, and only its LEADING segment decides which tree it
+  # lands in. Climbing a relative path like `$D/railway.json` bottoms out at the
+  # hook's own cwd, which silently reinterprets a target anywhere on disk as a
+  # main-tree write (MuscleBuddy#3962: writes to a /tmp scratchpad blocked).
+  # Refuse to guess, exactly as the `cd` tracker above does. A `$` further along
+  # an otherwise-resolvable path still climbs to a real ancestor, so it stays.
+  case "$file_path" in
+    /*) ;;
+    "~"/*) file_path="$HOME/${file_path#"~"/}" ;;
+    *)
+      case "${file_path%%/*}" in
+        *'$'* | *'`'*) return 0 ;;
+      esac
+      ;;
+  esac
 
   # Resolve the nearest existing directory at/above the target (the file may
   # not exist yet on a Write). git -C needs a real directory to run in.
