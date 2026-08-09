@@ -153,6 +153,40 @@ check 0 Bash command "cd \$SOME_VAR && echo hi > notes.md"
 # is unaffected (never depended on the tracked base to begin with).
 check 2 Bash command "cd \$SOME_VAR && echo hi > $CONV/src/absolute.md"
 
+# --- MuscleBuddy#3962: a write-target whose LEADING segment is an unexpanded
+# shell expansion decides nothing about which tree it lands in, so climbing it
+# for a real ancestor bottoms out at the hook's own cwd. Run from a convention
+# main tree, that reinterpreted a target anywhere on disk (a /tmp scratchpad)
+# as a main-tree write. These run with cwd INSIDE the main tree, which is the
+# only way the misresolution reproduces.
+(
+  cd "$CONV" || exit 1
+  check 0 Bash command 'D=/tmp/somewhere/scratchpad; echo hi > $D/railway.json'
+  check 0 Bash command 'echo hi > $HOME/notes.md'
+  check 0 Bash command 'echo hi > `pwd`/notes.md'
+
+  # Should still BLOCK — a plain relative target IS resolvable against cwd, and
+  # resolving it is the coverage that keeps a bare `echo x > src/f.ts` guarded.
+  check 2 Bash command 'echo hi > src/relative.ts'
+
+  # Should still BLOCK — an expansion PAST the leading segment leaves a real
+  # ancestor to climb to, so it is judged normally rather than skipped.
+  check 2 Bash command 'echo hi > src/$name.ts'
+  exit "$fail"
+) || fail=1
+
+# Should still BLOCK — an ABSOLUTE path carrying a later expansion still climbs
+# to its real ancestor; only the leading-segment case is unresolvable.
+check 2 Bash command "echo hi > $CONV/src/\$name.ts"
+
+# Should BLOCK — a leading `~` IS resolvable, so it is expanded rather than
+# skipped. HOME points at the convention main tree for this one case.
+(
+  export HOME="$CONV"
+  check 2 Bash command 'echo hi > ~/src/tilde.ts'
+  exit "$fail"
+) || fail=1
+
 # Should ALLOW — the config-repo exemption reached THROUGH a directory symlink,
 # exactly as production does (~/.claude/hooks -> dotclaude/hooks). Invokes the
 # guard via a symlinked parent dir so readlink -f must resolve the chain to find
