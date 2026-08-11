@@ -81,10 +81,10 @@ Where a repo carries an issue-audit script (MuscleBuddy's `npm run issues:audit`
 Files with matching `type:*` + `source:*`. The status depends on **who reported it and whether an agent can verify it**:
 
 - **Garrett's own defect reports → `status:ready`.** He is the primary reporter, and his account of running software settles the question of whether it happens. Reproduce it, then fix it. `source:owner` marks these.
-- **A third party's defect report → `status:blocked`.** One person's account of what they saw, unverifiable from here, and building against it confidently builds the wrong thing. It waits for Garrett to reproduce.
-- **Any idea or feature request → `status:blocked`, whoever filed it.** These need his intent before they are built, and he develops them *with* an agent rather than receiving a finished guess.
+- **A third party's defect report → verify it yourself first, in good faith, the same as any other bug.** Reproduce it: grep the code, hit the route, render the page, read the log line the report points at. Confirmed ⇒ `status:ready` and fix it — a bug report is not less true for being filed by someone other than Garrett, and a real defect (a literal `/<studio>` placeholder leaking onto a live page is exactly this kind) is verifiable from the repo whether or not you know the reporter. `status:blocked` is for what you genuinely cannot pin down this way — no repro, no matching code path, needs an account/environment/credential only Garrett has — not the default starting state.
+- **Any idea or feature request → `status:blocked`, whoever filed it.** These need his intent before they are built, and he develops them *with* an agent rather than receiving a finished guess. This is a different axis from the defect case above: a request for new behavior is a scope decision, not a fact to verify.
 
-The in-app reporter applies this itself (`apps/server/src/lib/bug-report-github.ts`), so the label that arrives is already correct — do not re-derive it by hand. `issue_open` encodes the same defaults: pass `source` and `type` and the status follows.
+The in-app reporter applies a `source:*` label, so `source:owner` vs `source:user-feedback` is already correct on arrival — do not re-derive *that*. The *status* is still yours to set by the verify-first rule above: `source:*` says who reported it, not whether it's confirmed. `issue_open` defaults new defect reports to `status:ready` when `source` and `type` are passed; downgrade to `blocked` only after you've actually tried and failed to verify.
 
 ## Tooling
 
