@@ -51,6 +51,18 @@
 #     `` `pwd`/x ``) is allowed through unjudged: nothing here knows where it
 #     points, and guessing resolves it into whatever tree the session runs in.
 #
+# UNTRUSTED CWD (#166): a RELATIVE write-target with no tracked `cd` base lands
+# wherever the tool's cwd happens to be, and in an agent thread that cwd is not
+# the agent's to trust — it resets between Bash calls and has been observed
+# pointing into a SIBLING worktree the agent never entered, so the write lands
+# silently in another agent's tree. Resolving such a target against the hook's
+# own cwd then CLEARS it (a linked worktree is exactly what this guard wants to
+# see), which is how the drift bypasses the guard entirely. So when the hook's
+# cwd is a linked worktree of a convention repo, a relative target is blocked
+# rather than resolved: the agent must spell an absolute path or lead with
+# `cd <absolute-path> &&`, which is verifiable. A cwd in a MAIN tree still
+# resolves normally — that path blocks anyway, and the message is more useful.
+#
 # NOT THE CAUSE OF NetWorthy#223: a Bash command merely referencing a
 # credential-shaped env var name (`export DATABASE_URL=$NW_DATABASE_URL`) was
 # reported blocked with a "worktree-isolated agent's git operations must
@@ -218,6 +230,29 @@ self="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${
 selfroot=""
 [ -n "$self" ] && selfroot="$(git -C "$self" rev-parse --show-toplevel 2>/dev/null)"
 
+# Is the hook's own cwd a linked worktree of a repo using the convention? If so
+# it is an untrustworthy base for a relative write-target (see UNTRUSTED CWD in
+# the header). Computed once; consulted per-candidate.
+cwd_untrusted=0
+if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ]; then
+  cwd_gitdir="$(git rev-parse --absolute-git-dir 2>/dev/null)"
+  cwd_common_rel="$(git rev-parse --git-common-dir 2>/dev/null)"
+  cwd_common=""
+  case "${cwd_common_rel:-}" in
+    "") ;;
+    /*) cwd_common="$cwd_common_rel" ;;
+    *)  cwd_common="$(cd "$cwd_common_rel" 2>/dev/null && pwd)" ;;
+  esac
+  if [ -n "$cwd_gitdir" ] && [ -n "$cwd_common" ] && [ "$cwd_gitdir" != "$cwd_common" ]; then
+    # The main working tree owning this linked worktree — the config-repo
+    # exemption is about the repo, not about which of its trees you stand in.
+    cwd_mainroot="$(dirname "$cwd_common")"
+    if [ "$cwd_mainroot" != "$selfroot" ] && git check-ignore -q ".worktrees/.probe" 2>/dev/null; then
+      cwd_untrusted=1
+    fi
+  fi
+fi
+
 # Check one candidate path; echoes a block reason and returns 2 on a hit, 0
 # otherwise. Isolated in a function so Bash's multiple candidates can each be
 # checked without repeating the Edit/Write single-path logic.
@@ -238,6 +273,21 @@ check_one() {
       case "${file_path%%/*}" in
         *'$'* | *'`'*) return 0 ;;
       esac
+      if [ "$cwd_untrusted" = 1 ]; then
+        echo "⛔ dotclaude worktree-guard blocked this write." >&2
+        echo "Reason: '$file_path' is relative, so it lands in whatever directory this" >&2
+        echo "  tool call happens to be in — and that cwd is a linked worktree this" >&2
+        echo "  command never entered. An agent's Bash cwd resets between calls and can" >&2
+        echo "  point into a SIBLING agent's worktree, so a relative write is not" >&2
+        echo "  attributable to any tree (see #166)." >&2
+        echo "Fix: name the tree explicitly — either an absolute write-target:" >&2
+        echo "    echo x > /abs/path/to/your/worktree/$file_path" >&2
+        echo "  or lead the command with a cd into it:" >&2
+        echo "    cd /abs/path/to/your/worktree && echo x > $file_path" >&2
+        echo "Policy: ~/dotclaude/CLAUDE.md (Worktree-first). Deliberate?" >&2
+        echo "  Re-run with WORKTREE_GUARD_OFF=1 set, or ask the user to run it via ! prefix." >&2
+        return 2
+      fi
       ;;
   esac
 

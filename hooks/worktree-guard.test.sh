@@ -187,6 +187,51 @@ check 2 Bash command "echo hi > $CONV/src/\$name.ts"
   exit "$fail"
 ) || fail=1
 
+# --- #166: an agent's Bash cwd resets between calls and has been observed
+# pointing into a SIBLING worktree the agent never entered, so a RELATIVE
+# write-target resolved against it lands in another agent's tree — and resolving
+# it that way CLEARS the guard, because a linked worktree is exactly what the
+# guard wants to see. Standing in a linked worktree, a relative target with no
+# tracked `cd` base must be blocked rather than resolved.
+(
+  cd "$CONV/.worktrees/wt" || exit 1
+
+  # Should BLOCK — the drift shape: relative target, untrustworthy cwd.
+  check 2 Bash command 'echo hi > notes.md'
+  check 2 Bash command 'sed -i s/a/b/ src/app.ts'
+  check 2 Bash command "cat >> packages/engine/src/index.ts <<'EOF'
+some content
+EOF"
+
+  # Should ALLOW — naming the tree makes the target attributable again, which
+  # is the whole point of the block. Both spellings the message recommends.
+  check 0 Bash command "echo hi > $CONV/.worktrees/wt/notes.md"
+  check 0 Bash command "cd $CONV/.worktrees/wt && echo hi > notes.md"
+
+  # Should still BLOCK — an absolute main-tree target is judged on its own path,
+  # not on the cwd it was issued from.
+  check 2 Bash command "echo hi > $CONV/src/absolute.ts"
+
+  # Should ALLOW — no write pattern at all, and the escape hatch still works.
+  check 0 Bash command 'cat notes.md'
+  check 0 Bash command 'echo hi > notes.md' 1
+
+  # Should ALLOW — a leading shell expansion is still unresolvable rather than
+  # relative-to-cwd, so it keeps passing unjudged (MuscleBuddy#3962).
+  check 0 Bash command 'D=/tmp/somewhere; echo hi > $D/railway.json'
+  exit "$fail"
+) || fail=1
+
+# Should ALLOW — same relative write from a linked worktree of a repo that does
+# NOT use the convention. The untrusted-cwd block is scoped to the convention,
+# exactly as every other rule here is.
+git -C "$PLAIN" worktree add -q "$PLAIN/wt" -b feat-plain 2>/dev/null
+(
+  cd "$PLAIN/wt" || exit 1
+  check 0 Bash command 'echo hi > notes.md'
+  exit "$fail"
+) || fail=1
+
 # Should ALLOW — the config-repo exemption reached THROUGH a directory symlink,
 # exactly as production does (~/.claude/hooks -> dotclaude/hooks). Invokes the
 # guard via a symlinked parent dir so readlink -f must resolve the chain to find
