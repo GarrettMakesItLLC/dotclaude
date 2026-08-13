@@ -159,9 +159,15 @@ is bounded to 10 pages per call.
 
 Effort and Priority live as custom fields on the shared `GarrettMakesItLLC — Work`
 GitHub Project (Projects v2), not as labels — `issue_set_effort`,
-`issue_set_priority`, and `issue_open`'s `effort`/`priority` params all shell
-out to `gh project` under the hood, so they require `gh` CLI auth with the
-`project` scope (`gh auth refresh -s project` if it's missing).
+`issue_set_priority`, `issue_claim`'s effort/model-mismatch check, and
+`issue_open`'s `effort`/`priority` params all shell out to `gh project` under
+the hood, so they require `gh` CLI auth with the `project` scope (`gh auth
+refresh -s project` if it's missing). A token missing it fails in one of two
+ways depending on which of gh's own checks trips first — an explicit "missing
+required scopes" error, or the unrelated-looking "unknown owner type" — both
+of which `src/project.ts` recognizes and rewraps with this same remediation,
+so the `_warnings` a caller sees already carries the fix rather than gh's raw
+text.
 
 ## Claiming work
 

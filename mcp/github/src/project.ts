@@ -35,20 +35,57 @@ let cachedFields: ProjectField[] | null = null;
 let cachedItems: RawProjectItem[] | null = null;
 
 /**
+ * The one-time fix for either signature below: `gh auth refresh -s project`
+ * grants the scope; a token that already carries `project` satisfies the
+ * narrower `read:project` check these commands actually make.
+ */
+const PROJECT_SCOPE_HINT =
+  "gh CLI's token is missing the `project` OAuth scope GitHub Projects " +
+  "commands require — run `gh auth refresh -s project` to grant it (see " +
+  "mcp/github/README.md), then retry.";
+
+/**
+ * Matches both observed shapes of a scope-starved `gh project` token (#4051):
+ * gh's own explicit scope error, and "unknown owner type" — a token missing
+ * `read:project` fails owner-type resolution first and surfaces that opaque
+ * message instead of the real cause. Both are deterministic for a given
+ * token, not transient, so neither is worth retrying on its own; the retry
+ * below exists only for the genuine concurrent-`gh`-process race (#147).
+ */
+function isProjectPermissionError(message: string): boolean {
+  return /missing required scopes/i.test(message) || /unknown owner type/i.test(message);
+}
+
+function wrapProjectError(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  if (!isProjectPermissionError(message)) {
+    return err instanceof Error ? err : new Error(message);
+  }
+  return new Error(`${PROJECT_SCOPE_HINT} (${message})`);
+}
+
+/**
  * `gh project field-list`/`item-list --owner <org>` intermittently fails with
  * "unknown owner type" — reproduced across multiple concurrent agent sessions
  * (#147) but not on a single isolated invocation, which points at a race in
  * gh's own owner-type resolution under concurrent `gh` processes sharing one
- * `~/.config/gh`, not a wrong flag. One retry clears it in practice; a second
- * failure is treated as real.
+ * `~/.config/gh`, not a wrong flag. One retry clears the race in practice.
+ *
+ * A second failure — or an immediate scope error, which no retry clears — is
+ * rethrown via `wrapProjectError` so a missing-scope token produces one
+ * actionable message instead of gh's opaque raw text.
  */
 async function execGhProjectCmd(args: string[]): Promise<string> {
   try {
     return await execGh(args);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (!message.includes("unknown owner type")) throw err;
-    return execGh(args);
+    if (!message.includes("unknown owner type")) throw wrapProjectError(err);
+    try {
+      return await execGh(args);
+    } catch (retryErr) {
+      throw wrapProjectError(retryErr);
+    }
   }
 }
 
