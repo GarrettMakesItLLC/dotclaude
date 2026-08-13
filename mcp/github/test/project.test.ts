@@ -66,6 +66,32 @@ describe("getProjectField", () => {
     expect(execFileMock).toHaveBeenCalledTimes(1);
   });
 
+  it("wraps gh's explicit missing-scope error with the actionable fix, without retrying (#4051)", async () => {
+    execFileMock.mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+      cb(
+        new Error(
+          "error: your authentication token is missing required scopes [read:project]",
+        ),
+        undefined,
+      );
+    });
+    const { getProjectField } = await import("../src/project.js");
+    await expect(getProjectField("Effort")).rejects.toThrow("gh auth refresh -s project");
+    expect(execFileMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("wraps a second \"unknown owner type\" (post-retry) with the actionable fix (#4051)", async () => {
+    execFileMock.mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+      cb(new Error("unknown owner type"), undefined);
+    });
+    const { getProjectField } = await import("../src/project.js");
+    await expect(getProjectField("Effort")).rejects.toThrow("gh auth refresh -s project");
+    // One initial attempt + one retry — the retry still exists for the genuine race (#147).
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+  });
+
   it("caches the field list across calls, but a miss triggers one refetch before giving up", async () => {
     execFileMock
       .mockImplementationOnce((_c: string, _a: string[], ...rest: unknown[]) => {
