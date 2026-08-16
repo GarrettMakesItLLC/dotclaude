@@ -54,6 +54,9 @@ SHARED_SKILLS=(
   "aligning-repo-config"        # re-tier a repo's CLAUDE.md / .claude config against this global config
   "running-an-audit"            # audit/investigation method + per-realm checklists in references/
   "bootstrapping-a-product-repo" # stand up a new repo: branches, rulesets, labels, CI, scaffold
+  "content-drafting"            # brief -> validated MDX draft for the four product repos' content pillars
+  "avoiding-ai-slop"            # strip AI writing tells from prose (docs, PRs, comments, drafted content)
+  "task-observer"               # meta-skill: watches sessions for skill-improvement opportunities, logs them
 )
 
 MODE="install"

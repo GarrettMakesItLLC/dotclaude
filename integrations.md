@@ -35,6 +35,10 @@ the reason each stays out is the rule for anything like it:
 | `claude-md-management` | Overlapped by the `aligning-repo-config` skill, which knows this tiering model. |
 | `feature-dev` | Its workflow duplicates `superpowers` plus `finishing-work`, and competing process skills make the chosen path non-deterministic. |
 | `claude-code-setup`, `hookify`, `mcp-server-dev` | One-shot authoring tools, not per-turn context. Install for the session that needs one (`/plugin install <name>@claude-plugins-official`), then remove it. |
+| `remember` (Digital-Process-Tools) | Duplicates Claude Code's built-in cross-session auto-memory (`~/.claude/projects/*/memory/`), and runs its own hook-driven session-capture/compression pipeline with full shell privileges and an optional git-push backup — no benefit over the built-in system to justify that surface. |
+| `frontend-design` (Anthropic) | Overlapped by `impeccable`, which covers the same aesthetic-direction ground plus a deeper audit/critique/polish/harden command set, dedicated review agents, and an anti-pattern detector — the actual ask (bring existing product UI to production-grade, not just greenfield direction). One design skill, not two. |
+
+`stop-slop` isn't a real plugin (no marketplace, no `.claude-plugin/plugin.json`) — it's a raw prose ruleset, vendored here as the `avoiding-ai-slop` skill instead of installed. `task-observer` (rebelytics) is likewise vendored as a skill rather than installed as a plugin, since it ships as a plain `SKILL.md` bundle too.
 
 ## MCP servers a plugin brings
 
