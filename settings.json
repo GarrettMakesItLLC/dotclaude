@@ -1,6 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "skillListingMaxDescChars": 200,
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
   "permissions": {
     "allow": [
       "Bash(git fetch *)",
@@ -18,9 +21,6 @@
     "defaultMode": "bypassPermissions"
   },
   "model": "sonnet",
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  },
   "hooks": {
     "SessionStart": [
       {
@@ -117,13 +117,13 @@
     "prisma@claude-plugins-official": true,
     "playwright@claude-plugins-official": true,
     "sentry@claude-plugins-official": true,
-    "frontend-design@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true,
     "code-review@claude-plugins-official": true,
     "commit-commands@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
     "security-guidance@claude-plugins-official": true,
-    "serena@claude-plugins-official": true
+    "serena@claude-plugins-official": true,
+    "impeccable@impeccable": true
   },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
@@ -131,11 +131,18 @@
         "source": "github",
         "repo": "anthropics/claude-plugins-official"
       }
+    },
+    "impeccable": {
+      "source": {
+        "source": "github",
+        "repo": "pbakaus/impeccable"
+      }
     }
   },
   "spinnerTipsEnabled": false,
   "effortLevel": "medium",
   "promptSuggestionEnabled": false,
   "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
   "precomputeCompactionEnabled": true
 }

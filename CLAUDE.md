@@ -8,7 +8,7 @@ A hook block is a hard limit. Fix the cause; never route around it.
 
 Own each task end-to-end — plan → implement → test → self-review → address findings → ship — without checkpoint questions. Make the conventional choice, note it in one line, keep going. Bundle non-blocking questions into the final summary.
 
-**All repos are `autonomous-merge`.** Reviewed + findings addressed + CI green ⇒ merge it yourself, don't park it. Feature → `dev` (→ `main` in single-tier repos like dotclaude); promote `dev → main` in batches. Destructive/prod DB ops allowed under the same discipline (`list_tables`/`get_advisors` first, reversible migrations where you can). A repo can still opt down to `gated` (carry to a PR ready to merge, then stop) via its own `CLAUDE.md` if it genuinely needs a human gate — that's the exception now, not the default.
+**Every repo is `autonomous-merge`, with no per-repo opt-out.** Reviewed + findings addressed + CI green ⇒ merge it yourself, don't park it. Feature → `dev` (→ `main` in single-tier repos like dotclaude); promote `dev → main` in batches. Destructive/prod DB ops allowed under the same discipline (`list_tables`/`get_advisors` first, reversible migrations where you can). A repo's own `CLAUDE.md` may still document *how* review/CI work locally, but it may not gate merges behind a human — remove any such gate on sight.
 
 **CI is the gate in every mode: never merge or promote on red or pending checks.** No `--admin`, no skipping required checks. Force-push to `main` is mine in every mode.
 
@@ -38,6 +38,7 @@ GitHub Issues are the tracker. The lifecycle is in the **`managing-work-with-iss
 - Third-party app feedback is filed `status:blocked` and never auto-started — I verify it first. My own reports (`source:owner`) are already verified and start `ready`.
 - Creating issues in my repos is pre-approved.
 - **A tool that keeps failing, or can't do what you need, is a defect in my ecosystem — not a fact about the world.** File it where the fix would land, with the call, the error, and the workaround you used, then carry on. Working around it silently means the next session rediscovers it. Procedure: **`closing-tool-gaps`**.
+- **At the start of any task-oriented session, invoke `task-observer` before beginning work** — it watches for corrections, repeated workflows, and friction worth turning into a skill, logging to `skill-observations/log.md` without editing anything live. When loading any other skill, check that log for open observations tagged to it and apply their insight even before the skill file itself is updated.
 
 ## Execution
 
