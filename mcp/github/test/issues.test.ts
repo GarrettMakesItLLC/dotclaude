@@ -8,10 +8,12 @@ vi.mock("node:child_process", () => ({
 const findProjectItemMock = vi.fn();
 const getProjectFieldMock = vi.fn();
 const setProjectSingleSelectMock = vi.fn();
+const invalidateProjectItemMock = vi.fn();
 vi.mock("../src/project.js", () => ({
   findProjectItem: findProjectItemMock,
   getProjectField: getProjectFieldMock,
   setProjectSingleSelect: setProjectSingleSelectMock,
+  invalidateProjectItem: invalidateProjectItemMock,
 }));
 
 function makeResponse(opts: {
@@ -83,6 +85,7 @@ beforeEach(() => {
   findProjectItemMock.mockReset();
   getProjectFieldMock.mockReset();
   setProjectSingleSelectMock.mockReset();
+  invalidateProjectItemMock.mockReset();
 });
 
 /**

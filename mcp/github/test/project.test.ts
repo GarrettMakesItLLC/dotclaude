@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const execFileMock = vi.fn();
 vi.mock("node:child_process", () => ({ execFile: execFileMock }));
@@ -10,9 +10,38 @@ function ghSuccess(stdout: string) {
   });
 }
 
+/** Build a minimal `Response`-like object good enough for `ghGraphQL`. */
+function graphqlResponse(data: unknown): Response {
+  const text = JSON.stringify({ data });
+  return {
+    status: 200,
+    ok: true,
+    headers: new Headers(),
+    text: async () => text,
+    json: async () => JSON.parse(text),
+  } as unknown as Response;
+}
+
+let fetchMock: ReturnType<typeof vi.fn>;
+
 beforeEach(() => {
   vi.resetModules();
   execFileMock.mockReset();
+  // `ghGraphQL` fetches a token via `gh auth token` before every request.
+  execFileMock.mockImplementation((_c: string, args: string[], ...rest: unknown[]) => {
+    const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+    if (args[0] === "auth" && args[1] === "token") {
+      cb(null, { stdout: "ghs_secrettoken123\n", stderr: "" });
+      return;
+    }
+    cb(new Error(`unexpected gh args: ${args.join(" ")}`));
+  });
+  fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("getProjectField", () => {
@@ -117,51 +146,122 @@ describe("getProjectField", () => {
   });
 });
 
+const PROJECT_ID = "PVT_kwDOEa9MV84BfYTK";
+
 describe("findProjectItem", () => {
-  it("matches an item by repository and issue number, splitting id from fields", async () => {
-    ghSuccess(
-      JSON.stringify({
-        items: [
-          { id: "PVTI_1", content: { number: 5, repository: "acme/widgets" }, status: "Todo", effort: "Standard" },
-          { id: "PVTI_2", content: { number: 6, repository: "acme/widgets" }, status: "Done" },
-        ],
+  it("resolves an issue's project item by a single targeted query, not the whole board", async () => {
+    fetchMock.mockResolvedValueOnce(
+      graphqlResponse({
+        repository: {
+          issue: {
+            projectItems: {
+              nodes: [
+                {
+                  id: "PVTI_1",
+                  project: { id: PROJECT_ID },
+                  fieldValues: {
+                    nodes: [
+                      {
+                        __typename: "ProjectV2ItemFieldSingleSelectValue",
+                        name: "Todo",
+                        field: { name: "Status" },
+                      },
+                      {
+                        __typename: "ProjectV2ItemFieldSingleSelectValue",
+                        name: "Standard",
+                        field: { name: "Effort" },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
       }),
     );
     const { findProjectItem } = await import("../src/project.js");
     const item = await findProjectItem("acme", "widgets", 5);
     expect(item).toEqual({ id: "PVTI_1", fields: { status: "Todo", effort: "Standard" } });
+    // One GraphQL request for exactly this issue — not a project-wide list.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit & { body: string }];
+    const body = JSON.parse(init.body);
+    expect(body.variables).toEqual({ owner: "acme", repo: "widgets", number: 5 });
   });
 
-  it("returns null when the issue isn't a project item", async () => {
-    ghSuccess(JSON.stringify({ items: [] }));
+  it("ignores project items belonging to a different project", async () => {
+    fetchMock.mockResolvedValueOnce(
+      graphqlResponse({
+        repository: {
+          issue: {
+            projectItems: {
+              nodes: [{ id: "PVTI_other", project: { id: "PVT_someOtherProject" }, fieldValues: { nodes: [] } }],
+            },
+          },
+        },
+      }),
+    );
     const { findProjectItem } = await import("../src/project.js");
     expect(await findProjectItem("acme", "widgets", 999)).toBeNull();
   });
 
-  it("caches the item list across calls, but a miss triggers one refetch before giving up null", async () => {
-    execFileMock
-      .mockImplementationOnce((_c: string, _a: string[], ...rest: unknown[]) => {
-        const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
-        cb(null, { stdout: JSON.stringify({ items: [] }), stderr: "" });
-      })
-      .mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
-        const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
-        cb(null, {
-          stdout: JSON.stringify({
-            items: [{ id: "PVTI_9", content: { number: 5, repository: "acme/widgets" }, status: "Todo" }],
-          }),
-          stderr: "",
-        });
-      });
+  it("returns null when the issue isn't a project item at all", async () => {
+    fetchMock.mockResolvedValueOnce(
+      graphqlResponse({ repository: { issue: { projectItems: { nodes: [] } } } }),
+    );
     const { findProjectItem } = await import("../src/project.js");
-    // First call: cache is empty, fetches (miss — the once-only empty list), then a
-    // cache-miss refetch (the default impl, which has the item) succeeds.
+    expect(await findProjectItem("acme", "widgets", 999)).toBeNull();
+  });
+
+  it("caches per issue for the process lifetime — a second lookup of the same issue makes no request", async () => {
+    fetchMock.mockResolvedValueOnce(
+      graphqlResponse({
+        repository: {
+          issue: {
+            projectItems: {
+              nodes: [
+                {
+                  id: "PVTI_9",
+                  project: { id: PROJECT_ID },
+                  fieldValues: {
+                    nodes: [
+                      {
+                        __typename: "ProjectV2ItemFieldSingleSelectValue",
+                        name: "Todo",
+                        field: { name: "Status" },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    const { findProjectItem } = await import("../src/project.js");
     const item = await findProjectItem("acme", "widgets", 5);
     expect(item?.id).toBe("PVTI_9");
-    expect(execFileMock).toHaveBeenCalledTimes(2);
-    // Second call: item is in the (now-populated) cache — no further fetch needed.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     await findProjectItem("acme", "widgets", 5);
-    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a write invalidates the cached lookup so the next read refetches", async () => {
+    fetchMock.mockResolvedValue(
+      graphqlResponse({
+        repository: {
+          issue: { projectItems: { nodes: [{ id: "PVTI_9", project: { id: PROJECT_ID }, fieldValues: { nodes: [] } }] } },
+        },
+      }),
+    );
+    const { findProjectItem, invalidateProjectItem } = await import("../src/project.js");
+    await findProjectItem("acme", "widgets", 5);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    invalidateProjectItem("acme", "widgets", 5);
+    await findProjectItem("acme", "widgets", 5);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
