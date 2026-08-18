@@ -224,6 +224,46 @@ export async function ghRequest<T = unknown>(
   return JSON.parse(text) as T;
 }
 
+interface GraphQLError {
+  message: string;
+}
+
+interface GraphQLResponse<T> {
+  data?: T;
+  errors?: GraphQLError[];
+}
+
+/**
+ * Perform a single GitHub GraphQL request. Only for what REST genuinely has no
+ * equivalent for (Projects v2 field reads/writes) — everything else goes
+ * through `ghRequest`. Unlike `gh project item-list`, this lets a caller ask
+ * for exactly the fields it needs (e.g. one issue's project item) instead of
+ * paginating the entire board, which is what made `findProjectItem` expensive
+ * on a project with thousands of items (#490).
+ */
+export async function ghGraphQL<T = unknown>(
+  query: string,
+  variables: Record<string, unknown> = {},
+): Promise<T> {
+  const res = await ghFetch(`${BASE_URL}/graphql`, {
+    method: "POST",
+    body: JSON.stringify({ query, variables }),
+  });
+
+  if (!res.ok) {
+    throw await requestError("POST", "/graphql", res);
+  }
+
+  const body = (await res.json()) as GraphQLResponse<T>;
+  if (body.errors?.length) {
+    throw new Error(`GitHub GraphQL error: ${body.errors.map((e) => e.message).join("; ")}`);
+  }
+  if (body.data === undefined) {
+    throw new Error("GitHub GraphQL response had no data");
+  }
+  return body.data;
+}
+
 /** Extract the `rel="next"` URL from a `Link` response header, if present. */
 function parseNextLink(linkHeader: string | null): string | undefined {
   if (!linkHeader) return undefined;

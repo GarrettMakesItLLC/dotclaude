@@ -313,3 +313,42 @@ describe("execGh", () => {
     expect(capturedOptions?.maxBuffer).toBe(32 * 1024 * 1024);
   });
 });
+
+describe("ghGraphQL", () => {
+  it("POSTs the query/variables to /graphql and returns data", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({ status: 200, body: { data: { viewer: { login: "octo" } } } }),
+    );
+    const { ghGraphQL } = await import("../src/github.js");
+    const data = await ghGraphQL<{ viewer: { login: string } }>("query { viewer { login } }", {
+      foo: "bar",
+    });
+    expect(data).toEqual({ viewer: { login: "octo" } });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit & { body: string }];
+    expect(url).toBe("https://api.github.com/graphql");
+    expect(JSON.parse(init.body)).toEqual({
+      query: "query { viewer { login } }",
+      variables: { foo: "bar" },
+    });
+  });
+
+  it("throws on GraphQL-level errors even though the HTTP status is 200", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({ status: 200, body: { errors: [{ message: "Field not found" }] } }),
+    );
+    const { ghGraphQL } = await import("../src/github.js");
+    await expect(ghGraphQL("query { bogus }")).rejects.toThrow(
+      "GitHub GraphQL error: Field not found",
+    );
+  });
+
+  it("retries once on 401 like ghRequest", async () => {
+    fetchMock
+      .mockResolvedValueOnce(makeResponse({ status: 401, body: { message: "Bad creds" } }))
+      .mockResolvedValueOnce(makeResponse({ status: 200, body: { data: { ok: true } } }));
+    const { ghGraphQL } = await import("../src/github.js");
+    const data = await ghGraphQL("query { ok }");
+    expect(data).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
