@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20.19.0 <21",
-    "npm": "10.8.2"
+    "node": ">=24"
   },
+  "packageManager": "npm@10.8.2",
   "workspaces": [
     "apps/*",
     "packages/*"
