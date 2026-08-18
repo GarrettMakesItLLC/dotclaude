@@ -20,6 +20,8 @@ The method is here. The realm checklists are in `references/` — load only the 
 | Data integrity & safety-critical paths | `references/data-integrity-safety.md` |
 | Performance & operability | `references/performance-ops.md` |
 | UX coherence | `references/ux-coherence.md` |
+| SEO & metadata | `references/seo-metadata.md` |
+| Visual anti-slop (product/design counterpart to `avoiding-ai-slop`) | `references/visual-anti-slop.md` |
 
 A realm not listed still runs on this method — write the checklist as you go and add the reference file in the same PR.
 

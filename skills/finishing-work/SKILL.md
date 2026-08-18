@@ -26,6 +26,18 @@ Verification itself is covered by CLAUDE.md and `verify-reminder.sh`. What this 
 
 Any box you can't check goes in the summary explicitly. Never present unverified work as done, and never describe a feature as complete while a layer is outstanding — say which layer is missing and why.
 
+### Regression checklist
+
+The mechanically-checkable subset of `running-an-audit`'s realms, run against this diff — not a dispatch, not a full audit. Under a minute:
+
+- [ ] No test disabled, skipped, or loosened to let this diff pass.
+- [ ] No unjustified lint-disable comment added.
+- [ ] Any new route or form: security headers / CSRF / secure cookie flags present (`running-an-audit/references/security-access-control.md`).
+- [ ] No secrets in the diff; no API key reachable from a frontend bundle.
+- [ ] Any new image: alt text. Any new page: meta title + description, exactly one `<h1>` (`running-an-audit/references/seo-metadata.md`).
+- [ ] No new emoji-as-icon usage; no new purple/violet accent that isn't already in the token system (`running-an-audit/references/visual-anti-slop.md`).
+- [ ] Any new async surface: loading, error, and empty states present — see `running-an-audit/references/ux-coherence.md`, don't re-derive it here.
+
 ## 2. Account for every finding
 
 Walk the findings you accumulated this session — bugs noticed in passing, tests you skipped, docs left stale, rough edges in code you touched. Each one is either **in this diff** or **has an issue number**. There is no third bucket (CLAUDE.md: *Finish what you find*).
