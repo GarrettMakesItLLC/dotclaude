@@ -1,4 +1,4 @@
-import { execGh } from "./github.js";
+import { execGh, ghGraphQL } from "./github.js";
 
 const PROJECT_OWNER = "GarrettMakesItLLC";
 const PROJECT_NUMBER = 2;
@@ -17,22 +17,18 @@ export interface ProjectField {
 
 export interface ProjectItemInfo {
   id: string;
-  /**
-   * Every field's current value, keyed by the field's lowercased name (e.g.
-   * `effort`, `status`), plus `labels`/`title`/`repository` — everything on
-   * the raw item except `id`/`content`.
-   */
+  /** Every project-board field's current value, keyed by the field's
+   * lowercased name (e.g. `effort`, `status`). */
   fields: Record<string, unknown>;
 }
 
-interface RawProjectItem {
-  id: string;
-  content?: { number?: number; repository?: string };
-  [fieldKey: string]: unknown;
-}
-
 let cachedFields: ProjectField[] | null = null;
-let cachedItems: RawProjectItem[] | null = null;
+
+/** Per-issue memo for `findProjectItem`, process lifetime — same reasoning as
+ * `cachedFields`: a targeted GraphQL lookup is already cheap (one query, not
+ * the whole board), this just avoids repeating it for the same issue within
+ * one session. */
+const cachedItemsByIssue = new Map<string, ProjectItemInfo | null>();
 
 /**
  * The one-time fix for either signature below: `gh auth refresh -s project`
@@ -98,13 +94,78 @@ async function fetchProjectFields(): Promise<ProjectField[]> {
   return parsed.fields;
 }
 
-async function fetchProjectItems(): Promise<RawProjectItem[]> {
-  const out = await execGhProjectCmd([
-    "project", "item-list", String(PROJECT_NUMBER),
-    "--owner", PROJECT_OWNER, "--format", "json", "--limit", "1000",
-  ]);
-  const parsed = JSON.parse(out) as { items: RawProjectItem[] };
-  return parsed.items;
+const FIND_ITEM_QUERY = `
+  query($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) {
+      issue(number: $number) {
+        projectItems(first: 20) {
+          nodes {
+            id
+            project { id }
+            fieldValues(first: 30) {
+              nodes {
+                __typename
+                ... on ProjectV2ItemFieldSingleSelectValue {
+                  name
+                  field { ... on ProjectV2FieldCommon { name } }
+                }
+                ... on ProjectV2ItemFieldTextValue {
+                  text
+                  field { ... on ProjectV2FieldCommon { name } }
+                }
+                ... on ProjectV2ItemFieldNumberValue {
+                  number
+                  field { ... on ProjectV2FieldCommon { name } }
+                }
+                ... on ProjectV2ItemFieldDateValue {
+                  date
+                  field { ... on ProjectV2FieldCommon { name } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+interface FieldValueNode {
+  __typename: string;
+  name?: string;
+  text?: string;
+  number?: number;
+  date?: string;
+  field?: { name?: string } | null;
+}
+
+interface FindItemResponse {
+  repository: {
+    issue: {
+      projectItems: {
+        nodes: Array<{
+          id: string;
+          project: { id: string };
+          fieldValues: { nodes: FieldValueNode[] };
+        }>;
+      };
+    } | null;
+  } | null;
+}
+
+function fieldValueOf(node: FieldValueNode): unknown {
+  switch (node.__typename) {
+    case "ProjectV2ItemFieldSingleSelectValue":
+      return node.name;
+    case "ProjectV2ItemFieldTextValue":
+      return node.text;
+    case "ProjectV2ItemFieldNumberValue":
+      return node.number;
+    case "ProjectV2ItemFieldDateValue":
+      return node.date;
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -131,41 +192,58 @@ export async function getProjectField(name: string): Promise<ProjectField> {
   return field;
 }
 
-function matchItem(
-  items: RawProjectItem[],
-  owner: string,
-  repo: string,
-  issueNumber: number,
-): RawProjectItem | undefined {
-  return items.find(
-    (item) =>
-      item.content?.number === issueNumber && item.content?.repository === `${owner}/${repo}`,
-  );
-}
-
 /**
  * The shared work project's item for a repo issue, or null if it isn't a
  * project item.
  *
- * Caches the item list for the process lifetime, but a cache miss triggers one
- * refetch before giving up — an issue added to the project after this process
- * started must not be permanently invisible just because an earlier lookup
- * cached the list without it.
+ * Queries the specific issue's `projectItems` connection directly via GraphQL
+ * instead of paginating the whole board (previously `gh project item-list
+ * --limit 1000`, which on a project with thousands of items burned the
+ * shared 5000/req-hr GraphQL quota in a handful of calls — every lookup
+ * refetched the entire project regardless of which one issue was wanted,
+ * platform#490). One targeted query costs the same whether the project has
+ * ten items or ten thousand.
+ *
+ * Caches per issue for the process lifetime — cheap to keep since each entry
+ * is now one small lookup, not a multi-thousand-item list.
  */
 export async function findProjectItem(
   owner: string,
   repo: string,
   issueNumber: number,
 ): Promise<ProjectItemInfo | null> {
-  if (!cachedItems) cachedItems = await fetchProjectItems();
-  let match = matchItem(cachedItems, owner, repo, issueNumber);
-  if (!match) {
-    cachedItems = await fetchProjectItems();
-    match = matchItem(cachedItems, owner, repo, issueNumber);
+  const key = `${owner}/${repo}#${issueNumber}`;
+  if (cachedItemsByIssue.has(key)) return cachedItemsByIssue.get(key)!;
+
+  const data = await ghGraphQL<FindItemResponse>(FIND_ITEM_QUERY, {
+    owner,
+    repo,
+    number: issueNumber,
+  });
+  const nodes = data.repository?.issue?.projectItems.nodes ?? [];
+  const match = nodes.find((node) => node.project.id === PROJECT_ID);
+
+  let result: ProjectItemInfo | null = null;
+  if (match) {
+    const fields: Record<string, unknown> = {};
+    for (const fv of match.fieldValues.nodes) {
+      const name = fv.field?.name;
+      if (!name) continue;
+      const value = fieldValueOf(fv);
+      if (value !== undefined) fields[name.toLowerCase()] = value;
+    }
+    result = { id: match.id, fields };
   }
-  if (!match) return null;
-  const { id, content: _content, ...fields } = match;
-  return { id, fields };
+
+  cachedItemsByIssue.set(key, result);
+  return result;
+}
+
+/** Drop a cached `findProjectItem` lookup — call after a write that changes
+ * that issue's field values, so a later read in the same session isn't
+ * served the pre-write snapshot. */
+export function invalidateProjectItem(owner: string, repo: string, issueNumber: number): void {
+  cachedItemsByIssue.delete(`${owner}/${repo}#${issueNumber}`);
 }
 
 /** Set a single-select field's value on a project item, by option id. */

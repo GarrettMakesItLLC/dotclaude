@@ -28,7 +28,12 @@ import {
   type IssueStatus,
   type IssueType,
 } from "../labels.js";
-import { findProjectItem, getProjectField, setProjectSingleSelect } from "../project.js";
+import {
+  findProjectItem,
+  getProjectField,
+  invalidateProjectItem,
+  setProjectSingleSelect,
+} from "../project.js";
 import { setIssueStatus } from "../issue-status.js";
 import { labelNames, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";
 import {
@@ -128,6 +133,7 @@ async function applyProjectSingleSelect(
   }
   await setProjectSingleSelect(item.id, field.id, option.id);
   invalidate(cacheKey("issue", `${owner}/${name}`, number));
+  invalidateProjectItem(owner, name, number);
 }
 
 export function registerIssueTools(server: McpServer): void {
