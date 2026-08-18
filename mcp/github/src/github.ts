@@ -299,7 +299,9 @@ export async function ghPaginate<T = unknown>(
 export const repoParam = z
   .string()
   .optional()
-  .describe('Target repository as "owner/name". Defaults to the repo of the current directory.');
+  .describe(
+    'Target repository as "owner/name". Defaults to the repo of THIS MCP SERVER PROCESS\'S OWN launch directory — not the calling agent\'s current Bash cwd. If your Bash tool has cd\'d into a different repo\'s checkout or worktree, you MUST pass this explicitly or the call silently lands in the wrong repo.',
+  );
 
 export interface RepoRef {
   owner: string;
