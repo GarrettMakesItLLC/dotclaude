@@ -73,6 +73,34 @@ function defaultStatus(source?: IssueSource, type?: IssueType): IssueStatus {
   return "blocked";
 }
 
+const HTML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
+
+/**
+ * Decode the common named and numeric HTML entities (`&amp;`, `&#39;`,
+ * `&#x27;`, ...) in a title. A milestone title typed with a literal `&` can
+ * arrive HTML-escaped from an upstream source (#212) — without normalizing
+ * before the exact-title match in `ensureMilestone`, `Foo &amp; Bar` and
+ * `Foo & Bar` resolve to two different milestones instead of one.
+ */
+function decodeHtmlEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (match, entity: string) => {
+    if (entity[0] === "#") {
+      const code =
+        entity[1] === "x" || entity[1] === "X"
+          ? parseInt(entity.slice(2), 16)
+          : parseInt(entity.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+    }
+    return HTML_ENTITIES[entity] ?? match;
+  });
+}
+
 /**
  * Find a milestone by exact title, or create it. Returns the milestone number.
  * Shared by the `milestone_ensure` tool and `issue_open`.
@@ -84,15 +112,16 @@ async function ensureMilestone(
   description?: string,
   due_on?: string,
 ): Promise<number> {
+  const normalizedTitle = decodeHtmlEntities(title);
   const existing = await ghPaginate<{ number: number; title: string }>(
     `/repos/${owner}/${name}/milestones`,
     { query: { state: "all" }, limit: 1000 },
   );
-  const match = existing.find((m) => m.title === title);
+  const match = existing.find((m) => decodeHtmlEntities(m.title) === normalizedTitle);
   if (match) return match.number;
   const created = await ghRequest<{ number: number; title: string }>(
     `/repos/${owner}/${name}/milestones`,
-    { method: "POST", body: { title, description, due_on } },
+    { method: "POST", body: { title: normalizedTitle, description, due_on } },
   );
   return created.number;
 }
@@ -754,6 +783,55 @@ export function registerIssueTools(server: McpServer): void {
         const { owner, name } = await resolveRepo(repo);
         const number = await ensureMilestone(owner, name, title, description, due_on);
         return jsonText({ number, title });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "milestone_update",
+    {
+      description:
+        "Update a milestone's title, state, description, or due date (e.g. close an exhausted " +
+        "milestone).",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Milestone number."),
+        title: z.string().optional(),
+        state: z.enum(["open", "closed"]).optional(),
+        description: z.string().optional(),
+        due_on: z.string().optional().describe("ISO 8601 due date."),
+      },
+    },
+    async ({ repo, number, title, state, description, due_on }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const updated = await ghRequest<{ number: number; title: string; state: string }>(
+          `/repos/${owner}/${name}/milestones/${number}`,
+          { method: "PATCH", body: { title, state, description, due_on } },
+        );
+        return jsonText({ number: updated.number, title: updated.title, state: updated.state });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "milestone_delete",
+    {
+      description: "Delete a milestone. Does not touch the issues that were attached to it.",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Milestone number."),
+      },
+    },
+    async ({ repo, number }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        await ghRequest(`/repos/${owner}/${name}/milestones/${number}`, { method: "DELETE" });
+        return jsonText({ number, deleted: true });
       } catch (err) {
         return errorResult(err);
       }
