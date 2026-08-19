@@ -48,7 +48,8 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   vi.resetModules();
   execFileMock.mockReset();
-  execFileMock.mockImplementation((_c: string, args: string[], cb: (e: unknown, o?: unknown) => void) => {
+  execFileMock.mockImplementation((_c: string, args: string[], ...rest: unknown[]) => {
+    const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
     if (args[0] === "auth" && args[1] === "token") return cb(null, { stdout: "tok\n", stderr: "" });
     cb(new Error(`unexpected gh args: ${args.join(" ")}`));
   });

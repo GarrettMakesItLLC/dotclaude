@@ -31,6 +31,13 @@ auth token (`gh auth token`).
   The token is cached in memory. On a `401` the server refetches the token once
   and retries the request once.
 
+- **`GH_TOKEN`/`GITHUB_TOKEN` set in your shell shadow your `gh auth login`
+  scopes.** Every `gh` process this server spawns strips both env vars, so it
+  always uses your keyring-stored login rather than a narrower-scoped env-var
+  token. If neither env var is set this has no effect; if one is, and it's
+  missing `project` scope, this is what makes `issue_set_effort`/
+  `issue_set_priority` work without needing to touch the env var at all.
+
 ## Repo resolution
 
 Every tool takes an optional `repo` parameter formatted `"owner/name"`. When

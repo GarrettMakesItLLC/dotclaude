@@ -312,6 +312,31 @@ describe("execGh", () => {
     await execGh(["project", "item-list"]);
     expect(capturedOptions?.maxBuffer).toBe(32 * 1024 * 1024);
   });
+
+  it("strips GH_TOKEN/GITHUB_TOKEN from the spawned gh process's env, even when both are set", async () => {
+    const prevGhToken = process.env.GH_TOKEN;
+    const prevGithubToken = process.env.GITHUB_TOKEN;
+    process.env.GH_TOKEN = "gho_narrowscopetoken";
+    process.env.GITHUB_TOKEN = "gho_narrowscopetoken";
+    try {
+      vi.resetModules();
+      let capturedEnv: NodeJS.ProcessEnv | undefined;
+      execFileMock.mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
+        const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+        if (rest.length > 1) capturedEnv = (rest[0] as { env?: NodeJS.ProcessEnv }).env;
+        cb(null, { stdout: "ok\n", stderr: "" });
+      });
+      const { execGh } = await import("../src/github.js");
+      await execGh(["project", "item-list"]);
+      expect(capturedEnv?.GH_TOKEN).toBeUndefined();
+      expect(capturedEnv?.GITHUB_TOKEN).toBeUndefined();
+    } finally {
+      if (prevGhToken === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = prevGhToken;
+      if (prevGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = prevGithubToken;
+    }
+  });
 });
 
 describe("ghGraphQL", () => {

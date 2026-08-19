@@ -47,7 +47,8 @@ beforeEach(() => {
   vi.resetModules();
   execFileMock.mockReset();
   execFileMock.mockImplementation(
-    (_cmd: string, args: string[], cb: (err: unknown, out?: unknown) => void) => {
+    (_cmd: string, args: string[], ...rest: unknown[]) => {
+      const cb = rest[rest.length - 1] as (err: unknown, out?: unknown) => void;
       if (args[0] === "auth" && args[1] === "token") {
         cb(null, { stdout: "tok\n", stderr: "" });
         return;
