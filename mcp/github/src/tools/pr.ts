@@ -4,6 +4,7 @@ import {
   cacheKey,
   cachedGet,
   errorResult,
+  ghGraphQL,
   ghPaginate,
   ghRequest,
   invalidate,
@@ -312,6 +313,45 @@ export function registerPrTools(server: McpServer): void {
         }
 
         return jsonText(warnings.length ? { ...result, _warnings: warnings } : result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "pr_auto_merge",
+    {
+      description:
+        "Enable auto-merge on a pull request (GitHub merges it automatically once required " +
+        "checks — and the merge queue, where enabled — clear). Prefer this over " +
+        "`gh pr merge --auto --squash`: that CLI subcommand issues extra GraphQL calls beyond " +
+        "the single mutation this tool sends, and trips GitHub's secondary rate limit under " +
+        "concurrent-agent load in a way a lone `enablePullRequestAutoMerge` call does not (#238).",
+      inputSchema: {
+        repo: repoParam,
+        number: z.number().int().positive().describe("Pull request number."),
+        method: z
+          .enum(["merge", "squash", "rebase"])
+          .default("squash")
+          .describe("Merge method to use once auto-merge fires."),
+      },
+    },
+    async ({ repo, number, method }) => {
+      try {
+        const { owner, name } = await resolveRepo(repo);
+        const pr = await ghRequest<{ node_id: string }>(
+          `/repos/${owner}/${name}/pulls/${number}`,
+        );
+        await ghGraphQL(
+          `mutation($id: ID!, $method: PullRequestMergeMethod!) {
+            enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $method }) {
+              clientMutationId
+            }
+          }`,
+          { id: pr.node_id, method: method.toUpperCase() },
+        );
+        return jsonText({ number, auto_merge_enabled: true, method });
       } catch (err) {
         return errorResult(err);
       }

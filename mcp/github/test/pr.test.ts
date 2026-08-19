@@ -442,3 +442,60 @@ describe("pr_merge", () => {
     expect(body._warnings?.[0]).toContain("main");
   });
 });
+
+describe("pr_auto_merge", () => {
+  it("resolves the PR's node_id via REST, then sends a single enablePullRequestAutoMerge mutation", async () => {
+    let mutationVariables: Record<string, unknown> | undefined;
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if ((init.method === undefined || init.method === "GET") && url.endsWith("/pulls/42")) {
+        return makeResponse({ status: 200, body: { node_id: "PR_kwabc123" } });
+      }
+      if (init.method === "POST" && url.endsWith("/graphql")) {
+        const parsed = JSON.parse(init.body ?? "{}") as {
+          query: string;
+          variables: Record<string, unknown>;
+        };
+        expect(parsed.query).toContain("enablePullRequestAutoMerge");
+        mutationVariables = parsed.variables;
+        return makeResponse({
+          status: 200,
+          body: { data: { enablePullRequestAutoMerge: { clientMutationId: null } } },
+        });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getPrHandler("pr_auto_merge");
+    const res = await handler({ repo: "octo/repo", number: 42, method: "squash" });
+
+    expect(res.isError).toBeFalsy();
+    expect(mutationVariables).toEqual({ id: "PR_kwabc123", method: "SQUASH" });
+    const body = JSON.parse(res.content[0].text) as {
+      number: number;
+      auto_merge_enabled: boolean;
+      method: string;
+    };
+    expect(body).toEqual({ number: 42, auto_merge_enabled: true, method: "squash" });
+  });
+
+  it("surfaces a GraphQL error (e.g. merge queue required, or auto-merge not allowed) as a tool error", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if ((init.method === undefined || init.method === "GET") && url.endsWith("/pulls/42")) {
+        return makeResponse({ status: 200, body: { node_id: "PR_kwabc123" } });
+      }
+      if (init.method === "POST" && url.endsWith("/graphql")) {
+        return makeResponse({
+          status: 200,
+          body: { errors: [{ message: "Pull request Auto merge is not allowed for this repository" }] },
+        });
+      }
+      return makeResponse({ status: 500 });
+    });
+
+    const handler = await getPrHandler("pr_auto_merge");
+    const res = await handler({ repo: "octo/repo", number: 42, method: "squash" });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain("not allowed");
+  });
+});
