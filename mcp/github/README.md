@@ -84,6 +84,12 @@ Pull requests:
 - `pr_merge` — merge a PR (`method?` merge/squash/rebase, default `squash`,
   `commit_title?`, `commit_message?`), optionally deleting the head branch
   afterward (`delete_branch?`; refuses `main`/`master`).
+- `pr_auto_merge` — enable auto-merge (`method?`, default `squash`) via the
+  `enablePullRequestAutoMerge` GraphQL mutation directly. Prefer this over
+  `gh pr merge --auto --squash`: that CLI subcommand issues extra GraphQL
+  calls beyond the single mutation this tool sends, and trips GitHub's
+  secondary rate limit under concurrent-agent load in a way a lone mutation
+  call does not (#238).
 
 Issues:
 
