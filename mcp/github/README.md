@@ -114,7 +114,10 @@ Issues:
 - `issue_set_milestone` / `milestone_ensure` — attach an issue to a milestone,
   finding or creating it by title.
 - `issue_add_sub_issue` / `issue_list_sub_issues` — manage parent/child issue
-  relationships.
+  relationships. Parent and child may be in different repos in the same org —
+  pass `sub_repo` on `issue_add_sub_issue` (and `parent_repo` on `issue_open`)
+  when they differ; both default to the other side's repo, matching the
+  same-repo case.
 - `issue_set_blocked_by` / `issue_list_blocked_by` — set or list GitHub's
   native issue-dependencies "blocked by" relationship for issues in the same
   repo. `issue_set_blocked_by` skips blockers already linked and reports them

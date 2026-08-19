@@ -489,6 +489,29 @@ describe("issue_add_sub_issue", () => {
     const res = await handler({ repo: "octo/repo", number: 4, sub_number: 12 });
     expect(res.isError).toBeFalsy();
   });
+
+  it("looks up the child in ITS OWN repo, and posts to the PARENT's repo, when they differ (#234)", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      // Child lookup must hit the CHILD's repo (other-org-repo), not the parent's (octo/repo).
+      if (init.method === "GET" && url === "https://api.github.com/repos/octo/other-repo/issues/12") {
+        return makeResponse({ status: 200, body: { number: 12, id: 999001 } });
+      }
+      // The link itself must POST to the PARENT's repo.
+      if (init.method === "POST" && url === "https://api.github.com/repos/octo/repo/issues/4/sub_issues") {
+        expect(init.body).toContain('"sub_issue_id":999001');
+        return makeResponse({ status: 201, body: { number: 4, id: 500 } });
+      }
+      throw new Error(`unexpected fetch: ${init.method} ${url}`);
+    });
+    const handler = await getIssueHandler("issue_add_sub_issue");
+    const res = await handler({
+      repo: "octo/repo",
+      number: 4,
+      sub_number: 12,
+      sub_repo: "octo/other-repo",
+    });
+    expect(res.isError).toBeFalsy();
+  });
 });
 
 describe("issue_set_blocked_by", () => {
@@ -1200,6 +1223,37 @@ describe("issue_open", () => {
     const handler = await getIssueHandler("issue_open");
     const res = await handler({ repo: "octo/repo", title: "Sub task", parent: 4 });
     expect(res.isError).toBeFalsy();
+  });
+
+  it("posts the sub_issues link to the PARENT's repo, not the new issue's, when parent_repo differs (#234)", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      // The new issue is created in octo/child-repo.
+      if (init.method === "POST" && url === "https://api.github.com/repos/octo/child-repo/issues") {
+        return makeResponse({ status: 201, body: { number: 44, id: 8003 } });
+      }
+      // The link must POST to the PARENT's repo (octo/parent-repo), not octo/child-repo.
+      if (
+        init.method === "POST" &&
+        url === "https://api.github.com/repos/octo/parent-repo/issues/486/sub_issues"
+      ) {
+        expect(init.body).toContain('"sub_issue_id":8003');
+        return makeResponse({ status: 201, body: {} });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/44")) {
+        return makeResponse({ status: 200, body: { number: 44, id: 8003 } });
+      }
+      throw new Error(`unexpected fetch: ${init.method} ${url}`);
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({
+      repo: "octo/child-repo",
+      title: "Sub task",
+      parent: 486,
+      parent_repo: "octo/parent-repo",
+    });
+    expect(res.isError).toBeFalsy();
+    const body = JSON.parse(res.content[0].text) as { _warnings?: string[] };
+    expect(body._warnings).toBeUndefined();
   });
 
   it("returns the created issue with no _warnings on a fully successful run", async () => {
