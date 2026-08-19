@@ -42,6 +42,15 @@
 # reaching for `python3 - <<EOF ... open(path, "w") ... EOF` when Edit/Write
 # was blocked), not every possible one.
 #
+# QUOTING (#182, #183, #196, #209): before any of the above patterns are
+# matched, the command text is scanned with the interior of every quoted
+# span masked (character-for-character, so positions still line up with the
+# original text) — a `>`, bracket, `&&`/`;`, or other metacharacter-looking
+# byte INSIDE a quoted grep/awk pattern or `--title`/`--body` string is not
+# real shell syntax and must not be read as a redirect or pipeline
+# separator. This is still not a real shell parse (see BASH COVERAGE above)
+# — just quote-aware instead of a raw substring scan.
+#
 # KNOWN GAPS (by design — backstop, not a sandbox):
 #   - Cannot distinguish a subagent from the main session (no such flag in hook
 #     input). Both are guarded; the escape hatch + config-repo exemption cover
@@ -138,6 +147,49 @@ if tool == "Bash":
 
     blanked = blank_heredoc_bodies(cmd)
 
+    # Mask the INTERIOR of every quoted span (both ' and ") with 'x', character
+    # for character, so length and non-quote content are unchanged but a `>`,
+    # bracket, `&&`, or any other shell-metacharacter-looking byte INSIDE a
+    # quoted string can no longer be mistaken for real shell syntax by the
+    # pattern scans below (#182, #183, #196: a grep/awk pattern or a `gh`
+    # --title/--body string containing `[^>]`, `>=`, or a literal `>` line was
+    # scanned as if it were unquoted). Because masking preserves position and
+    # length, a match found in `masked` can be sliced out of the ORIGINAL
+    # `blanked` text at the same offsets to recover the real (unmasked)
+    # characters — quotes included, so `.strip(QUOTES)` below still works.
+    def mask_quotes(text):
+        out = list(text)
+        i, n = 0, len(text)
+        while i < n:
+            c = text[i]
+            if c == "'":
+                j = i + 1
+                while j < n and text[j] != "'":
+                    out[j] = "x"
+                    j += 1
+                i = j + 1
+            elif c == '"':
+                j = i + 1
+                while j < n and text[j] != '"':
+                    if text[j] == "\\" and j + 1 < n:
+                        out[j] = out[j + 1] = "x"
+                        j += 2
+                        continue
+                    out[j] = "x"
+                    j += 1
+                i = j + 1
+            else:
+                i += 1
+        return "".join(out)
+
+    masked = mask_quotes(blanked)
+
+    def seg_tokens(seg_masked, seg_orig):
+        """Whitespace-split on MASKED boundaries (so a quoted space can't
+        split a token) but return the ORIGINAL (unmasked) text of each
+        token."""
+        return [seg_orig[m.start():m.end()] for m in re.finditer(r"\S+", seg_masked)]
+
     # Track a leading `cd <dir>` chain (`cd a && cd b && write relfile`) so a
     # RELATIVE write-target is resolved against the directory the shell would
     # actually be in at that point, not the hook process's own cwd (#143) —
@@ -145,6 +197,8 @@ if tool == "Bash":
     # inside the worktree, not wherever this hook happens to run from.
     # Segmenting on &&/||/|/;/newline (order preserved) lets us walk the
     # command left-to-right and update the effective directory as we go.
+    # Split points are found in MASKED text so a quoted `&&`/`;`/`|` (e.g. an
+    # awk script's boolean operators) isn't mistaken for a pipeline separator.
     # have_base flips false (stop tracking, judge nothing relative from here
     # on — refuse to guess rather than guess wrong) the moment a `cd` target
     # isn't staticaly resolvable (`cd -`, `cd` with no args, a `$VAR`).
@@ -158,10 +212,16 @@ if tool == "Bash":
             return None
         return base.rstrip("/") + "/" + target if base else "/" + target
 
-    segs_ordered = [s for s in re.split(r"(&&|\|\||\||;|\n)", blanked) if s not in ("&&", "||", "|", ";", "\n")]
-    per_seg = []  # (base_or_None, segment_text)
-    for seg in segs_ordered:
-        toks = seg.split()
+    segs_ordered = []  # (seg_masked, seg_orig)
+    pos = 0
+    for m in re.finditer(r"&&|\|\||\||;|\n", masked):
+        segs_ordered.append((masked[pos:m.start()], blanked[pos:m.start()]))
+        pos = m.end()
+    segs_ordered.append((masked[pos:], blanked[pos:]))
+
+    per_seg = []  # (base_or_None, seg_masked, seg_orig)
+    for seg_masked, seg_orig in segs_ordered:
+        toks = seg_tokens(seg_masked, seg_orig)
         if toks and toks[0] == "cd":
             if len(toks) == 2 and not toks[1].startswith("$") and toks[1] != "-":
                 resolved = join(effective, toks[1].strip(QUOTES))
@@ -172,22 +232,24 @@ if tool == "Bash":
             else:
                 have_base = False
             continue
-        per_seg.append((effective if have_base else None, seg))
+        per_seg.append((effective if have_base else None, seg_masked, seg_orig))
 
-    for base, seg in per_seg:
+    for base, seg_masked, seg_orig in per_seg:
         # Redirection: `> path` / `>> path`, not `2>&1`, `&>`, `>=`, or a
         # `[ a > b ]` test operator (single `>` inside `[ ... ]` is a string
         # comparison, not a redirect — excluded by requiring the target look
-        # like a path, not `]`).
-        for m in re.finditer(r"(?<![&\d])>>?\s*([^\s|&;><)]+)", seg):
-            tgt = m.group(1).strip(QUOTES)
+        # like a path, not `]`). Matched against MASKED text so a quoted `>`
+        # never looks like a redirect; the target is sliced from the ORIGINAL
+        # text at the same offsets so real quoted paths still come through.
+        for m in re.finditer(r"(?<![&\d])>>?\s*([^\s|&;><)]+)", seg_masked):
+            tgt = seg_orig[m.start(1):m.end(1)].strip(QUOTES)
             if tgt and tgt not in ("/dev/null", "&1", "&2") and not tgt.startswith("&"):
                 out.append(f"{base}\t{tgt}" if base else tgt)
 
         # sed -i / --in-place: grab all non-flag trailing tokens on that
         # pipeline segment as candidate targets (sed accepts multiple files).
-        if re.search(r"\bsed\b.*(-i\b|--in-place\b)", seg):
-            for tok in seg.split():
+        if re.search(r"\bsed\b.*(-i\b|--in-place\b)", seg_masked):
+            for tok in seg_tokens(seg_masked, seg_orig):
                 if not tok.startswith("-") and tok != "sed" and "sed" not in tok:
                     tgt = tok.strip(QUOTES)
                     out.append(f"{base}\t{tgt}" if base else tgt)
@@ -196,7 +258,7 @@ if tool == "Bash":
         # FILE`'s one argument is both its first and last non-flag token, so
         # this covers the common single-destination form; `tee a b` (writes
         # both) only catches the last, which costs nothing beyond a miss.
-        toks = seg.split()
+        toks = seg_tokens(seg_masked, seg_orig)
         if toks:
             head = toks[0].rsplit("/", 1)[-1]
             if head in ("cp", "mv", "install", "tee"):

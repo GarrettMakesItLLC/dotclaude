@@ -108,6 +108,35 @@ check 0 Bash command "echo hi > $CONV/.worktrees/wt/x.ts"
 check 0 Bash command "some-command 2>&1"
 check 0 Bash command "some-command &> /dev/null"
 
+# --- #182/#183/#196/#209: a `>`, bracket, or `&&`/`;` INSIDE a quoted
+# argument must not be mistaken for real shell syntax — the pattern scans
+# above must respect quoting, not scan the raw command text byte-for-byte.
+
+# Should ALLOW — a bracket-containing regex/character-class in a quoted grep
+# pattern (#182), including one whose `[^>]*>` looks exactly like a redirect.
+check 0 Bash command "grep -io '<meta[^>]*content-security[^>]*>' file.txt"
+check 0 Bash command 'grep -rn "<th[^>]*scope=" .'
+
+# Should ALLOW — shell metacharacters (`>`, `>=`) inside a quoted regex/awk
+# script, including a comparison operator that is not a redirect at all
+# (#183).
+check 0 Bash command "grep -rEn \"\\.(get|post)\\s*(<[^>]*>)?\\s*\\(\\s*'[^']+'\" file.ts"
+check 0 Bash command "awk 'NR>=615 && NR<=800 && /foo/' file.txt"
+
+# Should ALLOW — a real redirect appears ONLY inside a quoted string (a
+# markdown blockquote line in a --body argument, not on a heredoc body this
+# time), so it must not be read as shell syntax (#196).
+check 0 Bash command 'gh issue create --title "fix: some/thing" --body "> a quoted blockquote line"'
+
+# Should still BLOCK — a REAL unquoted redirect right next to a quoted string
+# containing metacharacters is still caught; masking quotes must not blind
+# the scan to genuine redirects elsewhere on the same line.
+check 2 Bash command "grep -io '<meta[^>]*>' file.txt > $CONV/src/out.txt"
+
+# Should ALLOW — `2>&1` preceded by other quoted-metacharacter noise on the
+# same command still isn't mistaken for a redirect (#209).
+check 0 Bash command "grep -io '[^>]*' file.txt 2>&1"
+
 # Should ALLOW — the escape hatch works for Bash too.
 check 0 Bash command "echo hi > $CONV/src/redirected.ts" 1
 
