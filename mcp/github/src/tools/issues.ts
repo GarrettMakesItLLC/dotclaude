@@ -432,19 +432,27 @@ export function registerIssueTools(server: McpServer): void {
     "issue_add_sub_issue",
     {
       description:
-        "Link an existing issue as a sub-issue (child) of another. Both are issue numbers in the same repo.",
+        "Link an existing issue as a sub-issue (child) of another. Parent and child may be in " +
+        "different repos (same org) — pass `sub_repo` for the child's repo if it differs from " +
+        "the parent's `repo`.",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Parent issue number."),
         sub_number: z.number().int().positive().describe("Child issue number to nest under the parent."),
+        sub_repo: repoParam.describe(
+          'The CHILD\'s repo as "owner/name", if different from `repo` (the parent\'s repo). ' +
+            "Defaults to `repo` when omitted, matching the same-repo case.",
+        ),
       },
     },
-    async ({ repo, number, sub_number }) => {
+    async ({ repo, number, sub_number, sub_repo }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        // The sub_issues endpoint takes the child's database id, not its number.
+        const { owner: subOwner, name: subName } = await resolveRepo(sub_repo ?? repo);
+        // The sub_issues endpoint takes the child's database id, not its number — looked up in
+        // the CHILD's own repo, which may differ from the parent's (#234).
         const child = await ghRequest<{ id: number }>(
-          `/repos/${owner}/${name}/issues/${sub_number}`,
+          `/repos/${subOwner}/${subName}/issues/${sub_number}`,
         );
         const data = await ghRequest(
           `/repos/${owner}/${name}/issues/${number}/sub_issues`,
@@ -841,13 +849,30 @@ export function registerIssueTools(server: McpServer): void {
           .positive()
           .optional()
           .describe("Parent issue number; nests the new issue as its sub-issue."),
+        parent_repo: repoParam.describe(
+          'The PARENT\'s repo as "owner/name", if different from `repo` (the new issue\'s repo). ' +
+            "Defaults to `repo` when omitted, matching the same-repo case.",
+        ),
         assignees: z
           .array(z.string())
           .optional()
           .describe('Usernames to assign, or "@me". Default: unassigned.'),
       },
     },
-    async ({ repo, title, body, type, status, source, effort, priority, milestone, parent, assignees }) => {
+    async ({
+      repo,
+      title,
+      body,
+      type,
+      status,
+      source,
+      effort,
+      priority,
+      milestone,
+      parent,
+      parent_repo,
+      assignees,
+    }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
         const effectiveStatus: IssueStatus = status ?? defaultStatus(source, type);
@@ -901,8 +926,13 @@ export function registerIssueTools(server: McpServer): void {
 
         if (parent) {
           try {
+            // Resolved independently from the new issue's own repo (#234) — a parent in a
+            // different repo (same org) must be posted to via ITS repo, not the child's.
+            const { owner: parentOwner, name: parentName } = await resolveRepo(
+              parent_repo ?? repo,
+            );
             // The sub_issues endpoint takes the child's database id, already captured above.
-            await ghRequest(`/repos/${owner}/${name}/issues/${parent}/sub_issues`, {
+            await ghRequest(`/repos/${parentOwner}/${parentName}/issues/${parent}/sub_issues`, {
               method: "POST",
               body: { sub_issue_id: id },
             });
