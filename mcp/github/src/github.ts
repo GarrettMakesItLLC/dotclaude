@@ -13,6 +13,28 @@ let cachedRepo: string | null = null;
 let cachedViewer: string | null = null;
 
 /**
+ * Env for every spawned `gh` process, with `GH_TOKEN`/`GITHUB_TOKEN` stripped.
+ *
+ * `gh` prefers an env-var token over its own keyring-stored login when both are
+ * present. On a machine where `GH_TOKEN` is set globally (for git operations,
+ * CI-style tooling, etc.) but scoped narrower than the interactive `gh auth
+ * login` credential — missing `project`, for instance — that env var silently
+ * shadows the wider-scoped login for every `gh` call this server makes, and
+ * `gh auth refresh` cannot fix it: there is no stored credential behind an
+ * env-var token to refresh (#219, #205, #204, #203, #188). Stripping the env
+ * var lets `gh` fall back to its own keyring login, which is what an
+ * interactive `gh auth login` on this machine actually grants scopes to. If no
+ * keyring login exists either, `gh` fails exactly as it would have with an
+ * unset `GH_TOKEN` — no regression for a CI-only environment.
+ */
+const GH_SPAWN_ENV = (() => {
+  const env = { ...process.env };
+  delete env.GH_TOKEN;
+  delete env.GITHUB_TOKEN;
+  return env;
+})();
+
+/**
  * Process-lifetime memo for single-object reads (`issue_view`, `pr_view`,
  * `repo_get`) — same lifetime as `cachedToken`/`cachedRepo` above. Every write
  * tool that touches the object a key names must call `invalidate` for that
@@ -45,7 +67,7 @@ export function invalidate(key: string): void {
  */
 async function fetchToken(): Promise<string> {
   try {
-    const { stdout } = await execFileAsync("gh", ["auth", "token"]);
+    const { stdout } = await execFileAsync("gh", ["auth", "token"], { env: GH_SPAWN_ENV });
     const token = stdout.trim();
     if (!token) {
       throw new Error("empty token");
@@ -68,6 +90,7 @@ export async function execGh(args: string[]): Promise<string> {
   try {
     const { stdout } = await execFileAsync("gh", args, {
       maxBuffer: 32 * 1024 * 1024,
+      env: GH_SPAWN_ENV,
     });
     return stdout.trim();
   } catch (err) {
@@ -363,14 +386,11 @@ export async function resolveRepo(repo?: string): Promise<RepoRef> {
   if (!nameWithOwner) {
     if (!cachedRepo) {
       try {
-        const { stdout } = await execFileAsync("gh", [
-          "repo",
-          "view",
-          "--json",
-          "nameWithOwner",
-          "-q",
-          ".nameWithOwner",
-        ]);
+        const { stdout } = await execFileAsync(
+          "gh",
+          ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+          { env: GH_SPAWN_ENV },
+        );
         cachedRepo = stdout.trim();
       } catch {
         cachedRepo = null;
