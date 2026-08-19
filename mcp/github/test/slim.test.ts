@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   actorLogins,
   labelNames,
+  pick,
   slimBranch,
   slimComment,
   slimIssue,
@@ -316,5 +317,24 @@ describe("field helpers", () => {
     expect(labelNames("nope")).toEqual([]);
     expect(actorLogins({ login: "a" })).toEqual([]);
     expect(labelNames([null, { name: "a" }])).toEqual(["a"]);
+  });
+});
+
+describe("pick", () => {
+  it("projects an object down to just the named keys", () => {
+    expect(pick({ number: 1, title: "x", state: "open" }, ["number", "state"])).toEqual({
+      number: 1,
+      state: "open",
+    });
+  });
+
+  it("returns the object unchanged when fields is undefined or empty", () => {
+    const obj = { number: 1, title: "x" };
+    expect(pick(obj, undefined)).toBe(obj);
+    expect(pick(obj, [])).toBe(obj);
+  });
+
+  it("silently drops an unrecognized field name instead of erroring", () => {
+    expect(pick({ number: 1 }, ["number", "bogus"])).toEqual({ number: 1 });
   });
 });

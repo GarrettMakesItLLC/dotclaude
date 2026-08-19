@@ -85,12 +85,22 @@ The contract:
 - **Writes acknowledge what changed** — a number, a URL, the mutated field —
   instead of echoing the whole object back.
 - JSON is serialized compact; indentation buys nothing on a projected payload.
+- **`issue_list`/`pr_list` take an optional `fields` array** projecting each
+  result down to just the named keys (e.g. `["number","title","state"]`) — the
+  common case is a dedupe pass across many issues/PRs that only needs enough
+  to skim for a duplicate, not the full slimmed shape.
+- **Any result over 100,000 characters is rejected with a clear error**
+  instead of being returned as an unusable blob — reproduced at
+  `issue_list({ limit: 400 })` against a large repo, which returned a
+  185,000-character single line the calling agent could not consume (#181).
+  Lower `limit`, add filters, or pass `fields` to bring a large list under the
+  cap.
 
 ## Tools
 
 Pull requests:
 
-- `pr_list` — list PRs (`state`, `base`, `head`, `limit`).
+- `pr_list` — list PRs (`state`, `base`, `head`, `limit`, `fields`).
 - `pr_view` — view one PR, including `body`.
 - `pr_create` — create a PR (`title`, `head`, `base`, `body?`, `draft?`).
 - `pr_update` — update a PR (`title?`, `body?`, `base?`, `state?`).
@@ -114,7 +124,8 @@ Pull requests:
 
 Issues:
 
-- `issue_list` — list issues (PRs filtered out; `state`, `labels`, `limit`).
+- `issue_list` — list issues (PRs filtered out; `state`, `labels`, `limit`,
+  `fields`).
 - `issue_view` — view one issue.
 - `issue_create` — create an issue (`title`, `body?`, `labels?`, `assignees?`).
 - `issue_update` — update an issue (`title?`, `body?`, `state?`, `state_reason?`

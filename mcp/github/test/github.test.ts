@@ -407,3 +407,21 @@ describe("ghGraphQL", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("jsonText", () => {
+  it("returns a compact single-line JSON text block for a normal-sized payload", async () => {
+    const { jsonText } = await import("../src/github.js");
+    const res = jsonText({ number: 1, title: "x" });
+    expect(res.content).toEqual([{ type: "text", text: '{"number":1,"title":"x"}' }]);
+  });
+
+  it("throws instead of returning a result over 100,000 characters (#181)", async () => {
+    const { jsonText } = await import("../src/github.js");
+    const huge = Array.from({ length: 5000 }, (_, i) => ({
+      number: i,
+      title: "x".repeat(30),
+    }));
+    expect(() => jsonText(huge)).toThrow(/Result too large to return/);
+    expect(() => jsonText(huge)).toThrow(/`fields`/);
+  });
+});

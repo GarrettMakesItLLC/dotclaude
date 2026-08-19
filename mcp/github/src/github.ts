@@ -449,17 +449,39 @@ export function listLimit(limit?: number): number {
 }
 
 /**
+ * Above this many characters a result is rejected outright rather than handed
+ * back as an unusable blob — reproduced at `issue_list({ limit: 400 })`
+ * against a large repo, which returned a 185,000-character single line the
+ * calling agent could not consume (#181). Comfortably below that reproduction
+ * size so the same shape of call fails fast with actionable guidance instead
+ * of silently degrading.
+ */
+const MAX_RESULT_CHARS = 100_000;
+
+/**
  * Render a value as a single JSON text content block.
  *
  * Compact, not indented: a tool result is re-read on every subsequent turn of
  * the session, and indentation buys the model nothing on payloads already
  * projected down to the fields it reads (see `slim.ts`).
+ *
+ * Throws rather than returning an oversized payload (#181) — callers already
+ * wrap their `jsonText(...)` call in a try/catch that routes into
+ * `errorResult`, so this surfaces as a normal tool error, not a crash.
  */
 export function jsonText(value: unknown): {
   content: { type: "text"; text: string }[];
 } {
+  const text = JSON.stringify(value);
+  if (text.length > MAX_RESULT_CHARS) {
+    throw new Error(
+      `Result too large to return (${text.length} chars, max ${MAX_RESULT_CHARS}). ` +
+        "Narrow the request: lower `limit`, add more specific filters, or — for " +
+        "issue_list/pr_list — pass `fields` to project down to just the keys you need.",
+    );
+  }
   return {
-    content: [{ type: "text", text: JSON.stringify(value) }],
+    content: [{ type: "text", text }],
   };
 }
 
