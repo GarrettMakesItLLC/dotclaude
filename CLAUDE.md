@@ -71,6 +71,10 @@ A push and a PR are handoffs — never make them on unverified work. Run typeche
 
 Self-review and verify locally *before* opening the PR, then open it ready — not draft. **Never use CI as the debugging loop**: reproduce failures locally; manual triggers are for what genuinely can't run locally, not debug-by-rerun.
 
+**Never pipe a verification command.** Run it bare and read its exit code; pipe only after the status is captured (`cmd; rc=$?` or `set -o pipefail`). A killed process reports the pipe's exit code, not its own — `npx eslint <files> | tail -20` reads clean (`tail` exits 0) whether lint passed or an OOM-killer took eslint out mid-run, and the second case is common, not rare, under swarm load. When a hook fails with a message that doesn't match the diff (`Task failed to spawn` from lint-staged, for instance), suspect the environment before the diff — `dmesg | grep -i "killed process"` settles it in one command (dotclaude#186).
+
+**Never accept a `Monitor` event or a background task's `tasks/<id>.output` file alone as proof a check passed.** Both have been observed to report a clean/passing result while the tracked output file was still 0 bytes and the real process hadn't finished (dotclaude#217) — this is unresolved harness behavior, not something a retry fixes. Redirect the command to a self-named log (`> scratchpad/build.log 2>&1`) and read that file directly, and/or capture the real exit code explicitly into it, rather than trusting the synthesized event.
+
 Done isn't "PR opened" — it's the checkout clean, on the default branch, pulled current, no stray worktrees or branches. Run the **`finishing-work`** skill at the finish line. Never delete a worktree or branch holding uncommitted or unpushed work without flagging it.
 
 ## Write for the final state, not the journey
