@@ -19,6 +19,7 @@ Every such path either sources real data, or states its unavailability in the in
 - Emergency paths (SOS, incident report, contact obligations) are exercised end to end against a real integration in a test environment, not mocked into passing.
 - Where a regulator or standards body defines the content (avalanche bulletins, marine warnings, protocol checklists), the citation is in the code and the figures are read from the published text — see the citation doctrine in `accessibility.md`'s physical-space section.
 - Degraded and offline behavior is defined for every safety surface: what a user sees with no network is part of the feature, not an edge case.
+- **Any user-facing AI chat surface has a self-harm/crisis-language response path** — detection plus a hardcoded resource (crisis line, not a model-generated one) rather than relying on the base model's default behavior, which is not a substitute for a tested, owned response.
 
 ## Offline resilience and durability
 

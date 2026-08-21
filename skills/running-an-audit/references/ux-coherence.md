@@ -31,6 +31,10 @@ Sweep for the same concept displayed in several places with divergent formatting
 
 Every list, table, and async surface has all three, in text, and the empty state says what to do next. Loading states don't reflow the layout. This overlaps `accessibility.md`'s live-region checklist — check them together.
 
+## Common polish surfaces
+
+Not a checklist of features to build — a checklist of *presence and consistency* wherever the product has already committed to the pattern elsewhere. Flag a surface only where its absence breaks a pattern the rest of the product establishes, not because the list below is exhaustive of what a mature product could have: skip-to-content and password-visibility toggles (also accessibility findings, see `accessibility.md`), sticky/scroll-aware headers, breadcrumbs on nested routes, mobile nav pattern, print stylesheet on content meant to be printed, "back to top" on long scroll surfaces, a 404 page that isn't the framework default, a thank-you/confirmation step after every meaningful form submit, tooltips on any control whose purpose isn't self-evident from its label.
+
 ## Copy consistency
 
 No hardcoded user-facing strings outside the i18n layer; keys added for every new surface; dark-mode variants present on every new component. These are lint-gateable, and should be lint-gated rather than audited twice.

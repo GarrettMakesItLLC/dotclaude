@@ -22,6 +22,12 @@ Enumerate every route the way `security-access-control.md` enumerates from the r
 - **Favicon** present across the sizes modern browsers and OS integrations expect (not just a single 16×16 `.ico`), and it renders — an absent favicon is a cheap, visible tell that the site went out the door unfinished.
 - A page meant to be unindexed (an internal tool, a preview environment) carries `noindex` explicitly — relying on obscurity is not a control.
 
+## Rendering and content depth
+
+- **Marketing/landing pages are pre-rendered (SSG/SSR), not client-rendered-only.** `view-source` on a marketing route showing an empty shell is the tell — a crawler and a social-share unfurl both see nothing. Cross-check against `performance-ops.md`'s bundle findings; this is the SEO-visible symptom of the same root cause.
+- **Backlink sources** — directories, partner/integration listings, guest posts — are an owner-action growth lever, not a code finding; note current backlink profile as a baseline rather than filing it as a gap.
+- **Content depth on indexable surfaces** (blog posts, guides, tool/calculator pages) — a marketing site with zero indexable content beyond the landing page has nothing for search to rank. Not a per-post count to hit; a stated content plan versus zero content is the actual finding.
+
 ## Tracking wiring
 
 - **GA4, Meta Pixel, and any other analytics tag fire on every route they're meant to**, not just the marketing pages — the gap that recurs is a pixel present on the homepage and silently absent from three routes added since. Check this against `privacy-data-processing.md`'s consent-gating rule: an analytics tag firing before consent is a privacy finding, not just a wiring gap, and the two audits should share the enumeration rather than each re-deriving it.
