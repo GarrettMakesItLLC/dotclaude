@@ -34,6 +34,20 @@ Build the list from the router, not from the pages that call it. For each route:
 
 Session timeout and rotation; lockout and throttling on auth endpoints; password policy; MFA (TOTP) available for privileged accounts; bot protection on public auth surfaces. Secrets: none in client-bundled code, none in the repo (secret scanning in CI), rotated after any exposure — *carried forward, not rotated* is a finding in its own right. Privileged keys (service-role) never reachable from the client bundle.
 
+- **Passwords hashed** (bcrypt/argon2), never stored or logged plain.
+- **Session token never in `localStorage`/`sessionStorage`** — an XSS becomes a full account takeover instead of nothing; httpOnly + secure + `SameSite` cookie, or short-lived memory token with rotation.
+- **Sessions invalidated on password change and on logout everywhere** (not just the current device) — a stolen session outliving the password reset that was supposed to kill it is the recurring failure.
+- **Password-reset links expire** (short TTL, single-use, invalidated once consumed) and **don't leak whether an account exists** — same response shape for "sent" regardless of whether the email matches a real account.
+- **CSRF tokens on state-changing requests** wherever session auth is cookie-based (SPA-with-bearer-token architectures are exempt by design — state the exemption rather than a missing check).
+- **Directory listing disabled** on any static/asset host; **no default admin route** (`/admin`, `/wp-admin`-shaped paths) left reachable from a scaffold.
+- **Security events logged**: failed logins, privilege changes, admin actions — enough to reconstruct an incident, not just enough to know one happened.
+- **Prod error responses never include a stack trace** or internal path — a generic message to the client, the real trace to the error tracker only.
+- **IDs are not sequential/predictable** (UUID or equivalent) wherever enumeration would expose another tenant's records.
+- **Request/response bodies aren't logged wholesale** — a full-body log is a PII and secret leak waiting on the next `console.log` left in.
+- **AI-specific**: prompt-injection resistant to untrusted input reaching the system prompt or tool-call arguments; per-user/per-IP usage caps on any LLM-backed endpoint (the cost equivalent of rate limiting, and a distinct finding from it); user-supplied content never reaches a tool call's privileged arguments (file path, SQL, shell) unvalidated.
+- **Storage buckets default-private**, checked against the actual provider config (Supabase/S3 bucket policy), not assumed from the app code — a bucket flipped public during debugging and never flipped back is a recurring finding.
+- Amounts/prices computed and re-validated **server-side** from the source of truth, never trusted from a client-submitted value, on any path that touches payment.
+
 ## Rate limiting and cost
 
 - Every expensive, sensitive, or third-party-billed path is rate limited. Absent limits and **in-memory limits that don't survive a cold start or a second instance** are the same finding.
