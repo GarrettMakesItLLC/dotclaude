@@ -38,6 +38,8 @@ the reason each stays out is the rule for anything like it:
 | `remember` (Digital-Process-Tools) | Duplicates Claude Code's built-in cross-session auto-memory (`~/.claude/projects/*/memory/`), and runs its own hook-driven session-capture/compression pipeline with full shell privileges and an optional git-push backup — no benefit over the built-in system to justify that surface. |
 | `frontend-design` (Anthropic) | Overlapped by `impeccable`, which covers the same aesthetic-direction ground plus a deeper audit/critique/polish/harden command set, dedicated review agents, and an anti-pattern detector — the actual ask (bring existing product UI to production-grade, not just greenfield direction). One design skill, not two. |
 
+`ui-ux-pro-max` breaks the "one design skill" rule deliberately: it's a searchable reference database (styles/palettes/font pairings/chart types per stack), not a critique workflow, so it composes with `impeccable` instead of overlapping it — `impeccable` judges and fixes, `ui-ux-pro-max` supplies the reference material it judges against.
+
 `stop-slop` isn't a real plugin (no marketplace, no `.claude-plugin/plugin.json`) — it's a raw prose ruleset, vendored here as the `avoiding-ai-slop` skill instead of installed. `task-observer` (rebelytics) is likewise vendored as a skill rather than installed as a plugin, since it ships as a plain `SKILL.md` bundle too.
 
 ## MCP servers a plugin brings
