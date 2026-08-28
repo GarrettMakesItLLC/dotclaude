@@ -136,6 +136,36 @@ if tool == "Bash":
             i = j + 1
         return "\n".join(lines)
 
+    def quoted_spans(text):
+        """(start, end) of every single- or double-quoted run, backslash-aware.
+
+        Used only to decide whether a `>` is an operator or data. Unterminated
+        quotes yield no span rather than swallowing the rest of the line, so a
+        stray apostrophe cannot blind the scan to a real redirect after it.
+        """
+        spans = []
+        i = 0
+        n = len(text)
+        while i < n:
+            c = text[i]
+            if c == "\\":
+                i += 2
+                continue
+            if c in ("'", '"'):
+                j = i + 1
+                while j < n and text[j] != c:
+                    if c == '"' and text[j] == "\\":
+                        j += 2
+                        continue
+                    j += 1
+                if j < n:
+                    spans.append((i, j))
+                    i = j + 1
+                    continue
+                return spans
+            i += 1
+        return spans
+
     blanked = blank_heredoc_bodies(cmd)
 
     # Track a leading `cd <dir>` chain (`cd a && cd b && write relfile`) so a
@@ -158,7 +188,34 @@ if tool == "Bash":
             return None
         return base.rstrip("/") + "/" + target if base else "/" + target
 
-    segs_ordered = [s for s in re.split(r"(&&|\|\||\||;|\n)", blanked) if s not in ("&&", "||", "|", ";", "\n")]
+    # Split on shell separators, but only where they are NOT inside quotes. A
+    # `|`, `;` or `&&` inside a quoted argument is data — a jq filter
+    # (`.[]|select(...)`), an awk program, a sed script — and cutting there
+    # split a quoted run in half, which broke the quote pairing the redirect
+    # scan below depends on and turned a quoted `>` into a phantom redirect.
+    def split_unquoted(text):
+        spans = quoted_spans(text)
+        inside = lambda k: any(lo <= k < hi for lo, hi in spans)
+        parts, buf, i, n = [], [], 0, len(text)
+        while i < n:
+            if not inside(i):
+                two = text[i : i + 2]
+                if two in ("&&", "||"):
+                    parts.append("".join(buf))
+                    buf = []
+                    i += 2
+                    continue
+                if text[i] in ("|", ";", "\n"):
+                    parts.append("".join(buf))
+                    buf = []
+                    i += 1
+                    continue
+            buf.append(text[i])
+            i += 1
+        parts.append("".join(buf))
+        return [p for p in parts if p.strip()]
+
+    segs_ordered = split_unquoted(blanked)
     per_seg = []  # (base_or_None, segment_text)
     for seg in segs_ordered:
         toks = seg.split()
@@ -179,7 +236,14 @@ if tool == "Bash":
         # `[ a > b ]` test operator (single `>` inside `[ ... ]` is a string
         # comparison, not a redirect — excluded by requiring the target look
         # like a path, not `]`).
+        quoted = quoted_spans(seg)
         for m in re.finditer(r"(?<![&\d])>>?\s*([^\s|&;><)]+)", seg):
+            # A `>` INSIDE a quoted argument is data, not an operator: a jq
+            # filter (`select(.date > "2026-01-01")`), an awk program, a commit
+            # message. The operator itself is never quoted — only its target
+            # may be — so testing the `>` position leaves `> "file"` detected.
+            if any(lo <= m.start() < hi for lo, hi in quoted):
+                continue
             tgt = m.group(1).strip(QUOTES)
             if tgt and tgt not in ("/dev/null", "&1", "&2") and not tgt.startswith("&"):
                 out.append(f"{base}\t{tgt}" if base else tgt)
@@ -344,8 +408,15 @@ while IFS=$'\t' read -r a b; do
   # A tracked cd-base arrives as "base<TAB>relative-path"; no base is just
   # "path" (b empty) — read splits on the FIRST tab only via IFS, so a path
   # containing no tab lands entirely in $a.
+  #
+  # An ABSOLUTE target ignores the base. `cd /repo && cat > /tmp/x` writes to
+  # /tmp, and joining produced `/repo//tmp/x`, which climbed to /repo and
+  # blocked a legitimate scratchpad write from a main-tree cwd (#267).
   if [ -n "$b" ]; then
-    path="$a/$b"
+    case "$b" in
+      /*) path="$b" ;;
+      *)  path="$a/$b" ;;
+    esac
   else
     path="$a"
   fi
