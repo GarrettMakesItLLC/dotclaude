@@ -259,7 +259,24 @@ check 0 Bash command 'echo "$NW_DATABASE_URL" | wc -c'
 check 0 Bash command 'export FOO=bar'
 check 0 Bash command 'export XYZ="$HOME"'
 
+# --- #267: an absolute target ignores a leading `cd` base -------------------
+# `cd /repo && cat > /tmp/x` writes to /tmp. Joining base onto an already
+# absolute path produced `/repo//tmp/x`, which climbed to /repo and blocked a
+# legitimate scratchpad write.
+check 0 Bash command "cd $CONV && echo hi > /tmp/guard-abs-probe.txt"
+check 0 Bash command "cd $CONV/.worktrees/wt && cat > /tmp/guard-abs-probe.txt"
+# The same shape with a RELATIVE target still resolves into the tree and blocks.
+check 2 Bash command "cd $CONV && echo hi > src/thing.ts"
+
+# --- a `>` inside a quoted argument is data, not a redirect ------------------
+# jq/awk/git filters carry `>` in their program text. The operator is never
+# quoted, so `> "file"` must still be seen.
+check 0 Bash command "cd $CONV && gh issue list --jq '.[]|select(.updatedAt > \"2026-01-01\")'"
+check 0 Bash command "cd $CONV && awk '\$1 > 5 {print}' data.txt"
+check 2 Bash command "cd $CONV && echo hi > \"src/quoted target.ts\""
+
 if [ "$fail" = 0 ]; then
-  echo "worktree-guard: all cases passed"
+  
+echo "worktree-guard: all cases passed"
 fi
 exit "$fail"
