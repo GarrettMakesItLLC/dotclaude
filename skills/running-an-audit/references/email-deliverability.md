@@ -48,6 +48,18 @@ Enumerate every send site in the codebase — grep the ESP client, not the templ
 - **Are the lifecycle flows that the product's model requires actually present?** Welcome, activation/onboarding, abandoned-intent, dunning/failed-payment, win-back. A missing dunning flow is revenue leaking on a schedule; file it as a finding, not a roadmap idea. Depth on flow content and copy belongs to the `email-marketing-bible` skill — this audit checks presence, routing, and instrumentation, not subject-line craft.
 - **Consent and legal**: every marketing send traces to a consent record, the physical address is present, and the regime in scope (CAN-SPAM / CASL / GDPR) is satisfied — that analysis is `legal-compliance.md`'s and `privacy-data-processing.md`'s, not re-derived here.
 
+## What this audit cannot settle
+
+**The DNS half is auditable from outside; the ESP half is not.** Resolving records proves what is published; it does not prove what the provider will accept, issue, or let you configure. Findings that turn on provider capability need a round-trip through the provider before their fix text is final, and stating them as settled produces confident, wrong remediation steps.
+
+Observed instances, worth knowing before writing a fix:
+
+- **A provider may not offer the key size the standard asks for.** One ESP issues 1024-bit DKIM with no option to change it; "regenerate at 2048-bit" is then not a step the owner can take, and the real mitigation is elsewhere in the record.
+- **A provisioned subdomain is not necessarily a spare sending domain.** A `send.` subdomain carrying SPF and a bounce MX is frequently the *Return-Path* subdomain the ESP created for the apex — reusing it as a visible `From:` breaks bounce handling.
+- **DNS may not be writable where you expect.** A domain held at one registrar's nameservers cannot have records written through a hosting provider's API, however the domain appears in that provider's dashboard.
+
+Report these as owner action naming the round-trip, not as a fix. And sequence the fix so it cannot make delivery worse: **publish and verify SPF and a DKIM selector on the new subdomain before moving any traffic to it.** Sending from an unauthenticated subdomain under an enforcing DMARC policy authenticates worse than the apex it left, so the switch ships defaulted off until the records resolve.
+
 ## Gates
 
 - **A scheduled check resolving SPF, DKIM selector, and DMARC for every sending subdomain, asserting the policy strings** — this is the one that matters, because DNS drifts when a vendor is added and nothing in CI notices. It runs on a schedule against production DNS, not in the PR pipeline.

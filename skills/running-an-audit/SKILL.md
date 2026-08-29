@@ -40,12 +40,23 @@ Several realms deliberately share a surface and must not each re-derive it. Wher
 
 **2. Verify the guard fires.** A guard that exists and never runs is the most expensive outcome available: it converts an open problem into a false pass. Before trusting any check — existing or newly added — confirm it goes red. Dry-run the rule against known-bad input, or break the thing on purpose once. Specifically look for `continue-on-error`, a job that isn't a required check, a lint override whose glob doesn't match the files, an invariant with no enabled-path coverage, and a report generator whose every severity bucket is empty.
 
+The general shape, which is not limited to CI: **a valid, well-formed, correctly-sized artifact whose content is absent, where nothing failed.** It is worth checking for by name, because every instance looks like success:
+
+- A guard that reads a parsed corpus — the *correct* design — and scans zero fields, because a heading was renamed or a glob stopped matching.
+- A reachability check that asserts a route is *registered* while its built artifact is missing.
+- A permission guard that is implemented, correct, and covered by passing tests, and attached to no production route.
+- A rewrite that answers `200` with the homepage for a path that does not exist, so `llms.txt` and `sitemap.xml` return success and HTML.
+- An error path that converts every failure into a silent `false`, making the `catch` blocks downstream of it unreachable.
+- A media pipeline returning a correctly-sized, correctly-encoded, silent audio buffer.
+
+**And the sharper form of the rule: ask whether the expected size is derived from something the same edit cannot change.** A non-empty assertion is not enough — the worst instances are *partially* vacuous, where a real corpus is scanned and one field is missed, so no count looks wrong. A floor typed into the test is a floor someone lowers when it fails; a floor read from the filename, from a declaration inside the document, or from the router breaks that loop. Prefer an expectation the change under test cannot reach.
+
 ## Scope before you look
 
 Write these four down before reading any code. An audit that starts by reading code produces a list of whatever happened to be interesting.
 
 - **The question**, in one sentence, answerable yes/no or as a gap list.
-- **The target**, nameable and pinnable: `origin/main @ <sha>`, a deploy URL, a released artifact — not "the app". A finding against an unnamed target can't be reproduced or retired.
+- **The target**, nameable and pinnable: `origin/<branch> @ <sha>`, a deploy URL, a released artifact — not "the app". A finding against an unnamed target can't be reproduced or retired. **Name the branch, and resolve the sha from that branch explicitly** — a repo's default branch is often `dev`, so `commits/HEAD` gives you `origin/dev` while you write `origin/main`, and every finding then points at a tree the reader cannot check out. Verify the sha is on the branch you claim before dispatching.
 - **The realms** in scope, and the ones deliberately out.
 - **The depth**, below.
 
