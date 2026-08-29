@@ -127,7 +127,8 @@
     "context7@claude-plugins-official": true,
     "chrome-devtools-mcp@claude-plugins-official": true,
     "impeccable@impeccable": true,
-    "ui-ux-pro-max@ui-ux-pro-max-skill": true
+    "ui-ux-pro-max@ui-ux-pro-max-skill": true,
+    "marketing-skills@marketingskills": true
   },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
@@ -146,6 +147,12 @@
       "source": {
         "source": "github",
         "repo": "nextlevelbuilder/ui-ux-pro-max-skill"
+      }
+    },
+    "marketingskills": {
+      "source": {
+        "source": "github",
+        "repo": "coreyhaines31/marketingskills"
       }
     }
   },

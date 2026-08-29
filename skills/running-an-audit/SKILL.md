@@ -18,12 +18,21 @@ The method is here. The realm checklists are in `references/` — load only the 
 | Feature completeness & gap analysis | `references/feature-completeness.md` |
 | Competitor & market analysis | `references/competitor-analysis.md` |
 | Data integrity & safety-critical paths | `references/data-integrity-safety.md` |
-| Performance & operability | `references/performance-ops.md` |
+| Performance & operability (server side) | `references/performance-ops.md` |
+| Client delivery & perceived performance | `references/web-delivery-performance.md` |
+| Resilience & dependency concentration | `references/resilience-dependencies.md` |
 | UX coherence | `references/ux-coherence.md` |
+| Responsive & mobile | `references/responsive-mobile.md` |
+| Site hygiene & launch tells | `references/site-hygiene-launch-tells.md` |
 | SEO & metadata | `references/seo-metadata.md` |
+| Answer-engine visibility (GEO) | `references/answer-engine-visibility.md` |
+| Growth, ads & conversion instrumentation | `references/growth-ads-conversion.md` |
+| Email & sending-domain deliverability | `references/email-deliverability.md` |
 | Visual anti-slop (product/design counterpart to `avoiding-ai-slop`) | `references/visual-anti-slop.md` |
 
-A realm not listed still runs on this method — write the checklist as you go and add the reference file in the same PR.
+A realm not listed still runs on this method — write the checklist as you go and add the reference file in the same PR. **The table is the index: a file in `references/` missing from it, or a row pointing at no file, is drift and gets fixed in the PR that finds it.**
+
+Several realms deliberately share a surface and must not each re-derive it. Where two files name the same finding, file it once in the more severe realm and tag the other — the pairs that recur are client-rendered marketing pages (`web-delivery-performance` / `seo-metadata` / `answer-engine-visibility`), consent-gated tags (`growth-ads-conversion` / `privacy-data-processing`), fabricated proof and metrics (`visual-anti-slop` / `legal-compliance` / `data-integrity-safety`), and icon-button naming (`accessibility` / `ux-coherence`).
 
 ## The two laws
 

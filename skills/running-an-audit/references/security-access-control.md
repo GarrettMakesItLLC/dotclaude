@@ -9,6 +9,8 @@ Build the list from the router, not from the pages that call it. For each route:
 - **Is authentication attached at all?** A cheap first pass that finds real holes: compare the route count per file against the number of `authenticate`/`requireAuthUser` references in it. Any file where they don't match gets read line by line.
 - **Prefer default-deny.** Middleware that authenticates everything with an explicit public allow-list beats per-route opt-in, because the failure mode of forgetting is a 401 rather than a leak.
 - **Does the guard check the thing its name implies?** The recurring finding is a role guard that verifies a session exists but never checks the actual role assignment.
+- **Authorization is never client-side only.** A role or permission read in the browser to decide what to render is a display concern, and the server must re-check it on every request behind it. The signature finding: an admin panel gated by `if (user.role === 'admin')` in a React component, with the API routes it calls guarded by nothing — the entire panel is reachable by anyone who edits their local state or calls the endpoints directly. Enumerate every client-side role/permission/flag check and confirm the server-side counterpart exists for each; a client check with no server twin is a blocker, not a medium.
+- **The client never receives what it isn't authorized to see**, on the theory that it will hide it. Hidden-but-present data in a payload, a props blob, or an RSC serialization is disclosed data.
 - **Wrong-owner responses are 404, not 403** — a 403 confirms the resource exists.
 - **Every request body, query, and param is schema-validated** (Zod) at the boundary.
 
@@ -32,7 +34,12 @@ Build the list from the router, not from the pages that call it. For each route:
 
 ## Sessions, credentials, and secrets
 
-Session timeout and rotation; lockout and throttling on auth endpoints; password policy; MFA (TOTP) available for privileged accounts; bot protection on public auth surfaces. Secrets: none in client-bundled code, none in the repo (secret scanning in CI), rotated after any exposure — *carried forward, not rotated* is a finding in its own right. Privileged keys (service-role) never reachable from the client bundle.
+Session timeout and rotation; bot protection on public auth surfaces.
+
+- **Rate limiting and lockout on every authentication surface** — login, signup, password reset, email verification resend, MFA challenge, and any magic-link or OTP request. Per-account *and* per-IP, because either alone is trivially defeated. The recurring finding is a product that rate-limits its expensive API and leaves `/login` unlimited, which is the one endpoint an attacker actually wants unlimited. In-memory limiters that don't survive a cold start or a second instance are the same finding as no limiter.
+- **Password strength enforced server-side**, and enforced by *entropy and breach status*, not by a composition rule — a length floor (12+), a check against a known-breached-password set (k-anonymity range query against a service, or a local list), and a block on obvious context words (the product name, the user's email local-part). Composition rules alone (one uppercase, one symbol) produce `Password1!` and are worse than a length floor. A client-side-only strength meter with no server check is the same defect as a client-side admin check.
+- **MFA is available**, at minimum TOTP, and it is *required* for privileged accounts rather than merely offered. Recovery codes issued once, hashed at rest, and single-use. Where the product uses email OTP or magic links, those get their own rate limit, a short TTL, single use, and invalidation on consumption — an OTP with no attempt ceiling is a six-digit brute force.
+- Session invalidation on MFA enrolment change, the same as on password change. Secrets: none in client-bundled code, none in the repo (secret scanning in CI), rotated after any exposure — *carried forward, not rotated* is a finding in its own right. Privileged keys (service-role) never reachable from the client bundle.
 
 - **Passwords hashed** (bcrypt/argon2), never stored or logged plain.
 - **Session token never in `localStorage`/`sessionStorage`** — an XSS becomes a full account takeover instead of nothing; httpOnly + secure + `SameSite` cookie, or short-lived memory token with rotation.
@@ -55,7 +62,7 @@ Session timeout and rotation; lockout and throttling on auth endpoints; password
 
 ## Dependencies
 
-Vulnerability scan in CI, **without `continue-on-error`** — check that the job actually fails, because the masked-advisories finding recurs. Lockfile integrity, no unvetted transitive additions in the diff, key/package provenance.
+Vulnerability scan in CI, **without `continue-on-error`** — check that the job actually fails, because the masked-advisories finding recurs. Lockfile integrity, no unvetted transitive additions in the diff, key/package provenance. Continuity — an unmaintained or single-maintainer dependency, license compatibility, postinstall scripts, and what happens when a vendor is simply unavailable — is `resilience-dependencies.md`'s; this section owns vulnerabilities and provenance only.
 
 ## Findings from live signal
 
