@@ -45,6 +45,12 @@ Most traffic is mobile and most development happens on a 27-inch monitor. That g
 
 Mobile is where the performance budget is actually spent — the same findings as `web-delivery-performance.md`, measured on the device class that matters. Run Lighthouse mobile with throttling, not desktop; the responsive `srcset` finding and the bundle finding are both twice as costly here. Don't re-derive them in this realm — measure mobile, and file into that file.
 
+## When several products share the defect
+
+Three products independently missing a mobile nav is not three findings — it is one, in the shared layer. Before filing the same responsive defect against a second product, check whether the design system ships the primitive at all: an absent `Drawer`/`Sheet` is why each product hand-rolls or omits one, and fixing it once is cheaper than three times.
+
+The inverse is equally worth checking, and is the more common answer: where the shared layer **does** ship the primitive (skeletons, tooltips, a responsive image component), the finding is product-side adoption, and filing it against the design system wastes a cycle. Verify which before assuming either.
+
 ## Gates
 
 - **A Playwright test asserting no horizontal overflow at each named viewport, across a route list derived from the router.** Cheap, deterministic, catches the regression class permanently, and its absence is why this recurs.
