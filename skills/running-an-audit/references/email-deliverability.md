@@ -58,7 +58,13 @@ Observed instances, worth knowing before writing a fix:
 - **A provisioned subdomain is not necessarily a spare sending domain.** A `send.` subdomain carrying SPF and a bounce MX is frequently the *Return-Path* subdomain the ESP created for the apex — reusing it as a visible `From:` breaks bounce handling.
 - **DNS may not be writable where you expect.** A domain held at one registrar's nameservers cannot have records written through a hosting provider's API, however the domain appears in that provider's dashboard.
 
-Report these as owner action naming the round-trip, not as a fix. And sequence the fix so it cannot make delivery worse: **publish and verify SPF and a DKIM selector on the new subdomain before moving any traffic to it.** Sending from an unauthenticated subdomain under an enforcing DMARC policy authenticates worse than the apex it left, so the switch ships defaulted off until the records resolve.
+**Verify every provisioning write by reading it back.** A provider's write API can accept a field, answer `200` with a well-formed object, and ignore it — observed: `POST /webhooks` with `"status": "disabled"` returning a correct-looking object and creating the webhook *enabled*, because the REST endpoint silently drops a field the vendor's own SDK exposes. The mutation's success response is not evidence that the mutation did what it said; only a subsequent read is. This applies to the `PATCH` that fixes it too.
+
+**Provision in the safe order: create the receiver disabled, ship the handler, then enable.** An endpoint pointed at a route that does not exist yet collects delivery failures immediately, and the provider auto-disables it after enough of them — leaving something that reads as configured, records nothing, and is discovered only when someone asks why there are no suppressions. Same shape as the rest of this section: present, well-formed, inert.
+
+Watch for two receivers on one URL. Only one signing secret can be current, so the losing endpoint fails signature verification on every delivery, retries, and is auto-disabled — with the same silent-zero-suppressions result.
+
+Report provider-capability limits as owner action naming the round-trip, not as a fix. And sequence the fix so it cannot make delivery worse: **publish and verify SPF and a DKIM selector on the new subdomain before moving any traffic to it.** Sending from an unauthenticated subdomain under an enforcing DMARC policy authenticates worse than the apex it left, so the switch ships defaulted off until the records resolve.
 
 ## Gates
 
