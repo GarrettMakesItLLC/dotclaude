@@ -19,6 +19,19 @@ paths:
 - **Zod at every API boundary.** Never trust raw `req.body` or untyped query params.
 - **Supabase Auth**: two clients, never crossed — `supabaseServer()` (RSC / actions / handlers) vs `supabaseBrowser()` (`'use client'` only). Service-role key is server-only.
 - **Integration tests hit a real database** — never mock Prisma.
+- **JSON responses are compressed.** Verify `content-encoding` on the deployed endpoint; a platform that compresses static assets automatically often does not compress an API route's response, and a separately-hosted backend never does by default.
+- **Select the fields the surface uses**, not the whole row so the client can pick three.
+
+## Write paths
+
+- **A multi-step write is one transaction.** Three sequential `await`s that must all succeed, with no transaction around them, is a bug waiting on the day one of them throws.
+- **Every externally-triggered write is idempotent, keyed**, with a uniqueness constraint behind the key. Webhooks retry, jobs re-run, users double-click, and a client timeout is indistinguishable from a failure.
+- **Read-modify-write happens in the database** — atomic increment or an optimistic-concurrency version column. `SELECT`, add one in JS, `UPDATE` loses writes under any real concurrency; check every counter, balance, quota and streak.
+- **No per-keystroke writes.** Debounce, batch, or save on blur/submit.
+- **Derived values are computed, not stored** — unless stored deliberately, with a recompute path, a backfill, and a reconciliation job that reports drift rather than silently correcting it.
+- **Soft vs. hard delete is decided once per model** and every query path filters accordingly. Cascade behavior is declared in the schema, not implied by delete order in application code.
+- **Bulk operations are chunked and bounded**, with a stated partial-failure outcome.
+- **Every outbound call has an explicit timeout**; retries are bounded, backed off, jittered, and only on idempotent operations. The client default is usually "forever," and a hung upstream becomes an exhausted connection pool and a total outage.
 
 ## Migrations & data operations
 

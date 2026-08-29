@@ -58,6 +58,11 @@ SHARED_SKILLS=(
   "avoiding-ai-slop"            # strip AI writing tells from prose (docs, PRs, comments, drafted content)
   "task-observer"               # meta-skill: watches sessions for skill-improvement opportunities, logs them
 )
+# Third-party skills that ship as a plain repo with no plugin marketplace, so
+# they can't go in settings.json's enabledPlugins. `<dir-name>=<owner/repo>`.
+EXTERNAL_SKILLS=(
+  "email-marketing-bible=CosmoBlk/email-marketing-bible"  # MIT; deliverability triage, lifecycle flows, send-safety gates
+)
 
 MODE="install"
 case "${1:-}" in
@@ -215,6 +220,31 @@ if [ "${#SHARED_SKILLS[@]}" -gt 0 ]; then
     case "$tgt" in
       "$REPO_DIR"/skills/*) [ -e "$tgt" ] || { rm "$dst"; echo "  pruned: skills/$(basename "$dst") (removed from repo)"; } ;;
     esac
+  done
+fi
+
+# Third-party skills published as a plain repo rather than as a plugin. Cloned
+# rather than vendored so upstream stays the owner of its content; pinned to a
+# branch, refreshed on every bootstrap. Anything with a plugin marketplace goes
+# in settings.json's enabledPlugins instead.
+if [ "${#EXTERNAL_SKILLS[@]}" -gt 0 ]; then
+  echo "→ Syncing external skills into $CLAUDE_DIR/skills"
+  mkdir -p "$CLAUDE_DIR/skills"
+  for entry in "${EXTERNAL_SKILLS[@]}"; do
+    name="${entry%%=*}"
+    repo="${entry#*=}"
+    dst="$CLAUDE_DIR/skills/$name"
+    if [ -d "$dst/.git" ]; then
+      git -C "$dst" pull --quiet --ff-only 2>/dev/null \
+        && echo "  updated: skills/$name" \
+        || echo "  WARNING: skills/$name — pull failed, leaving as is" >&2
+    elif [ -e "$dst" ]; then
+      echo "  skip: skills/$name (exists and is not a clone)"
+    else
+      git clone --quiet --depth 1 "https://github.com/$repo.git" "$dst" \
+        && echo "  cloned: skills/$name" \
+        || echo "  WARNING: skills/$name — clone failed" >&2
+    fi
   done
 fi
 

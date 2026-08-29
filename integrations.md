@@ -40,6 +40,20 @@ the reason each stays out is the rule for anything like it:
 
 `ui-ux-pro-max` breaks the "one design skill" rule deliberately: it's a searchable reference database (styles/palettes/font pairings/chart types per stack), not a critique workflow, so it composes with `impeccable` instead of overlapping it — `impeccable` judges and fixes, `ui-ux-pro-max` supplies the reference material it judges against.
 
+### Third-party marketplaces
+
+Three marketplaces outside `claude-plugins-official` are enabled, each because it fills a gap the official set doesn't: `impeccable` (design critique/polish), `ui-ux-pro-max` (design reference database), and `marketingskills`.
+
+**`marketing-skills` (`coreyhaines31/marketingskills`, MIT)** — ~50 skills across CRO, copywriting, paid ads, ad creative, SEO and AI SEO, programmatic SEO, site architecture, schema, analytics, attribution, lifecycle and cold email, SMS, pricing, offers, paywalls, onboarding, signup, churn prevention, referrals, PR, launches, and customer research. Enabled because the whole marketing and growth axis had no coverage in this config at all: `running-an-audit` can now *find* an ads/conversion or GEO problem, and nothing here knew how to fix one.
+
+It is the largest single addition to the skill listing, which is the cost — its descriptions load at session start like any plugin's. Accepted because the alternative is the same content re-derived per session from a model's priors, which is exactly the AI-slop failure `avoiding-ai-slop` exists to prevent. Where its skills and this config's rules disagree, this config wins: `avoiding-ai-slop` governs drafted prose, `content-drafting` governs the four product repos' content pipeline, and `legal-compliance.md`'s substantiation bar governs any comparative or performance claim before it is published.
+
+**`email-marketing-bible` (`CosmoBlk/email-marketing-bible`, MIT)** — not a plugin (plain repo, no marketplace manifest), so `bootstrap.sh`'s `EXTERNAL_SKILLS` clones it into `~/.claude/skills/` and refreshes it on each run. A condensed operating manual: deliverability triage, flow recipes, compliance gates, and a pre-send safety checklist. It complements rather than duplicates `running-an-audit`'s `email-deliverability.md` — that file audits sending-domain architecture, DNS authentication, and routing; this one covers flow content, copy, benchmarks, and the send decision. Its benchmark figures are dated and vendor-sourced: verify before citing one, the same rule as `competitor-analysis.md`'s provenance discipline.
+
+**Higgsfield (`higgsfield-ai/skills`) — evaluated, not enabled.** Image/video/brand-asset generation through Higgsfield's own MCP and a paid account. Out for three reasons, and the reasons are the rule for anything like it: it needs a paid third-party subscription and API credentials for a capability no product in the fleet currently ships; its brand-identity and website-generation skills overlap `impeccable` and `ui-ux-pro-max`, and one design pipeline is the standing rule; and generated ad creative is the *last* thing to add to a paid-acquisition stack, not the first — `growth-ads-conversion.md` says tracking is verified before spend scales, and none of that is in place yet. Revisit if and when paid acquisition is running with verified conversion tracking and creative volume is the actual bottleneck.
+
+**GEO/AEO** is a realm, not a package. Nothing acquired for it: `running-an-audit`'s `answer-engine-visibility.md` carries the method, and `marketing-skills`' `ai-seo` covers the execution side.
+
 `stop-slop` isn't a real plugin (no marketplace, no `.claude-plugin/plugin.json`) — it's a raw prose ruleset, vendored here as the `avoiding-ai-slop` skill instead of installed. `task-observer` (rebelytics) is likewise vendored as a skill rather than installed as a plugin, since it ships as a plain `SKILL.md` bundle too.
 
 ## MCP servers a plugin brings
