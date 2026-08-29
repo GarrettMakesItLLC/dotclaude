@@ -55,7 +55,14 @@ Overlaps `ux-coherence.md`, which owns the *consistency* question. Here the ques
 
 Most of this realm is genuinely automatable, which is what separates it from the judgement-shaped realms — an audit here that produces only issues will be run again next quarter.
 
-- **A link checker over the built site in CI**, failing on internal 404s and reporting external ones (external links are flaky; report rather than fail, but do report). This single check owns the broken-link, dead-footer, and dead-nav findings permanently.
+- **A link checker in CI**, failing on internal 404s and reporting external ones (external links are flaky; report rather than fail, but do report). This single check owns the broken-link, dead-footer, and dead-nav findings permanently. Two shapes, and the right one depends on the repo:
+
+  - **Over the built site** — crawl `dist/` or the deployed target. Catches everything, including hrefs computed at runtime from data.
+  - **Over source** — read the files that actually decide what an HTTP request gets: the routing/rewrite config and the prerender path list. **This is the right choice when CI deliberately does not build the frontend** (common where the host builds every PR), because a check over `dist` there can only fail *after* the gate it is supposed to be.
+
+  **The source-based check is equivalent for concrete targets only when the prerenderer fails loudly on an entry it cannot emit.** A prerenderer that writes one file per declared path and throws otherwise makes source and output agree by construction; one that silently skips an unknown entry gives no such guarantee, and the source-based check there is genuinely weaker rather than equivalent. Verify which before porting the pattern — it is one line to check, and it is the difference between a sound check and a comforting one.
+
+  Either way, **state the blind spot rather than implying full coverage**: a source-based check cannot resolve a data-driven href (`` `/for/${slug}` `` against a real slug set). Go looking for a live instance of that class before calling it theoretical, and record what you found.
 - **A test asserting the 404 route renders the custom page** with the site nav present — otherwise a routing change silently restores the default.
 - **A grep gate over built output for placeholder markers** (`lorem ipsum`, `TODO`, `Your Company`, `example.com`, `placeholder`) failing the build.
 - **A test asserting the rendered footer's copyright year equals the current year** — trivially satisfied by the dynamic expression, and it is what keeps the hardcoded year from coming back.
