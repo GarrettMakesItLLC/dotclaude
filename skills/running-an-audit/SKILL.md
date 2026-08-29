@@ -49,6 +49,13 @@ The general shape, which is not limited to CI: **a valid, well-formed, correctly
 - An error path that converts every failure into a silent `false`, making the `catch` blocks downstream of it unreachable.
 - A media pipeline returning a correctly-sized, correctly-encoded, silent audio buffer.
 
+**The same shape occurs across an API boundary, where it is harder to see and the only available check is different.** A write to an external system can be accepted, answered `200`, and not do what it was asked:
+
+- A provisioning endpoint that accepts a field its own SDK documents, returns a well-formed object, and silently drops it — creating the resource in the opposite state from the one requested.
+- A configuration write whose success response reports the value sent rather than the value stored.
+
+So for any step that writes to a system you do not control — DNS, an ESP, an ad platform, a payment provider, a hosting API — the question is: **does the write API confirm the field it accepted?** A mutation *reporting* success is not evidence. Only a read-back is. Where an audit's own remediation includes a provisioning step, the step is not complete until re-read.
+
 **And the sharper form of the rule: ask whether the expected size is derived from something the same edit cannot change.** A non-empty assertion is not enough — the worst instances are *partially* vacuous, where a real corpus is scanned and one field is missed, so no count looks wrong. A floor typed into the test is a floor someone lowers when it fails; a floor read from the filename, from a declaration inside the document, or from the router breaks that loop. Prefer an expectation the change under test cannot reach.
 
 ## Scope before you look
