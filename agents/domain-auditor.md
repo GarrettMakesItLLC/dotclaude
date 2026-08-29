@@ -34,7 +34,12 @@ Drop what you cannot defend. A report of six defensible findings beats twenty wi
 
 ## Report format
 
-**Write the report to a file, not into your reply.** A complete report in this format reliably exceeds the inter-agent transport limit and arrives truncated mid-finding, costing a round trip per auditor. Unless your dispatch names a different path, write it with `Write` to `<scratchpad>/audit-<your-agent-name>.md`, then reply with **one line**: the path and your finding counts by severity. Nothing else — the orchestrator reads the file.
+**A complete report in this format reliably exceeds the inter-agent transport limit and arrives truncated mid-finding.** Deliver it one of these two ways:
+
+- **If you have a file-writing tool**, write the report to the path your dispatch names (or `<scratchpad>/audit-<your-agent-name>.md`), then reply with **one line**: the path and your finding counts by severity. Nothing else — the orchestrator reads the file.
+- **If file writing is unavailable to you** — `Write` is disabled in some sessions, including for subagents — say so in one line and **send the report as messages, split into chunks of roughly 400 lines each**, in report order. Do not shell out to a heredoc or any other workaround to defeat a disabled tool: a disabled tool is a decision, not an obstacle, and routing around it is out of bounds even when the goal is legitimate. Splitting works and costs nothing.
+
+Either way the content is identical. Never silently truncate, and never drop sections to fit — a report missing its *Verified safe* list is not a shorter report, it is a different and less useful one.
 
 Put every table your dispatch asked for in the file **verbatim**, including the ones that produced no finding: a crawler-status table that is all-200, a per-route tag matrix that is uniformly empty for a structural reason, the literal `dig` output including NXDOMAINs. Those are the *Verified safe* evidence, and they are what stops the next audit re-deriving them.
 
