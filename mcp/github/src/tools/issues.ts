@@ -29,6 +29,7 @@ import {
   type IssueType,
 } from "../labels.js";
 import {
+  addProjectItem,
   findProjectItem,
   getProjectField,
   invalidateProjectItem,
@@ -103,10 +104,18 @@ async function ensureMilestone(
  * case-insensitive on both sides — option names on the project are
  * capitalized (e.g. "Complex") while callers pass the lowercase enum value,
  * but a caller passing mixed case is matched too.
- * Throws if the issue isn't a project item, or the field has no such option —
- * callers that want best-effort behavior (issue_open) catch around this;
- * callers that want a hard failure (issue_set_effort/issue_set_priority) let
- * it propagate to their own try/catch.
+ * An issue that isn't on the board yet is ADDED rather than rejected. Effort
+ * and Priority live on the project, so "not a project item" is a missing setup
+ * step the caller cannot be expected to do out-of-band — and it made
+ * `issue_open`'s `effort`/`priority` params inert on every newly-created
+ * issue, since nothing adds the issue between creating it and setting the
+ * fields (platform#745). `addProjectV2ItemById` is idempotent, so this is
+ * safe on an issue already on the board.
+ *
+ * Throws if the field has no such option — callers that want best-effort
+ * behavior (issue_open) catch around this; callers that want a hard failure
+ * (issue_set_effort/issue_set_priority) let it propagate to their own
+ * try/catch.
  */
 async function applyProjectSingleSelect(
   owner: string,
@@ -115,12 +124,8 @@ async function applyProjectSingleSelect(
   fieldName: string,
   optionValue: string,
 ): Promise<void> {
-  const item = await findProjectItem(owner, name, number);
-  if (!item) {
-    throw new Error(
-      `Issue #${number} in ${owner}/${name} is not on the GarrettMakesItLLC — Work project — add it first.`,
-    );
-  }
+  const existing = await findProjectItem(owner, name, number);
+  const item = existing ?? { id: await addProjectItem(owner, name, number) };
   const field = await getProjectField(fieldName);
   const option = field.options?.find(
     (o) => o.name.toLowerCase() === optionValue.toLowerCase(),
