@@ -52,7 +52,7 @@ export function registerLabelTools(server: McpServer): void {
     {
       description:
         "Idempotently provision the standard issue label taxonomy (status:*, source:*, and the " +
-        "markers epic / launch-blocker) into a repo: creates missing labels and updates color/description " +
+        "launch-blocker marker) into a repo: creates missing labels and updates color/description " +
         "on existing ones. Also retitles GitHub's stock labels that duplicate a taxonomy axis (bug, " +
         "enhancement, documentation) as deprecated — only where they already exist, never creating them.",
       inputSchema: { repo: repoParam },

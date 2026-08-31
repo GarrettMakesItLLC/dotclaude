@@ -586,6 +586,33 @@ describe("issue_set_status", () => {
     expect(res.isError).toBeFalsy();
     expect(JSON.parse(res.content[0].text).labels).toContain("status:waiting");
   });
+
+  /**
+   * `status:backlog` was retired from the taxonomy but is still on issues filed
+   * before it went — so it has to be stripped like any other status label.
+   * Stripping only the live names leaves the issue wearing two at once, which
+   * is exactly the invariant a single `status:*` label exists to hold.
+   */
+  it("strips a retired status:* label instead of leaving the issue wearing two", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "GET" && url.endsWith("/issues/3365")) {
+        return makeResponse({
+          status: 200,
+          body: { labels: [{ name: "status:backlog" }, { name: "type:task" }] },
+        });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        const sent = JSON.parse(init.body as string).labels as string[];
+        expect(sent).toEqual(["type:task", "status:ready"]);
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_set_status");
+    const res = await handler({ repo: "octo/repo", number: 3365, status: "ready" });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text).labels).not.toContain("status:backlog");
+  });
 });
 
 describe("issue_set_type", () => {
@@ -1075,15 +1102,15 @@ describe("issue_claim", () => {
 });
 
 describe("issue_open", () => {
-  it("composes status/source labels on create, defaults feedback (source set, no status) to status:blocked, and sends the native-type PATCH", async () => {
+  it("composes status/source labels on create, defaults to status:ready even with a source set, and sends the native-type PATCH", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
       if (init.method === "POST" && url.endsWith("/issues")) {
         const sent = JSON.parse(init.body as string) as { labels: string[] };
         expect(sent.labels).toEqual(
-          expect.arrayContaining(["status:blocked", "source:redthread"]),
+          expect.arrayContaining(["status:ready", "source:redthread"]),
         );
         expect(sent.labels).not.toContain("type:bug");
-        expect(sent.labels).not.toContain("status:ready");
+        expect(sent.labels).not.toContain("status:blocked");
         return makeResponse({ status: 201, body: { number: 42, id: 8001, labels: sent.labels } });
       }
       if (init.method === "PATCH" && url.endsWith("/issues/42")) {
@@ -1153,62 +1180,44 @@ describe("issue_open", () => {
     expect(res.isError).toBeFalsy();
   });
 
-  it("still defaults an owner-reported feature to status:blocked — it needs his intent first", async () => {
-    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
-      if (init.method === "POST" && url.endsWith("/issues")) {
-        const sent = JSON.parse(init.body as string) as { labels: string[] };
-        expect(sent.labels).toEqual(
-          expect.arrayContaining(["status:blocked", "source:owner"]),
-        );
-        expect(sent.labels).not.toContain("type:feature");
-        expect(sent.labels).not.toContain("status:ready");
-        return makeResponse({ status: 201, body: { number: 47, id: 8006, labels: sent.labels } });
-      }
-      if (init.method === "PATCH" && url.endsWith("/issues/47")) {
-        return makeResponse({ status: 200, body: {} });
-      }
-      if (init.method === "GET" && url.endsWith("/issues/47")) {
-        return makeResponse({ status: 200, body: { number: 47, id: 8006 } });
-      }
-      return makeResponse({ status: 500 });
-    });
-    const handler = await getIssueHandler("issue_open");
-    const res = await handler({
-      repo: "octo/repo",
-      title: "Add a plate calculator",
-      type: "feature",
-      source: "owner",
-    });
-    expect(res.isError).toBeFalsy();
-  });
+  // The pairs that the retired source/type routing sent to `blocked` on create.
+  // Nothing infers a blocked issue from who filed it or what kind of report it
+  // is any more; `blocked` is set explicitly when the owner is genuinely needed.
+  const formerlyBlocked = [
+    { source: "owner", type: "feature", title: "Add a plate calculator", number: 47, id: 8006 },
+    { source: "user-feedback", type: "bug", title: "Timer stops on lock screen", number: 48, id: 8007 },
+  ] as const;
 
-  it("defaults an in-app third-party report to status:blocked", async () => {
-    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
-      if (init.method === "POST" && url.endsWith("/issues")) {
-        const sent = JSON.parse(init.body as string) as { labels: string[] };
-        expect(sent.labels).toEqual(
-          expect.arrayContaining(["status:blocked", "source:user-feedback"]),
-        );
-        expect(sent.labels).not.toContain("type:bug");
-        return makeResponse({ status: 201, body: { number: 48, id: 8007, labels: sent.labels } });
-      }
-      if (init.method === "PATCH" && url.endsWith("/issues/48")) {
-        return makeResponse({ status: 200, body: {} });
-      }
-      if (init.method === "GET" && url.endsWith("/issues/48")) {
-        return makeResponse({ status: 200, body: { number: 48, id: 8007 } });
-      }
-      return makeResponse({ status: 500 });
+  for (const c of formerlyBlocked) {
+    it(`defaults a ${c.source} ${c.type} to status:ready — nothing is auto-routed to blocked`, async () => {
+      fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+        if (init.method === "POST" && url.endsWith("/issues")) {
+          const sent = JSON.parse(init.body as string) as { labels: string[] };
+          expect(sent.labels).toEqual(
+            expect.arrayContaining(["status:ready", `source:${c.source}`]),
+          );
+          expect(sent.labels).not.toContain(`type:${c.type}`);
+          expect(sent.labels).not.toContain("status:blocked");
+          return makeResponse({ status: 201, body: { number: c.number, id: c.id, labels: sent.labels } });
+        }
+        if (init.method === "PATCH" && url.endsWith(`/issues/${c.number}`)) {
+          return makeResponse({ status: 200, body: {} });
+        }
+        if (init.method === "GET" && url.endsWith(`/issues/${c.number}`)) {
+          return makeResponse({ status: 200, body: { number: c.number, id: c.id } });
+        }
+        return makeResponse({ status: 500 });
+      });
+      const handler = await getIssueHandler("issue_open");
+      const res = await handler({
+        repo: "octo/repo",
+        title: c.title,
+        type: c.type,
+        source: c.source,
+      });
+      expect(res.isError).toBeFalsy();
     });
-    const handler = await getIssueHandler("issue_open");
-    const res = await handler({
-      repo: "octo/repo",
-      title: "Timer stops on lock screen",
-      type: "bug",
-      source: "user-feedback",
-    });
-    expect(res.isError).toBeFalsy();
-  });
+  }
 
   it("attaches an existing milestone by title without creating a duplicate", async () => {
     let milestonePatched = false;
