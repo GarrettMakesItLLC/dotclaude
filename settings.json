@@ -1,7 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "skillListingMaxDescChars": 200,
-  "outputStyle": "Concise",
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
@@ -21,7 +20,6 @@
     ],
     "defaultMode": "bypassPermissions"
   },
-  "model": "sonnet",
   "hooks": {
     "SessionStart": [
       {
@@ -156,6 +154,7 @@
       }
     }
   },
+  "outputStyle": "Concise",
   "spinnerTipsEnabled": false,
   "effortLevel": "medium",
   "promptSuggestionEnabled": false,
