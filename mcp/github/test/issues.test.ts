@@ -6,11 +6,13 @@ vi.mock("node:child_process", () => ({
 }));
 
 const findProjectItemMock = vi.fn();
+const addProjectItemMock = vi.fn();
 const getProjectFieldMock = vi.fn();
 const setProjectSingleSelectMock = vi.fn();
 const invalidateProjectItemMock = vi.fn();
 vi.mock("../src/project.js", () => ({
   findProjectItem: findProjectItemMock,
+  addProjectItem: addProjectItemMock,
   getProjectField: getProjectFieldMock,
   setProjectSingleSelect: setProjectSingleSelectMock,
   invalidateProjectItem: invalidateProjectItemMock,
@@ -84,6 +86,7 @@ beforeEach(() => {
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
   findProjectItemMock.mockReset();
+  addProjectItemMock.mockReset();
   getProjectFieldMock.mockReset();
   setProjectSingleSelectMock.mockReset();
   invalidateProjectItemMock.mockReset();
@@ -616,12 +619,34 @@ describe("issue_set_effort", () => {
     expect(JSON.parse(res.content[0].text)).toEqual({ number: 9, effort: "standard" });
   });
 
-  it("errors clearly when the issue isn't a project item", async () => {
+  /**
+   * Effort lives on the project, so an issue that is not a project item is a
+   * missing setup step rather than a caller error — and refusing made
+   * `issue_open`'s own `effort` param inert, since nothing adds the issue
+   * between creating it and setting the field (platform#745).
+   */
+  it("adds the issue to the project when it isn't an item yet", async () => {
     findProjectItemMock.mockResolvedValue(null);
+    addProjectItemMock.mockResolvedValue("PVTI_new");
+    getProjectFieldMock.mockResolvedValue({
+      id: "F_effort",
+      name: "Effort",
+      options: [{ id: "O_std", name: "Standard" }],
+    });
+    const handler = await getIssueHandler("issue_set_effort");
+    const res = await handler({ repo: "octo/repo", number: 9, effort: "standard" });
+    expect(res.isError).toBeFalsy();
+    expect(addProjectItemMock).toHaveBeenCalledWith("octo", "repo", 9);
+    expect(setProjectSingleSelectMock).toHaveBeenCalledWith("PVTI_new", "F_effort", "O_std");
+  });
+
+  it("surfaces a failure to add the issue rather than reporting success", async () => {
+    findProjectItemMock.mockResolvedValue(null);
+    addProjectItemMock.mockRejectedValue(new Error("project add refused"));
     const handler = await getIssueHandler("issue_set_effort");
     const res = await handler({ repo: "octo/repo", number: 9, effort: "standard" });
     expect(res.isError).toBe(true);
-    expect(res.content[0].text).toContain("not on the GarrettMakesItLLC — Work project");
+    expect(res.content[0].text).toContain("project add refused");
   });
 });
 
@@ -640,12 +665,19 @@ describe("issue_set_priority", () => {
     expect(JSON.parse(res.content[0].text)).toEqual({ number: 11, priority: "high" });
   });
 
-  it("errors clearly when the issue isn't a project item", async () => {
+  it("adds the issue to the project when it isn't an item yet", async () => {
     findProjectItemMock.mockResolvedValue(null);
+    addProjectItemMock.mockResolvedValue("PVTI_new");
+    getProjectFieldMock.mockResolvedValue({
+      id: "F_priority",
+      name: "Priority",
+      options: [{ id: "O_high", name: "High" }],
+    });
     const handler = await getIssueHandler("issue_set_priority");
     const res = await handler({ repo: "octo/repo", number: 11, priority: "high" });
-    expect(res.isError).toBe(true);
-    expect(res.content[0].text).toContain("not on the GarrettMakesItLLC — Work project");
+    expect(res.isError).toBeFalsy();
+    expect(addProjectItemMock).toHaveBeenCalledWith("octo", "repo", 11);
+    expect(setProjectSingleSelectMock).toHaveBeenCalledWith("PVTI_new", "F_priority", "O_high");
   });
 });
 
