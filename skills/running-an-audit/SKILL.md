@@ -29,6 +29,16 @@ The method is here. The realm checklists are in `references/` — load only the 
 | Growth, ads & conversion instrumentation | `references/growth-ads-conversion.md` |
 | Email & sending-domain deliverability | `references/email-deliverability.md` |
 | Visual anti-slop (product/design counterpart to `avoiding-ai-slop`) | `references/visual-anti-slop.md` |
+| Architecture & code health (boundaries, duplication, docs drift) | `references/architecture-code-health.md` |
+| Test & CI gate integrity (which green checks can go red) | `references/test-ci-gate-integrity.md` |
+| Database & migrations (migration safety, catalog drift, indexes) | `references/database-migrations.md` |
+| Native app (Capacitor wrapper, store compliance) | `references/native-app.md` |
+| Developer experience & agent tooling | `references/developer-experience-agent-tooling.md` |
+| Domain-science validity (formulas, thresholds, cited sources) | `references/domain-science-validity.md` |
+| Observability & cost | `references/observability-cost.md` |
+| Product & spec coherence (tiers, flags, invariants) | `references/product-spec-coherence.md` |
+| i18n, units & time | `references/i18n-units-time.md` |
+| API contract quality | `references/api-contract-quality.md` |
 
 A realm not listed still runs on this method — write the checklist as you go and add the reference file in the same PR. **The table is the index: a file in `references/` missing from it, or a row pointing at no file, is drift and gets fixed in the PR that finds it.**
 
