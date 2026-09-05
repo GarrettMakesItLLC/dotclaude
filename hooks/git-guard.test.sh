@@ -110,30 +110,42 @@ check 0 'rrm -rf /'
 # tree and the index, never the ref namespace. Two agents interleaving push/pop
 # meant one popped the other's entry, with no error from git either time.
 #
-# These run from THIS repo, which has linked worktrees, so the hazard applies.
-check 2 'git stash'
-check 2 'git stash push -m wip'
-check 2 'git stash -u'
-check 2 'git stash pop'
-check 2 'git stash apply'
-check 2 'git stash drop'
-# Reads are fine — seeing the stack is how you discover somebody else's entry.
-check 0 'git stash list'
-check 0 'git stash show'
-# Not a stash at all.
-check 0 'git status'
-check 0 'echo git stash is repo-wide >> notes.md'
+# Run from PURPOSE-BUILT repos, not from wherever the suite happens to be
+# invoked. The rule keys on `git worktree list`, so an ambient cwd makes the
+# answer depend on the developer's shell — green from a worktree, red from a
+# plain checkout, and CI is a plain checkout (#269).
+stash_repo="$(mktemp -d)/multi"
+git init -q "$stash_repo"
+git -C "$stash_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git -C "$stash_repo" worktree add -q "$stash_repo/.worktrees/wt" -b feat 2>/dev/null
+(
+  cd "$stash_repo" || exit 1
+  check 2 'git stash'
+  check 2 'git stash push -m wip'
+  check 2 'git stash -u'
+  check 2 'git stash pop'
+  check 2 'git stash apply'
+  check 2 'git stash drop'
+  # Reads are fine — seeing the stack is how you discover somebody else's entry.
+  check 0 'git stash list'
+  check 0 'git stash show'
+  # Not a stash at all, and prose that merely mentions one.
+  check 0 'git status'
+  check 0 'echo git stash is repo-wide >> notes.md'
+) || fail=1
+rm -rf "$(dirname "$stash_repo")"
 
 # A repo with a single worktree has no sibling to collide with, so stashing is
-# the operator's own business. Run the guard from a throwaway solo repo.
-solo="$(mktemp -d)"
+# the operator's own business.
+solo="$(mktemp -d)/solo"
 git init -q "$solo"
 git -C "$solo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
-solo_got=$(cd "$solo" && printf '%s' 'git stash push -m wip' \
-  | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
-  | "$GUARD" >/dev/null 2>&1; echo $?)
-[ "$solo_got" = 0 ] || { echo "FAIL: want exit 0 for git stash in a solo repo, got $solo_got"; fail=1; }
-rm -rf "$solo"
+(
+  cd "$solo" || exit 1
+  check 0 'git stash push -m wip'
+  check 0 'git stash pop'
+) || fail=1
+rm -rf "$(dirname "$solo")"
 
 if [ "$fail" = 0 ]; then
   echo "git-guard: all cases passed"
