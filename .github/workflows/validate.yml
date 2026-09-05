@@ -179,10 +179,22 @@ jobs:
                   if not os.path.exists(os.path.join(refs_dir, name)):
                       fail.append(f"✗ skills/{skill}/SKILL.md links references/{name} which does not exist")
               # Cross-reference between realm files, same rule.
+              #
+              # A realm file also names docs in the repo BEING AUDITED, which
+              # are not siblings and must not be required to exist here. Two
+              # conventions separate them, and both are load-bearing:
+              #   - a path (`docs/health-signal-policy.md`, `references/x.md`)
+              #     is never a sibling reference;
+              #   - a bare SHOUTY name (`CLAUDE.md`, `ARCHITECTURE.md`) is a
+              #     target-repo root doc. Realm files are lowercase-kebab, so
+              #     the two namespaces cannot collide.
+              # Anything else bare stays checked, which is the ~90 real
+              # cross-references between realms.
+              sibling_ref = re.compile(r'`([a-z0-9][a-z0-9-]*\.md)`')
               for name in sorted(f for f in os.listdir(refs_dir) if f.endswith(".md")):
                   text = open(os.path.join(refs_dir, name)).read()
-                  for target in sorted(set(re.findall(r'`([\w-]+\.md)`', text))):
-                      if target != "SKILL.md" and not os.path.exists(os.path.join(refs_dir, target)):
+                  for target in sorted(set(sibling_ref.findall(text))):
+                      if not os.path.exists(os.path.join(refs_dir, target)):
                           fail.append(f"✗ skills/{skill}/references/{name} names `{target}` which does not exist")
           print("\n".join(fail) if fail else "✓ skill reference links resolve")
           sys.exit(1 if fail else 0)
