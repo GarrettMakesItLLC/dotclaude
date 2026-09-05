@@ -14,9 +14,30 @@ GraphQL: Projects (classic) is being deprecated ... (repository.issue.projectCar
 ```
 
 Working around it meant fragile `gh api` + `jq` pipelines. This server avoids
-both: it talks to the GitHub **REST** API exclusively (never GraphQL) and never
-shells out to `gh api` or depends on `jq`. The only use of `gh` is to obtain an
-auth token (`gh auth token`).
+both: it talks to the GitHub **REST** API for everything that has a REST
+equivalent, and never shells out to `gh api` or depends on `jq`. `gh` itself is
+only used to obtain an auth token (`gh auth token`) and for the handful of
+GraphQL-only operations REST genuinely has no equivalent for — Projects v2
+field/item reads and writes, and `pr_auto_merge`'s `enablePullRequestAutoMerge`
+mutation. Every other tool is REST.
+
+**GraphQL and REST are separate, independently-exhaustible quota buckets**
+(5000/hr each, both scoped to the same account) — `gh api rate_limit --jq
+'.resources'` shows them independently. A heavy multi-agent session can
+exhaust the GraphQL bucket while the REST bucket still has full headroom, and
+the failure (`GraphQL: API rate limit already exceeded` or a "secondary rate
+limit"/"unknown owner type" error) reads like an auth problem, not a quota
+one (#230). If you're reaching for the raw `gh` CLI instead of this MCP
+(there should be little reason to), **avoid `gh pr create`/`gh pr merge`/
+`gh pr view`/`gh pr list`/`gh pr edit`** — all route through GraphQL under the
+hood — in favor of the REST equivalents this server's own tools use:
+
+- Create a PR: `gh api repos/{owner}/{repo}/pulls -X POST -f title=... -f head=... -f base=... -f body=...`
+- Edit a PR: `gh api repos/{owner}/{repo}/pulls/{n} -X PATCH -f title=...` / `-f body=...`
+- Read a PR / its checks: `gh api repos/{owner}/{repo}/pulls/{n}` and `gh api repos/{owner}/{repo}/commits/{sha}/check-runs`
+- List PRs: `gh api "repos/{owner}/{repo}/pulls?base=main&head={owner}:{branch}&state=open"`
+- Merge a PR: `gh api repos/{owner}/{repo}/pulls/{n}/merge -X PUT -f merge_method=squash`
+- Enable auto-merge: no REST equivalent — use this server's `pr_auto_merge`, or `gh api graphql` directly with the `enablePullRequestAutoMerge` mutation if the MCP is unavailable.
 
 ## Requirements
 
@@ -141,7 +162,7 @@ Claims:
 Labels:
 
 - `labels_ensure` — idempotently provision the canonical taxonomy (`status:*`,
-  `source:*`, and the markers `epic` / `launch-blocker`) into a repo,
+  `source:*`, and the `launch-blocker` marker) into a repo,
   and retitle GitHub's colliding stock labels (`bug`, `enhancement`,
   `documentation`) as deprecated where they already exist.
 - `labels_audit` — read-only drift report: missing canonical labels, stock

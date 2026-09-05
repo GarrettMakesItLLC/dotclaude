@@ -6,11 +6,13 @@ vi.mock("node:child_process", () => ({
 }));
 
 const findProjectItemMock = vi.fn();
+const addProjectItemMock = vi.fn();
 const getProjectFieldMock = vi.fn();
 const setProjectSingleSelectMock = vi.fn();
 const invalidateProjectItemMock = vi.fn();
 vi.mock("../src/project.js", () => ({
   findProjectItem: findProjectItemMock,
+  addProjectItem: addProjectItemMock,
   getProjectField: getProjectFieldMock,
   setProjectSingleSelect: setProjectSingleSelectMock,
   invalidateProjectItem: invalidateProjectItemMock,
@@ -84,6 +86,7 @@ beforeEach(() => {
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
   findProjectItemMock.mockReset();
+  addProjectItemMock.mockReset();
   getProjectFieldMock.mockReset();
   setProjectSingleSelectMock.mockReset();
   invalidateProjectItemMock.mockReset();
@@ -583,6 +586,84 @@ describe("issue_set_status", () => {
     expect(res.isError).toBeFalsy();
     expect(JSON.parse(res.content[0].text).labels).toContain("status:waiting");
   });
+
+  /**
+   * A bulk triage sweep re-blocked an issue an hour after the owner had cleared
+   * it, and his answer then sat unread (#315). Warned rather than refused: the
+   * sweep may be right, and failing hard mid-sweep is its own mess — the point
+   * is that it cannot be silent.
+   */
+  describe("re-blocking an answered issue", () => {
+    const respondWith = (body: string) =>
+      async (url: string, init: { method?: string; body?: string }) => {
+        if (init.method === "GET" && url.endsWith("/issues/6376")) {
+          return makeResponse({ status: 200, body: { labels: [{ name: "status:ready" }], body } });
+        }
+        if (init.method === "PUT" && url.endsWith("/labels")) {
+          const sent = JSON.parse(init.body as string).labels as string[];
+          return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+        }
+        return makeResponse({ status: 500 });
+      };
+
+    it("warns when status:blocked lands on an issue with a ticked owner-action box", async () => {
+      fetchMock.mockImplementation(respondWith("## ⛔ Owner action required\n\n- [x] Option 1"));
+      const handler = await getIssueHandler("issue_set_status");
+      const res = await handler({ repo: "octo/repo", number: 6376, status: "blocked" });
+
+      const out = JSON.parse(res.content[0].text) as { labels: string[]; _warnings?: string[] };
+      // The write still happens — this is a warning, not a gate.
+      expect(res.isError).toBeFalsy();
+      expect(out.labels).toContain("status:blocked");
+      expect(out._warnings?.[0]).toMatch(/ticked owner-action box/);
+      expect(out._warnings?.[0]).toMatch(/buries that answer/);
+    });
+
+    it("stays quiet when nothing has been answered", async () => {
+      fetchMock.mockImplementation(respondWith("## ⛔ Owner action required\n\n- [ ] Option 1"));
+      const handler = await getIssueHandler("issue_set_status");
+      const res = await handler({ repo: "octo/repo", number: 6376, status: "blocked" });
+      expect(JSON.parse(res.content[0].text)).not.toHaveProperty("_warnings");
+    });
+
+    it("stays quiet for any status other than blocked", async () => {
+      // Moving an answered issue to ready or in-progress is acting ON the
+      // answer, which is the behaviour this wants, not the one it guards.
+      fetchMock.mockImplementation(respondWith("- [x] Option 1"));
+      const handler = await getIssueHandler("issue_set_status");
+      for (const status of ["ready", "in-progress"]) {
+        const res = await handler({ repo: "octo/repo", number: 6376, status });
+        expect(JSON.parse(res.content[0].text), status).not.toHaveProperty("_warnings");
+      }
+    });
+  });
+
+  /**
+   * `status:backlog` was retired from the taxonomy but is still on issues filed
+   * before it went — so it has to be stripped like any other status label.
+   * Stripping only the live names leaves the issue wearing two at once, which
+   * is exactly the invariant a single `status:*` label exists to hold.
+   */
+  it("strips a retired status:* label instead of leaving the issue wearing two", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "GET" && url.endsWith("/issues/3365")) {
+        return makeResponse({
+          status: 200,
+          body: { labels: [{ name: "status:backlog" }, { name: "type:task" }] },
+        });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        const sent = JSON.parse(init.body as string).labels as string[];
+        expect(sent).toEqual(["type:task", "status:ready"]);
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_set_status");
+    const res = await handler({ repo: "octo/repo", number: 3365, status: "ready" });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text).labels).not.toContain("status:backlog");
+  });
 });
 
 describe("issue_set_type", () => {
@@ -616,12 +697,34 @@ describe("issue_set_effort", () => {
     expect(JSON.parse(res.content[0].text)).toEqual({ number: 9, effort: "standard" });
   });
 
-  it("errors clearly when the issue isn't a project item", async () => {
+  /**
+   * Effort lives on the project, so an issue that is not a project item is a
+   * missing setup step rather than a caller error — and refusing made
+   * `issue_open`'s own `effort` param inert, since nothing adds the issue
+   * between creating it and setting the field (platform#745).
+   */
+  it("adds the issue to the project when it isn't an item yet", async () => {
     findProjectItemMock.mockResolvedValue(null);
+    addProjectItemMock.mockResolvedValue("PVTI_new");
+    getProjectFieldMock.mockResolvedValue({
+      id: "F_effort",
+      name: "Effort",
+      options: [{ id: "O_std", name: "Standard" }],
+    });
+    const handler = await getIssueHandler("issue_set_effort");
+    const res = await handler({ repo: "octo/repo", number: 9, effort: "standard" });
+    expect(res.isError).toBeFalsy();
+    expect(addProjectItemMock).toHaveBeenCalledWith("octo", "repo", 9);
+    expect(setProjectSingleSelectMock).toHaveBeenCalledWith("PVTI_new", "F_effort", "O_std");
+  });
+
+  it("surfaces a failure to add the issue rather than reporting success", async () => {
+    findProjectItemMock.mockResolvedValue(null);
+    addProjectItemMock.mockRejectedValue(new Error("project add refused"));
     const handler = await getIssueHandler("issue_set_effort");
     const res = await handler({ repo: "octo/repo", number: 9, effort: "standard" });
     expect(res.isError).toBe(true);
-    expect(res.content[0].text).toContain("not on the GarrettMakesItLLC — Work project");
+    expect(res.content[0].text).toContain("project add refused");
   });
 });
 
@@ -640,12 +743,19 @@ describe("issue_set_priority", () => {
     expect(JSON.parse(res.content[0].text)).toEqual({ number: 11, priority: "high" });
   });
 
-  it("errors clearly when the issue isn't a project item", async () => {
+  it("adds the issue to the project when it isn't an item yet", async () => {
     findProjectItemMock.mockResolvedValue(null);
+    addProjectItemMock.mockResolvedValue("PVTI_new");
+    getProjectFieldMock.mockResolvedValue({
+      id: "F_priority",
+      name: "Priority",
+      options: [{ id: "O_high", name: "High" }],
+    });
     const handler = await getIssueHandler("issue_set_priority");
     const res = await handler({ repo: "octo/repo", number: 11, priority: "high" });
-    expect(res.isError).toBe(true);
-    expect(res.content[0].text).toContain("not on the GarrettMakesItLLC — Work project");
+    expect(res.isError).toBeFalsy();
+    expect(addProjectItemMock).toHaveBeenCalledWith("octo", "repo", 11);
+    expect(setProjectSingleSelectMock).toHaveBeenCalledWith("PVTI_new", "F_priority", "O_high");
   });
 });
 
@@ -662,6 +772,7 @@ describe("issue_claim", () => {
     branchBody?: unknown;
     prsBody?: unknown;
     commentsBody?: unknown;
+    issueState?: string;
   }) {
     return async (url: string, init: { method?: string; body?: string }) => {
       const method = init.method ?? "GET";
@@ -695,11 +806,13 @@ describe("issue_claim", () => {
         return makeResponse({ status: 201, body: { body: JSON.parse(init.body as string).body } });
       }
       if (method === "GET" && url.endsWith("/issues/8")) {
+        if (opts.issueState === "unreadable") return makeResponse({ status: 500 });
         return makeResponse({
           status: 200,
           body: {
             number: 8,
             title: "Fix the thing!",
+            state: opts.issueState ?? "open",
             labels: [{ name: "status:ready" }, { name: "type:bug" }],
           },
         });
@@ -765,6 +878,158 @@ describe("issue_claim", () => {
     expect(typeof stamp.holder).toBe("string");
     expect(stamp.holder.length).toBeGreaterThan(0);
     expect(new Date(stamp.claimed_at).toString()).not.toBe("Invalid Date");
+  });
+
+  /**
+   * A hostname identifies a BOX, not a holder — several sessions per machine is
+   * the normal case with agent teams. Reading "same machine" as "probably mine"
+   * is how one session force-pushed over another's branch and dropped four
+   * reviewed files (#308). Only a matching SESSION is yours.
+   */
+  describe("who holds the lock", () => {
+    const claimWith = async (stampSession: string | null, mySession: string | null) => {
+      const prev = process.env.CLAIM_SESSION_ID;
+      if (mySession) process.env.CLAIM_SESSION_ID = mySession;
+      else delete process.env.CLAIM_SESSION_ID;
+      const stamp: Record<string, unknown> = {
+        branch: "issue-8-fix-the-thing",
+        holder: "DESKTOP-A51GURL",
+        claimed_at: "2026-07-01T00:00:00.000Z",
+      };
+      if (stampSession) stamp.session = stampSession;
+      const prevMachine = process.env.CLAIM_MACHINE_ID;
+      process.env.CLAIM_MACHINE_ID = "DESKTOP-A51GURL";
+      fetchMock.mockImplementation(
+        mockClaim({
+          refStatus: 422,
+          calls: [],
+          commentsBody: [{ body: `x\n<!-- claim-lock: ${JSON.stringify(stamp)} -->` }],
+        }),
+      );
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+      if (prev === undefined) delete process.env.CLAIM_SESSION_ID;
+      else process.env.CLAIM_SESSION_ID = prev;
+      if (prevMachine === undefined) delete process.env.CLAIM_MACHINE_ID;
+      else process.env.CLAIM_MACHINE_ID = prevMachine;
+      return res.content[0].text;
+    };
+
+    it("says it is YOURS when the session matches", async () => {
+      const text = await claimWith("sess-aaa", "sess-aaa");
+      expect(text).toContain("BY THIS SESSION");
+      expect(text).not.toContain("ANOTHER session");
+    });
+
+    it("says another session on this machine — not 'probably yours'", async () => {
+      const text = await claimWith("sess-bbb", "sess-aaa");
+      expect(text).toContain("ANOTHER session");
+      expect(text).toContain("not yours to resume");
+      expect(text).not.toContain("BY THIS SESSION");
+      // The old copy invited exactly the action that caused the incident.
+      expect(text).not.toMatch(/most likely your own earlier session/);
+    });
+
+    it("names the holding session, so it can be addressed directly", async () => {
+      const text = await claimWith("sess-bbb", "sess-aaa");
+      expect(text).toContain("sess-bbb");
+    });
+
+    it("falls back to machine-level wording for a stamp with no session", async () => {
+      // Stamps written before this existed must keep resolving.
+      const text = await claimWith(null, "sess-aaa");
+      expect(text).toContain("ANOTHER session");
+      expect(text).not.toContain("BY THIS SESSION");
+    });
+
+    it("never claims a lock as yours when this session has no id at all", async () => {
+      const text = await claimWith("sess-bbb", null);
+      expect(text).not.toContain("BY THIS SESSION");
+    });
+  });
+
+  /**
+   * A lock outlives its issue (#300): GitHub deletes a branch when ITS OWN PR
+   * merges, and one PR commonly closes several issues, so every lock but the
+   * PR head survives.
+   *
+   * `issue_claim` already refuses a CLOSED issue before it reaches the ref
+   * POST, so the case that actually reaches the conflict path is a REOPENED
+   * one — open again, with a lock from its previous life still on the remote
+   * naming a holder who finished long ago. The protocol then says "pick
+   * different work" and the issue is unclaimable forever.
+   */
+  describe("a lock left over from the issue's previous life", () => {
+    const reopenedAt = "2026-08-01T00:00:00Z";
+    const timeline = (events: { event: string; created_at: string }[]) =>
+      async (url: string, init: { method?: string; body?: string }) => {
+        if ((init.method ?? "GET") === "GET" && url.includes("/timeline")) {
+          return makeResponse({ status: 200, body: events });
+        }
+        return mockClaim({ refStatus: 422, calls: [], commentsBody: [stampComment] })(url, init);
+      };
+    const stampComment = {
+      body:
+        "🔒 Claimed by `OLD-BOX` at 2026-07-01T00:00:00.000Z (branch `issue-8-fix-the-thing`)\n" +
+        '<!-- claim-lock: {"branch":"issue-8-fix-the-thing","holder":"OLD-BOX","claimed_at":"2026-07-01T00:00:00.000Z"} -->',
+    };
+
+    it("names it a leftover when the stamp predates the reopen", async () => {
+      fetchMock.mockImplementation(timeline([{ event: "reopened", created_at: reopenedAt }]));
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+
+      const text = res.content[0].text;
+      expect(res.isError).toBe(true);
+      expect(text).toContain("REOPENED");
+      expect(text).toContain("leftover");
+      expect(text).toContain("claim_release");
+      // Must NOT send the agent away — that advice is what makes the issue
+      // permanently unclaimable.
+      expect(text).not.toContain("pick different work");
+    });
+
+    it("leaves a claim made AFTER the reopen alone", async () => {
+      fetchMock.mockImplementation(
+        timeline([{ event: "reopened", created_at: "2026-06-01T00:00:00Z" }]),
+      );
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+
+      const text = res.content[0].text;
+      expect(text).toContain("already claimed");
+      expect(text).not.toContain("leftover");
+    });
+
+    it("leaves a never-reopened issue alone", async () => {
+      fetchMock.mockImplementation(timeline([{ event: "labeled", created_at: reopenedAt }]));
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+      expect(res.content[0].text).not.toContain("leftover");
+    });
+
+    it("treats an unreadable timeline as a live claim, never as a leftover", async () => {
+      // Fails safe. The cost of a missed leftover is an issue unstuck by hand;
+      // the cost of a false one is a live claim getting stolen.
+      fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+        if ((init.method ?? "GET") === "GET" && url.includes("/timeline")) {
+          return makeResponse({ status: 500 });
+        }
+        return mockClaim({ refStatus: 422, calls: [], commentsBody: [stampComment] })(url, init);
+      });
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+      expect(res.content[0].text).not.toContain("leftover");
+    });
+
+    it("warns that a quiet branch is not an abandoned one", async () => {
+      fetchMock.mockImplementation(
+        timeline([{ event: "reopened", created_at: "2026-06-01T00:00:00Z" }]),
+      );
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+      expect(res.content[0].text).toMatch(/last_commit_at/);
+    });
   });
 
   it("returns a structured already-claimed failure on a 422 from the ref POST, and never assigns", async () => {
@@ -1043,15 +1308,15 @@ describe("issue_claim", () => {
 });
 
 describe("issue_open", () => {
-  it("composes status/source labels on create, defaults feedback (source set, no status) to status:blocked, and sends the native-type PATCH", async () => {
+  it("composes status/source labels on create, defaults to status:ready even with a source set, and sends the native-type PATCH", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
       if (init.method === "POST" && url.endsWith("/issues")) {
         const sent = JSON.parse(init.body as string) as { labels: string[] };
         expect(sent.labels).toEqual(
-          expect.arrayContaining(["status:blocked", "source:redthread"]),
+          expect.arrayContaining(["status:ready", "source:redthread"]),
         );
         expect(sent.labels).not.toContain("type:bug");
-        expect(sent.labels).not.toContain("status:ready");
+        expect(sent.labels).not.toContain("status:blocked");
         return makeResponse({ status: 201, body: { number: 42, id: 8001, labels: sent.labels } });
       }
       if (init.method === "PATCH" && url.endsWith("/issues/42")) {
@@ -1121,62 +1386,44 @@ describe("issue_open", () => {
     expect(res.isError).toBeFalsy();
   });
 
-  it("still defaults an owner-reported feature to status:blocked — it needs his intent first", async () => {
-    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
-      if (init.method === "POST" && url.endsWith("/issues")) {
-        const sent = JSON.parse(init.body as string) as { labels: string[] };
-        expect(sent.labels).toEqual(
-          expect.arrayContaining(["status:blocked", "source:owner"]),
-        );
-        expect(sent.labels).not.toContain("type:feature");
-        expect(sent.labels).not.toContain("status:ready");
-        return makeResponse({ status: 201, body: { number: 47, id: 8006, labels: sent.labels } });
-      }
-      if (init.method === "PATCH" && url.endsWith("/issues/47")) {
-        return makeResponse({ status: 200, body: {} });
-      }
-      if (init.method === "GET" && url.endsWith("/issues/47")) {
-        return makeResponse({ status: 200, body: { number: 47, id: 8006 } });
-      }
-      return makeResponse({ status: 500 });
-    });
-    const handler = await getIssueHandler("issue_open");
-    const res = await handler({
-      repo: "octo/repo",
-      title: "Add a plate calculator",
-      type: "feature",
-      source: "owner",
-    });
-    expect(res.isError).toBeFalsy();
-  });
+  // The pairs that the retired source/type routing sent to `blocked` on create.
+  // Nothing infers a blocked issue from who filed it or what kind of report it
+  // is any more; `blocked` is set explicitly when the owner is genuinely needed.
+  const formerlyBlocked = [
+    { source: "owner", type: "feature", title: "Add a plate calculator", number: 47, id: 8006 },
+    { source: "user-feedback", type: "bug", title: "Timer stops on lock screen", number: 48, id: 8007 },
+  ] as const;
 
-  it("defaults an in-app third-party report to status:blocked", async () => {
-    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
-      if (init.method === "POST" && url.endsWith("/issues")) {
-        const sent = JSON.parse(init.body as string) as { labels: string[] };
-        expect(sent.labels).toEqual(
-          expect.arrayContaining(["status:blocked", "source:user-feedback"]),
-        );
-        expect(sent.labels).not.toContain("type:bug");
-        return makeResponse({ status: 201, body: { number: 48, id: 8007, labels: sent.labels } });
-      }
-      if (init.method === "PATCH" && url.endsWith("/issues/48")) {
-        return makeResponse({ status: 200, body: {} });
-      }
-      if (init.method === "GET" && url.endsWith("/issues/48")) {
-        return makeResponse({ status: 200, body: { number: 48, id: 8007 } });
-      }
-      return makeResponse({ status: 500 });
+  for (const c of formerlyBlocked) {
+    it(`defaults a ${c.source} ${c.type} to status:ready — nothing is auto-routed to blocked`, async () => {
+      fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+        if (init.method === "POST" && url.endsWith("/issues")) {
+          const sent = JSON.parse(init.body as string) as { labels: string[] };
+          expect(sent.labels).toEqual(
+            expect.arrayContaining(["status:ready", `source:${c.source}`]),
+          );
+          expect(sent.labels).not.toContain(`type:${c.type}`);
+          expect(sent.labels).not.toContain("status:blocked");
+          return makeResponse({ status: 201, body: { number: c.number, id: c.id, labels: sent.labels } });
+        }
+        if (init.method === "PATCH" && url.endsWith(`/issues/${c.number}`)) {
+          return makeResponse({ status: 200, body: {} });
+        }
+        if (init.method === "GET" && url.endsWith(`/issues/${c.number}`)) {
+          return makeResponse({ status: 200, body: { number: c.number, id: c.id } });
+        }
+        return makeResponse({ status: 500 });
+      });
+      const handler = await getIssueHandler("issue_open");
+      const res = await handler({
+        repo: "octo/repo",
+        title: c.title,
+        type: c.type,
+        source: c.source,
+      });
+      expect(res.isError).toBeFalsy();
     });
-    const handler = await getIssueHandler("issue_open");
-    const res = await handler({
-      repo: "octo/repo",
-      title: "Timer stops on lock screen",
-      type: "bug",
-      source: "user-feedback",
-    });
-    expect(res.isError).toBeFalsy();
-  });
+  }
 
   it("attaches an existing milestone by title without creating a duplicate", async () => {
     let milestonePatched = false;

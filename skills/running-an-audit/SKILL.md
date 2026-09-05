@@ -18,25 +18,57 @@ The method is here. The realm checklists are in `references/` — load only the 
 | Feature completeness & gap analysis | `references/feature-completeness.md` |
 | Competitor & market analysis | `references/competitor-analysis.md` |
 | Data integrity & safety-critical paths | `references/data-integrity-safety.md` |
-| Performance & operability | `references/performance-ops.md` |
+| Performance & operability (server side) | `references/performance-ops.md` |
+| Client delivery & perceived performance | `references/web-delivery-performance.md` |
+| Resilience & dependency concentration | `references/resilience-dependencies.md` |
 | UX coherence | `references/ux-coherence.md` |
+| Responsive & mobile | `references/responsive-mobile.md` |
+| Site hygiene & launch tells | `references/site-hygiene-launch-tells.md` |
 | SEO & metadata | `references/seo-metadata.md` |
+| Answer-engine visibility (GEO) | `references/answer-engine-visibility.md` |
+| Growth, ads & conversion instrumentation | `references/growth-ads-conversion.md` |
+| Email & sending-domain deliverability | `references/email-deliverability.md` |
 | Visual anti-slop (product/design counterpart to `avoiding-ai-slop`) | `references/visual-anti-slop.md` |
 
-A realm not listed still runs on this method — write the checklist as you go and add the reference file in the same PR.
+A realm not listed still runs on this method — write the checklist as you go and add the reference file in the same PR. **The table is the index: a file in `references/` missing from it, or a row pointing at no file, is drift and gets fixed in the PR that finds it.**
+
+Several realms deliberately share a surface and must not each re-derive it. Where two files name the same finding, file it once in the more severe realm and tag the other — the pairs that recur are client-rendered marketing pages (`web-delivery-performance` / `seo-metadata` / `answer-engine-visibility`), consent-gated tags (`growth-ads-conversion` / `privacy-data-processing`), fabricated proof and metrics (`visual-anti-slop` / `legal-compliance` / `data-integrity-safety`), and icon-button naming (`accessibility` / `ux-coherence`).
 
 ## The two laws
 
 **1. Gate it, or it recurs.** A finding whose fix ships without a check that fails on its return will be found again by the next audit — and the fix will be written again, slightly differently, next to the last one. Every finding's issue names its gate: the test, the lint rule, the CI job, or the generated-artifact drift check that makes the finding un-reintroducible. Where a finding genuinely cannot be gated (owner action, a judgement call, an external dashboard), the issue says so explicitly. "Fixed" without a gate is a deferral dressed as a resolution.
 
-**2. Verify the guard fires.** A guard that exists and never runs is the most expensive outcome available: it converts an open problem into a false pass. Before trusting any check — existing or newly added — confirm it goes red. Dry-run the rule against known-bad input, or break the thing on purpose once. Specifically look for `continue-on-error`, a job that isn't a required check, a lint override whose glob doesn't match the files, an invariant with no enabled-path coverage, and a report generator whose every severity bucket is empty.
+**2. Verify the guard fires.** A guard that exists and never runs is the most expensive outcome available: it converts an open problem into a false pass. Before trusting any check — existing or newly added — confirm it goes red. Dry-run the rule against known-bad input, or break the thing on purpose once.
+
+**A pass is only evidence once a known-bad input has been shown to fail.** Two ways a green result means nothing, both observed:
+
+- **The subject was exempt.** Many guards carry a legitimate exemption — a config repo whose own files are the live config, a path allow-list, a branch filter. Running the check against an exempted subject returns a pass that says nothing about the check, and reads exactly like "does not reproduce."
+- **The subject was stale.** A hook, skill, shared action, or vendored config that is behind its source produces failures that look like defects in the thing under test. **`git log -1 -- <the file that misbehaved>` is the one-line disproof**, and it is the same check as comparing an installed version against the lockfile — pointed at your tooling instead of your dependencies. Run it before reporting any tool as broken; a correct diagnosis of a stale artifact is still a wrong finding. Specifically look for `continue-on-error`, a job that isn't a required check, a lint override whose glob doesn't match the files, an invariant with no enabled-path coverage, and a report generator whose every severity bucket is empty.
+
+The general shape, which is not limited to CI: **a valid, well-formed, correctly-sized artifact whose content is absent, where nothing failed.** It is worth checking for by name, because every instance looks like success:
+
+- A guard that reads a parsed corpus — the *correct* design — and scans zero fields, because a heading was renamed or a glob stopped matching.
+- A reachability check that asserts a route is *registered* while its built artifact is missing.
+- A permission guard that is implemented, correct, and covered by passing tests, and attached to no production route.
+- A rewrite that answers `200` with the homepage for a path that does not exist, so `llms.txt` and `sitemap.xml` return success and HTML.
+- An error path that converts every failure into a silent `false`, making the `catch` blocks downstream of it unreachable.
+- A media pipeline returning a correctly-sized, correctly-encoded, silent audio buffer.
+
+**The same shape occurs across an API boundary, where it is harder to see and the only available check is different.** A write to an external system can be accepted, answered `200`, and not do what it was asked:
+
+- A provisioning endpoint that accepts a field its own SDK documents, returns a well-formed object, and silently drops it — creating the resource in the opposite state from the one requested.
+- A configuration write whose success response reports the value sent rather than the value stored.
+
+So for any step that writes to a system you do not control — DNS, an ESP, an ad platform, a payment provider, a hosting API — the question is: **does the write API confirm the field it accepted?** A mutation *reporting* success is not evidence. Only a read-back is. Where an audit's own remediation includes a provisioning step, the step is not complete until re-read.
+
+**And the sharper form of the rule: ask whether the expected size is derived from something the same edit cannot change.** A non-empty assertion is not enough — the worst instances are *partially* vacuous, where a real corpus is scanned and one field is missed, so no count looks wrong. A floor typed into the test is a floor someone lowers when it fails; a floor read from the filename, from a declaration inside the document, or from the router breaks that loop. Prefer an expectation the change under test cannot reach.
 
 ## Scope before you look
 
 Write these four down before reading any code. An audit that starts by reading code produces a list of whatever happened to be interesting.
 
 - **The question**, in one sentence, answerable yes/no or as a gap list.
-- **The target**, nameable and pinnable: `origin/main @ <sha>`, a deploy URL, a released artifact — not "the app". A finding against an unnamed target can't be reproduced or retired.
+- **The target**, nameable and pinnable: `origin/<branch> @ <sha>`, a deploy URL, a released artifact — not "the app". A finding against an unnamed target can't be reproduced or retired. **Name the branch, and resolve the sha from that branch explicitly** — a repo's default branch is often `dev`, so `commits/HEAD` gives you `origin/dev` while you write `origin/main`, and every finding then points at a tree the reader cannot check out. Verify the sha is on the branch you claim before dispatching.
 - **The realms** in scope, and the ones deliberately out.
 - **The depth**, below.
 

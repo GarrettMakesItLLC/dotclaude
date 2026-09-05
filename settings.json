@@ -20,7 +20,6 @@
     ],
     "defaultMode": "bypassPermissions"
   },
-  "model": "sonnet",
   "hooks": {
     "SessionStart": [
       {
@@ -125,7 +124,9 @@
     "serena@claude-plugins-official": true,
     "context7@claude-plugins-official": true,
     "chrome-devtools-mcp@claude-plugins-official": true,
-    "impeccable@impeccable": true
+    "impeccable@impeccable": true,
+    "ui-ux-pro-max@ui-ux-pro-max-skill": true,
+    "marketing-skills@marketingskills": true
   },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
@@ -139,8 +140,21 @@
         "source": "github",
         "repo": "pbakaus/impeccable"
       }
+    },
+    "ui-ux-pro-max-skill": {
+      "source": {
+        "source": "github",
+        "repo": "nextlevelbuilder/ui-ux-pro-max-skill"
+      }
+    },
+    "marketingskills": {
+      "source": {
+        "source": "github",
+        "repo": "coreyhaines31/marketingskills"
+      }
     }
   },
+  "outputStyle": "Concise",
   "spinnerTipsEnabled": false,
   "effortLevel": "medium",
   "promptSuggestionEnabled": false,
