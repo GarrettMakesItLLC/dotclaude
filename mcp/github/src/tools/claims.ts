@@ -94,8 +94,35 @@ export function registerClaimTools(server: McpServer): void {
           });
         }
 
+        const pulls = await pullsForBranch(owner, name, target);
+
+        // Deleting a branch that heads an OPEN pull request closes that PR.
+        // That is a different act from dropping an abandoned ref, and `force`
+        // does not authorise it: force says "these commits are disposable",
+        // never "close the review somebody has open on them" (#299, where a
+        // forced release took twelve commits and an open PR with them, and the
+        // work survived only because a local worktree still had it).
+        //
+        // Refused even under force, because there is a cheap correct order —
+        // close the PR, then release — and no way to undo the alternative.
+        const openPr = pulls.find((p) => !p.merged_at && p.state === "open");
+        if (openPr) {
+          return structuredError({
+            released: false,
+            reason: "open-pull-request",
+            issue: number,
+            branch: target,
+            pull_request: { number: openPr.number, html_url: openPr.html_url },
+            holder: await claimHolder(owner, name, target),
+            message:
+              `Refusing to release "${target}": PR #${openPr.number} is open against it, and ` +
+              "deleting the ref would close that PR. `force` covers disposable commits, not an " +
+              "open review. Close or merge the PR first, then release — or if the PR is the " +
+              "thing you meant to discard, close it explicitly so that is on the record.",
+          });
+        }
+
         if (comparison.ahead_by > 0 && !force) {
-          const pulls = await pullsForBranch(owner, name, target);
           const merged = pulls.find((p) => p.merged_at);
           if (!merged) {
             return structuredError({
