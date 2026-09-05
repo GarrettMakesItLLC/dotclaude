@@ -133,7 +133,12 @@ Issues:
   standard/complex) or Priority (urgent/high/medium/low) field on the shared
   GarrettMakesItLLC — Work project. The issue must already be a project item.
 - `issue_set_milestone` / `milestone_ensure` — attach an issue to a milestone,
-  finding or creating it by title.
+  finding or creating it by title. `milestone_ensure`'s title match decodes
+  HTML entities on both sides first, so `Foo &amp; Bar` and `Foo & Bar`
+  resolve to the same milestone instead of creating a duplicate.
+- `milestone_update` / `milestone_delete` — update a milestone's title,
+  state, description, or due date (e.g. close an exhausted one), or delete
+  it outright.
 - `issue_add_sub_issue` / `issue_list_sub_issues` — manage parent/child issue
   relationships. Parent and child may be in different repos in the same org —
   pass `sub_repo` on `issue_add_sub_issue` (and `parent_repo` on `issue_open`)
