@@ -27,6 +27,33 @@ print(json.dumps({"tool_name":sys.argv[1],"tool_input":{sys.argv[2]:sys.argv[3]}
   fi
 }
 
+# --- the guard must fail CLOSED when its own extractor is broken (#319).
+# A misplaced import once switched the whole guard off: empty output was
+# indistinguishable from "this command writes nothing", so every BLOCK case
+# silently passed as allowed. Proven by breaking a copy on purpose.
+BROKEN="$TMP/guard-broken.sh"
+sed 's/^import json, os, re, shlex, sys$/&\nraise RuntimeError("deliberate breakage")/' \
+  "$GUARD" > "$BROKEN"
+chmod +x "$BROKEN"
+broken_got=$(python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"echo hello"}}))
+' | "$BROKEN" >/dev/null 2>&1; echo $?)
+if [ "$broken_got" != "2" ]; then
+  echo "FAIL: want 2, got $broken_got for a BROKEN extractor (must fail closed, #319)"
+  fail=1
+fi
+# And the same input through the real guard is allowed, so the case above is
+# measuring the breakage rather than the command.
+healthy_got=$(python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"echo hello"}}))
+' | "$GUARD" >/dev/null 2>&1; echo $?)
+if [ "$healthy_got" != "0" ]; then
+  echo "FAIL: want 0, got $healthy_got for 'echo hello' through a healthy guard"
+  fail=1
+fi
+
 # --- convention repo: .worktrees/ gitignored, one commit, one linked worktree
 CONV="$TMP/conv"
 mkdir -p "$CONV"

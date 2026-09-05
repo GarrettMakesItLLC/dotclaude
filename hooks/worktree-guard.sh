@@ -96,7 +96,13 @@ command -v python3 >/dev/null 2>&1 || exit 0
 # classes, str.strip(), etc. all do). Input travels via an env var, not stdin —
 # the heredoc IS python3's stdin (that's how `python3 -` gets its script), so
 # piping JSON in on top of it would just be discarded.
-candidates="$(INPUT_JSON="$input" python3 - <<'PYEOF' 2>/dev/null
+# The extractor's stderr is kept, not discarded. An error in it used to be
+# indistinguishable from "this command writes nothing": empty output, exit 0,
+# every write allowed. A misplaced `import` while fixing #295 silently switched
+# the whole guard off and flipped every BLOCK case in the self-test to
+# pass-as-allowed — nothing in a real session would have shown it (#319).
+guard_err="$(mktemp 2>/dev/null || echo /tmp/worktree-guard-err.$$)"
+candidates="$(INPUT_JSON="$input" python3 - <<'PYEOF' 2>"$guard_err"
 import json, os, re, shlex, sys
 
 try:
@@ -370,6 +376,35 @@ else:
 sys.stdout.write("\n".join(o for o in out if "\n" not in o))
 PYEOF
 )"
+extract_status=$?
+
+# "No interpreter" and "the extractor crashed" are different states, and the
+# difference is what makes failing closed safe here.
+#
+# No python3 at all: the guard cannot run, and blocking every Bash write on the
+# machine would be worse than the drift it prevents. Stay open, as before.
+#
+# python3 present and the script failed: that is a bug in this guard, not a
+# clean bill of health for the command. Block, and print what broke — a guard
+# that quietly stops guarding is worse than no guard, because the protection is
+# assumed.
+if [ "$extract_status" -ne 0 ] && command -v python3 >/dev/null 2>&1; then
+  echo "⛔ dotclaude worktree-guard could not inspect this command, so it is refusing it." >&2
+  echo "Reason: the write-target extractor exited $extract_status. That is a bug in the" >&2
+  echo "  guard, not a verdict on your command — but it cannot tell a safe write from an" >&2
+  echo "  unsafe one while it is broken, so it fails closed rather than waving everything" >&2
+  echo "  through (#319)." >&2
+  if [ -s "$guard_err" ]; then
+    echo "Extractor error:" >&2
+    sed 's/^/    /' "$guard_err" >&2
+  fi
+  echo "Fix: repair hooks/worktree-guard.sh. To get unblocked meanwhile, re-run with" >&2
+  echo "  WORKTREE_GUARD_OFF=1 set — and please file the error above, because every" >&2
+  echo "  session on this machine is hitting it." >&2
+  rm -f "$guard_err"
+  exit 2
+fi
+rm -f "$guard_err"
 
 [ -z "$candidates" ] && exit 0
 
