@@ -209,19 +209,26 @@ EOF"
 # Should ALLOW — chained cd's (cd a && cd b) accumulate into the worktree.
 check 0 Bash command "cd $CONV && cd .worktrees/wt && echo hi > notes.md"
 
-# Should ALLOW — an unresolvable `cd` target (a variable) makes the guard
-# refuse to judge anything relative afterward, rather than guess a root.
 # An unresolvable `cd` still BLOCKS: the destination is unknowable, and
-# unknowable is the risk — `$VAR` can expand into a sibling worktree. This
-# case used to assert allow, which would have let exactly that through; what
-# was actually wrong was the MESSAGE, which told the operator to use an
-# absolute path they do not have. It now says which case it is (#320).
-check 2 Bash command "cd \$SOME_VAR && echo hi > notes.md"
-check 2 Bash command "cd - && echo hi > notes.md"
+# unknowable is the risk — `$VAR` can expand into a sibling worktree. This case
+# used to assert allow, which would have let exactly that through; what was
+# actually wrong was the MESSAGE, which told the operator to use an absolute
+# path they do not have. It now says which case it is (#320).
+#
+# Run from a KNOWN cwd inside the convention worktree. The guard's verdict on a
+# relative target depends on whether its cwd is an untrusted worktree, so these
+# cases silently measured the developer's shell: green from a plain checkout,
+# red from inside a worktree, and CI is a plain checkout (#269). A test whose
+# answer depends on where it was run is not a test.
+(
+  cd "$CONV/.worktrees/wt" || exit 1
+  check 2 Bash command "cd \$SOME_VAR && echo hi > notes.md"
+  check 2 Bash command "cd - && echo hi > notes.md"
 
-# Should still BLOCK — an ABSOLUTE write-target after an unresolvable `cd`
-# is unaffected (never depended on the tracked base to begin with).
-check 2 Bash command "cd \$SOME_VAR && echo hi > $CONV/src/absolute.md"
+  # An ABSOLUTE write-target after an unresolvable `cd` is unaffected — it never
+  # depended on the tracked base to begin with.
+  check 2 Bash command "cd \$SOME_VAR && echo hi > $CONV/src/absolute.md"
+) || fail=1
 
 # --- MuscleBuddy#3962: a write-target whose LEADING segment is an unexpanded
 # shell expansion decides nothing about which tree it lands in, so climbing it
