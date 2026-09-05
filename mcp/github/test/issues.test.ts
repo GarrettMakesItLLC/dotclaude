@@ -424,6 +424,22 @@ describe("issue_list — PR filtering across pages", () => {
     expect(numbers).toEqual([1, 3, 5, 7]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("projects each issue down to just the requested `fields` (#184)", async () => {
+    fetchMock.mockResolvedValueOnce(
+      makeResponse({
+        status: 200,
+        body: [{ number: 1, title: "fix the thing", state: "open", body: "long body text" }],
+      }),
+    );
+
+    const handler = await getIssueHandler("issue_list");
+    const res = await handler({ repo: "octo/repo", fields: ["number", "state"] });
+
+    expect(res.isError).toBeFalsy();
+    const issues = JSON.parse(res.content[0].text) as Record<string, unknown>[];
+    expect(issues).toEqual([{ number: 1, state: "open" }]);
+  });
 });
 
 describe("issue_update state_reason", () => {
