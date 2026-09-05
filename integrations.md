@@ -159,6 +159,39 @@ Workaround, in order of preference:
 Neither needs a manually-minted `VERCEL_TOKEN`; both exist specifically
 because the MCP can't do this yet.
 
+Standing a project up from nothing needs the CLI form, since there is no
+project to `/env` against yet: write `.vercel/project.json` first to scope the
+CLI, then `npx vercel@58 env add <NAME> <target>` reading the value from stdin.
+This sits directly on `bootstrapping-a-product-repo`'s path — a project needing
+`VITE_*` or a build-time secret set before its first deploy cannot stay inside
+the MCP (#240).
+
+### Railway MCP gap — `update-service` silently drops `source`
+
+`mcp__plugin_railway_railway__update-service` accepts a `source` field, returns
+success, and never applies it:
+
+```
+update-service(serviceId, source: {repo: "GarrettMakesItLLC/SideQuest", branch: "dev"},
+               builder, buildCommand, startCommand, healthcheckPath)
+→ {"updatedFields": ["buildCommand", "startCommand", "healthcheckPath"]}
+```
+
+`source` is absent from `updatedFields`, and `get-service-config` afterwards has
+no `source` key. Passing `source` alone answers "No configuration fields
+provided — nothing to update", so the field is dropped before the update is
+assembled rather than rejected by the API.
+
+**This is the failure mode worth remembering**: connecting a service to its
+GitHub repo is what makes it deployable at all, so a silent drop leaves an
+inert service that reports as configured — a half-provisioned environment that
+looks finished.
+
+**Workaround:** `railway-agent` with the same instruction applies it correctly;
+its trace shows it calling `updateServiceTool` with exactly the config the
+direct tool dropped. So the gap is the direct tool's argument handling, not the
+Railway API. Verify with `get-service-config` either way (#240).
+
 ## Per-project context tools
 
 Registered/installed once per machine by `bootstrap.sh`; which one to reach
