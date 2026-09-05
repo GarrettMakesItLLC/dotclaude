@@ -105,6 +105,36 @@ check 0 'rm -rf "/tmp/x"'
 check 0 'rm -f /etc/foo'
 check 0 'rrm -rf /'
 
+# --- git stash where refs/stash is shared with sibling worktrees (#297, #275).
+# `refs/stash` is ONE repo-wide stack: a linked worktree isolates the working
+# tree and the index, never the ref namespace. Two agents interleaving push/pop
+# meant one popped the other's entry, with no error from git either time.
+#
+# These run from THIS repo, which has linked worktrees, so the hazard applies.
+check 2 'git stash'
+check 2 'git stash push -m wip'
+check 2 'git stash -u'
+check 2 'git stash pop'
+check 2 'git stash apply'
+check 2 'git stash drop'
+# Reads are fine — seeing the stack is how you discover somebody else's entry.
+check 0 'git stash list'
+check 0 'git stash show'
+# Not a stash at all.
+check 0 'git status'
+check 0 'echo git stash is repo-wide >> notes.md'
+
+# A repo with a single worktree has no sibling to collide with, so stashing is
+# the operator's own business. Run the guard from a throwaway solo repo.
+solo="$(mktemp -d)"
+git init -q "$solo"
+git -C "$solo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+solo_got=$(cd "$solo" && printf '%s' 'git stash push -m wip' \
+  | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
+  | "$GUARD" >/dev/null 2>&1; echo $?)
+[ "$solo_got" = 0 ] || { echo "FAIL: want exit 0 for git stash in a solo repo, got $solo_got"; fail=1; }
+rm -rf "$solo"
+
 if [ "$fail" = 0 ]; then
   echo "git-guard: all cases passed"
 fi
