@@ -354,19 +354,57 @@ echo "→ Plugins declared in settings.json (auto-install on next \`claude\` lau
 grep -E '@claude-plugins-official' "$REPO_DIR/settings.json" | sed -E 's/[[:space:]]*"([^"]+)".*/    \1/'
 
 # --------------------------------------------------------------------------
-# The playwright plugin's @playwright/mcp defaults to the 'chrome' channel,
-# which needs a system install at /opt/google/chrome/chrome — root-only, and
-# unavailable in a sandbox like WSL2 without a password prompt. The plugin's
-# own .mcp.json (in the marketplace package, not this repo) has no
-# --browser/--executable-path override, so there's no way to point it at a
-# different channel from here. Pre-fetching the bundled, no-root Chromium
-# build at least makes `npx playwright install chromium` a no-op later —
-# see integrations.md for the remaining gap.
+# Browser MCPs, registered directly instead of through their marketplace
+# plugins.
+#
+# Both plugins default to the Chrome 'stable' channel, which means a system
+# install at /opt/google/chrome/chrome. That is root-only, and `npx playwright
+# install chrome` escalates to a `sudo` password prompt no agent shell can
+# answer — so on WSL2 and any other sandbox, every browser tool failed at the
+# first call with `Chromium distribution 'chrome' is not found`, and there was
+# no way to override it: the channel is fixed in the plugins' own `.mcp.json`,
+# which lives in the marketplace package and is overwritten on refresh
+# (#191, #216, #222, #241).
+#
+# The bundled Chromium needs no root, runs headless here, and speaks CDP — so
+# it satisfies both servers. The plugins are disabled in settings.json and the
+# same upstream packages are registered by hand with the browser spelled out:
+# `--browser chromium` finds Playwright's own build, and chrome-devtools-mcp
+# takes the resolved path because it has no equivalent channel for it.
+#
+# Re-resolved on every bootstrap rather than pinned, since the build directory
+# carries a revision that changes with the Playwright version.
 # --------------------------------------------------------------------------
-if grep -q '"playwright@claude-plugins-official": true' "$REPO_DIR/settings.json" && command -v npx >/dev/null 2>&1; then
+if command -v npx >/dev/null 2>&1; then
   echo
-  echo "→ Pre-fetching bundled Chromium for the playwright plugin (no root needed)"
-  npx --yes playwright install chromium || echo "  WARNING: chromium prefetch failed — run 'npx playwright install chromium' manually" >&2
+  echo "→ Pre-fetching bundled Chromium for the browser MCPs (no root needed)"
+  npx --yes playwright install chromium \
+    || echo "  WARNING: chromium prefetch failed — run 'npx playwright install chromium' manually" >&2
+fi
+
+CHROMIUM_BIN="$(ls -d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux64/chrome 2>/dev/null | tail -1)"
+[ -n "$CHROMIUM_BIN" ] || CHROMIUM_BIN="$(ls -d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux/chrome 2>/dev/null | tail -1)"
+
+if command -v claude >/dev/null 2>&1; then
+  echo
+  echo "→ Registering browser MCPs against the bundled Chromium (user scope)"
+  if [ -z "$CHROMIUM_BIN" ]; then
+    echo "  WARNING: no bundled Chromium found under ~/.cache/ms-playwright — browser MCPs not registered." >&2
+    echo "           Run 'npx playwright install chromium', then re-run bootstrap." >&2
+  else
+    echo "  chromium: $CHROMIUM_BIN"
+    # Removed first, not skipped-if-present: the path carries a revision that
+    # moves with the Playwright version, so a registration from an older
+    # bootstrap points at a directory that no longer exists.
+    claude mcp remove --scope user playwright >/dev/null 2>&1 || true
+    claude mcp add --scope user playwright -- npx -y @playwright/mcp@latest --browser chromium
+    echo "  registered: playwright (--browser chromium)"
+
+    claude mcp remove --scope user chrome-devtools >/dev/null 2>&1 || true
+    claude mcp add --scope user chrome-devtools -- \
+      npx -y chrome-devtools-mcp@latest --executablePath "$CHROMIUM_BIN"
+    echo "  registered: chrome-devtools (--executablePath)"
+  fi
 fi
 
 # --------------------------------------------------------------------------
