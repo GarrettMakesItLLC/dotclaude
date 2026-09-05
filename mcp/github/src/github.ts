@@ -174,8 +174,19 @@ async function ghFetch(
     }
     const res = await fetch(url, { ...init, headers });
 
-    if (res.status === 401 && !retriedAuth) {
-      // Token may be stale — refetch once and retry once.
+    // 401 is an invalid token; 403 is a valid token that lacks a scope. Both
+    // mean the cached one is the wrong credential to be holding, and only the
+    // first was invalidating it.
+    //
+    // That gap is worse than it sounds: granting the missing scope with
+    // `gh auth refresh` changes nothing until the process restarts, and the
+    // error keeps reciting the OLD scope list while `gh auth status` shows the
+    // new one. The two disagree indefinitely and the message points at a
+    // settings page that already looks correct (#302).
+    //
+    // Retried once either way — a second 403 after a fresh token is a real
+    // permission answer, not a stale cache, and must surface.
+    if ((res.status === 401 || res.status === 403) && !retriedAuth) {
       retriedAuth = true;
       cachedToken = null;
       continue;

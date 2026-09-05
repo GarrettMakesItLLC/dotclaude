@@ -73,6 +73,81 @@ describe("claimBranchName", () => {
 });
 
 describe("claim_release", () => {
+  /**
+   * Deleting a branch that heads an OPEN pull request closes that PR. `force`
+   * says "these commits are disposable"; it has never meant "close the review
+   * somebody has open on them" (#299 — a forced release took twelve commits
+   * and an open PR with them, and the work survived only because a local
+   * worktree still had it).
+   */
+  describe("an open pull request against the lock branch", () => {
+    const releaseWith = async (pulls: unknown[], args: Record<string, unknown>) => {
+      let deleted = false;
+      fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+        if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
+        if (init.method === "GET" && url.endsWith("/repos/octo/repo")) {
+          return makeResponse({ status: 200, body: { default_branch: "main" } });
+        }
+        if (init.method === "GET" && url.includes("/compare/")) {
+          return makeResponse({ status: 200, body: { ahead_by: 12, behind_by: 0, status: "ahead" } });
+        }
+        if (init.method === "GET" && url.includes("/pulls")) {
+          return makeResponse({ status: 200, body: pulls });
+        }
+        if (init.method === "GET" && url.endsWith("/issues/12")) {
+          return makeResponse({ status: 200, body: { number: 12, title: "Fix the thing", state: "open", labels: [] } });
+        }
+        if (init.method === "DELETE" && url.includes("/git/refs/heads/")) {
+          deleted = true;
+          return makeResponse({ status: 204 });
+        }
+        if (init.method === "DELETE") return makeResponse({ status: 204 });
+        if (init.method === "PUT" && url.endsWith("/labels")) {
+          return makeResponse({ status: 200, body: [] });
+        }
+        return makeResponse({ status: 500 });
+      });
+      const handler = await getClaimHandler("claim_release");
+      const res = await handler({ repo: "octo/repo", number: 12, ...args });
+      return { out: JSON.parse(res.content[0].text) as Record<string, unknown>, deleted };
+    };
+
+    const openPr = [{ number: 77, html_url: "https://gh/pr/77", state: "open", merged_at: null }];
+
+    it("refuses even under force, and does not delete the ref", async () => {
+      const { out, deleted } = await releaseWith(openPr, { force: true });
+      expect(out.released).toBe(false);
+      expect(out.reason).toBe("open-pull-request");
+      expect(deleted).toBe(false);
+      expect(String(out.message)).toMatch(/would close that PR/);
+    });
+
+    it("names the PR, so the correct order is actionable", async () => {
+      const { out } = await releaseWith(openPr, {});
+      expect(out.pull_request).toMatchObject({ number: 77 });
+    });
+
+    it("still releases when the only PR is already merged", async () => {
+      // The pre-existing escape hatch: work that landed is safe to drop.
+      const merged = [{ number: 70, html_url: "https://gh/pr/70", state: "closed", merged_at: "2026-09-01T00:00:00Z" }];
+      const { out, deleted } = await releaseWith(merged, {});
+      expect(out.released).toBe(true);
+      expect(deleted).toBe(true);
+    });
+
+    it("still refuses unmerged commits with no PR at all, unless forced", async () => {
+      const none = await releaseWith([], {});
+      expect(none.out.reason).toBe("unmerged-commits");
+      expect(none.deleted).toBe(false);
+      // force remains the documented escape for that case — it is only the
+      // open-PR case it no longer covers.
+      const forced = await releaseWith([], { force: true });
+      expect(forced.out.released).toBe(true);
+      expect(forced.deleted).toBe(true);
+    });
+  });
+
+
   it("deletes the lock ref when the branch is not ahead of the default branch", async () => {
     let deleted = false;
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
