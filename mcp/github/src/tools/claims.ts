@@ -160,19 +160,47 @@ export function registerClaimTools(server: McpServer): void {
         // the audit enforces — done is a closed issue with no status label at
         // all. So a closed issue has its status cleared rather than rewritten.
         let reopenTo: "ready" | undefined = "ready";
+        let keptStatus: string | null = null;
         try {
-          const issue = await ghRequest<{ state?: string }>(
+          const issue = await ghRequest<{ state?: string; labels?: { name: string }[] }>(
             `/repos/${owner}/${name}/issues/${number}`,
           );
-          if (issue.state === "closed") reopenTo = undefined;
+          if (issue.state === "closed") {
+            reopenTo = undefined;
+          } else {
+            // Releasing a claim UNDOES THE CLAIM, and what the claim set was
+            // `status:in-progress`. Anything else on the issue was put there
+            // deliberately by somebody after that, so rewriting it to `ready`
+            // is not a release — it is a downgrade.
+            //
+            // The case that made this bite: one PR closing several issues.
+            // The agent claims each, works on one lock branch, releases the
+            // others — and each released issue, already `in-review` with an
+            // open PR against it, was shown as startable again (#310).
+            const current = (issue.labels ?? [])
+              .map((l) => l.name)
+              .find((n) => n.startsWith("status:"));
+            if (current && current !== "status:in-progress") {
+              reopenTo = undefined;
+              keptStatus = current;
+            }
+          }
         } catch {
           // Unreadable state ⇒ treat it as open, which is the prior behaviour
           // and the far more common case.
         }
 
-        let status: string | null = reopenTo ?? null;
+        // `setIssueStatus(…, undefined)` CLEARS the label, which is right for a
+        // closed issue and wrong for one we are deliberately leaving alone.
+        if (keptStatus) {
+          const releasedNote = `status left as \`${keptStatus}\` — the lock is released, but ` +
+            "something moved this issue past `in-progress` and a release should not rewind that.";
+          warnings.push(releasedNote);
+        }
+
+        let status: string | null = keptStatus ?? reopenTo ?? null;
         try {
-          await setIssueStatus(owner, name, number, reopenTo);
+          if (!keptStatus) await setIssueStatus(owner, name, number, reopenTo);
         } catch (err) {
           status = null;
           const msg = err instanceof Error ? err.message : String(err);

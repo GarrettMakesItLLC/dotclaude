@@ -185,6 +185,71 @@ describe("claim_release", () => {
     expect(deleted).toBe(true);
   });
 
+  /**
+   * Releasing a claim UNDOES THE CLAIM, and what the claim set was
+   * `status:in-progress`. Anything past that was put there deliberately, so
+   * rewriting it to `ready` is a downgrade rather than a release (#310).
+   *
+   * The case that made it bite: one PR closing several issues. The agent
+   * claims each, works one lock branch and releases the rest — and each
+   * released issue, already `in-review` with an open PR against it, was shown
+   * as startable again.
+   */
+  describe("an issue somebody has moved past in-progress", () => {
+    const releaseWithStatus = async (statusLabel: string | null) => {
+      let sentLabels: string[] | undefined;
+      const labels = [{ name: "type:bug" }];
+      if (statusLabel) labels.push({ name: statusLabel });
+      fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+        if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
+        if (init.method === "GET" && url.endsWith("/repos/octo/repo")) {
+          return makeResponse({ status: 200, body: { default_branch: "main" } });
+        }
+        if (init.method === "GET" && url.endsWith("/issues/12")) {
+          return makeResponse({
+            status: 200,
+            body: { number: 12, title: "Fix the thing", state: "open", labels },
+          });
+        }
+        if (init.method === "GET" && url.includes("/compare/")) {
+          return makeResponse({ status: 200, body: { ahead_by: 0, behind_by: 0, status: "identical" } });
+        }
+        if (init.method === "PUT" && url.endsWith("/labels")) {
+          sentLabels = (JSON.parse(init.body ?? "{}") as { labels: string[] }).labels;
+          return makeResponse({ status: 200, body: sentLabels.map((n) => ({ name: n })) });
+        }
+        if (init.method === "DELETE") return makeResponse({ status: 204 });
+        return makeResponse({ status: 500 });
+      });
+      const handler = await getClaimHandler("claim_release");
+      const res = await handler({ repo: "octo/repo", number: 12 });
+      return { out: JSON.parse(res.content[0].text) as { status: string | null; _warnings?: string[] }, sentLabels };
+    };
+
+    it("leaves status:in-review alone, and says so", async () => {
+      const { out, sentLabels } = await releaseWithStatus("status:in-review");
+      expect(out.status).toBe("status:in-review");
+      // The label write must not happen at all — clearing or rewriting are
+      // both wrong here.
+      expect(sentLabels).toBeUndefined();
+      expect(out._warnings?.join(" ")).toMatch(/left as/);
+    });
+
+    it("leaves blocked and waiting alone too", async () => {
+      for (const label of ["status:blocked", "status:waiting"]) {
+        const { out, sentLabels } = await releaseWithStatus(label);
+        expect(out.status, label).toBe(label);
+        expect(sentLabels, label).toBeUndefined();
+      }
+    });
+
+    it("still returns an in-progress issue to ready — that is the claim being undone", async () => {
+      const { out, sentLabels } = await releaseWithStatus("status:in-progress");
+      expect(out.status).toBe("ready");
+      expect(sentLabels).toContain("status:ready");
+    });
+  });
+
   it("returns an OPEN issue to status:ready", async () => {
     let sentLabels: string[] | undefined;
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
