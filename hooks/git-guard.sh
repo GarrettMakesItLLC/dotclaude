@@ -135,4 +135,33 @@ if printf '%s' "$scrubbed" | grep -Eq 'git[[:space:]]+(add|commit|stage|rm)([[:s
   fi
 fi
 
+# 4) `git stash` in a repo that has sibling worktrees. `refs/stash` lives in the
+# common `.git` and is a single repo-wide STACK: a linked worktree isolates the
+# working tree and the index, never the ref namespace. So concurrent agents push
+# onto and pop from one stack, and `stash@{0}` is whoever pushed last.
+#
+# Two agents interleaving push/pop is not hypothetical — one popped the other's
+# entry, a worktree received a foreign change, and the original fix left
+# `refs/stash` for ~248 dangling commits. Neither agent saw an error, because
+# nothing about it is an error to git (#297, #275).
+#
+# Blocked only where the hazard exists: a repo with more than one worktree. A
+# solo checkout stashes freely. `list`/`show` are reads and stay allowed.
+# Anchored to a COMMAND position — start of the string or just after a
+# separator — so `echo git stash is repo-wide >> notes.md` is prose, not an
+# invocation. Reading a command out of running text is how a guard becomes
+# something to work around.
+if printf '%s' "$scrubbed" | grep -Eq '(^|[;&|]|^[[:space:]]*)[[:space:]]*git([[:space:]]+-[^[:space:]]+)*[[:space:]]+stash([[:space:]]|$)'; then
+  stash_verb="$(printf '%s' "$scrubbed" \
+    | perl -0777 -ne 'if (/git(?:\s+-\S+)*\s+stash\s*([a-z-]*)/) { print $1 }')"
+  case "$stash_verb" in
+    list | show) ;;
+    *)
+      if [ "$(git worktree list 2>/dev/null | wc -l)" -gt 1 ]; then
+        block "git stash shares one repo-wide \`refs/stash\` with every worktree of this repo, so a concurrent agent can pop your entry (or you theirs) with no error — that has already cost real work. Commit to your branch instead: a WIP commit is per-branch, visible, and \`git reset --soft HEAD~1\` undoes it. If you genuinely need a stash, name it and pop it by message rather than by index: \`git stash push -m ISSUE\` then \`git stash pop stash@{/ISSUE}\`."
+      fi
+      ;;
+  esac
+fi
+
 exit 0

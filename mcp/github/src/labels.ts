@@ -214,6 +214,25 @@ export const STATUS_LABEL_NAMES: string[] = [
   ...DEPRECATED_LABELS.filter((l) => l.name.startsWith("status:")).map((l) => l.name),
 ];
 
+/**
+ * Whether a label name occupies the `status:` axis at all — the test a status
+ * write strips by.
+ *
+ * Deliberately the PREFIX and not membership of `STATUS_LABEL_NAMES`. The
+ * axis is defined by its namespace, so any `status:*` label is on it whether
+ * or not this file knows the value: a hand-created one, a rename landed on the
+ * repo before the taxonomy caught up, one carried over from another tracker.
+ * An allowlist silently leaves those attached and the issue ends up wearing
+ * two statuses, which is the bug this replaces — and it is a bug that returns
+ * every time the list and the repo drift apart (#257).
+ *
+ * `STATUS_LABEL_NAMES` stays what it is: the set this repo PROVISIONS and
+ * audits against. Stripping is a wider question than provisioning.
+ */
+export function isStatusLabel(name: string): boolean {
+  return name.startsWith("status:");
+}
+
 /** GitHub native issue-type name (title-cased) for a given type label value. */
 export function nativeTypeName(type: IssueType): string {
   return { bug: "Bug", feature: "Feature", task: "Task" }[type];
