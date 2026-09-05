@@ -462,15 +462,38 @@ check_one() {
       esac
       if [ "$cwd_untrusted" = 1 ]; then
         echo "⛔ dotclaude worktree-guard blocked this write." >&2
-        echo "Reason: '$file_path' is relative, so it lands in whatever directory this" >&2
-        echo "  tool call happens to be in — and that cwd is a linked worktree this" >&2
-        echo "  command never entered. An agent's Bash cwd resets between calls and can" >&2
-        echo "  point into a SIBLING agent's worktree, so a relative write is not" >&2
-        echo "  attributable to any tree (see #166)." >&2
-        echo "Fix: name the tree explicitly — either an absolute write-target:" >&2
-        echo "    echo x > /abs/path/to/your/worktree/$file_path" >&2
-        echo "  or lead the command with a cd into it:" >&2
-        echo "    cd /abs/path/to/your/worktree && echo x > $file_path" >&2
+        # A `cd` the guard could not resolve — `cd $VAR`, `cd -`, `cd` bare —
+        # is a different situation from no `cd` at all, and the generic advice
+        # is unfollowable there: "use an absolute path" cannot be done when the
+        # directory legitimately comes from a variable, so the operator is told
+        # to do something impossible and reads the guard as broken (#320).
+        #
+        # It still BLOCKS. The destination is unknowable, and unknowable is the
+        # risk — `$VAR` can expand into a sibling agent's worktree. What changes
+        # is that the message says which of the two it is and what would
+        # actually clear it.
+        # Matched against the raw payload, so the anchor allows any non-word
+        # character before `cd` — the command sits inside JSON, where it is
+        # preceded by a quote rather than by start-of-line.
+        if printf '%s' "$input" | grep -qE '(^|[^a-zA-Z0-9_/.-])cd +("?\$|`|-([ "\\]|$))'; then
+          echo "Reason: '$file_path' is relative, and the \`cd\` before it is one this guard" >&2
+          echo "  cannot resolve — a variable, \`cd -\`, or a bare \`cd\`. So the directory" >&2
+          echo "  this write lands in is not knowable from the command text, and unknowable" >&2
+          echo "  is the risk: a variable can expand into a SIBLING agent's worktree." >&2
+          echo "Fix: expand it yourself, so the tree is named in the command:" >&2
+          echo "    cd \"\$THE_VAR\" && …    ->    cd /abs/path/to/your/worktree && …" >&2
+          echo "  or give the write an absolute target and drop the cd entirely." >&2
+        else
+          echo "Reason: '$file_path' is relative, so it lands in whatever directory this" >&2
+          echo "  tool call happens to be in — and that cwd is a linked worktree this" >&2
+          echo "  command never entered. An agent's Bash cwd resets between calls and can" >&2
+          echo "  point into a SIBLING agent's worktree, so a relative write is not" >&2
+          echo "  attributable to any tree (see #166)." >&2
+          echo "Fix: name the tree explicitly — either an absolute write-target:" >&2
+          echo "    echo x > /abs/path/to/your/worktree/$file_path" >&2
+          echo "  or lead the command with a cd into it:" >&2
+          echo "    cd /abs/path/to/your/worktree && echo x > $file_path" >&2
+        fi
         echo "Policy: ~/dotclaude/CLAUDE.md (Worktree-first). Deliberate?" >&2
         echo "  Re-run with WORKTREE_GUARD_OFF=1 set, or ask the user to run it via ! prefix." >&2
         return 2
