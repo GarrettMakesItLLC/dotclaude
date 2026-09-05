@@ -34,13 +34,19 @@ function makeResponse(opts: {
   const { status, body, headers = {} } = opts;
   const text =
     body === undefined ? "" : typeof body === "string" ? body : JSON.stringify(body);
-  return {
+  const res: Record<string, unknown> = {
     status,
     ok: status >= 200 && status < 300,
     headers: new Headers(headers),
     text: async () => text,
     json: async () => JSON.parse(text),
-  } as unknown as Response;
+  };
+  // Real Responses are single-use, so code that needs to inspect a body it does
+  // not own reads a clone (see the secondary-limit classifier). A stub without
+  // `clone` makes that path silently take its catch branch, and the test then
+  // passes for the wrong reason.
+  res.clone = () => makeResponse(opts);
+  return res as unknown as Response;
 }
 
 // Re-imported fresh in each test so the module-scoped token/repo caches reset.
@@ -511,6 +517,109 @@ describe("token selection", () => {
     } finally {
       delete process.env.GH_TOKEN;
     }
+  });
+});
+
+/**
+ * The secondary (burst/abuse) limit is a different failure from the primary
+ * quota and needs a different response: it arrives as a 403 while
+ * `gh api rate_limit` still reports thousands remaining, so the documented
+ * "sleep until reset" recovery has nothing to sleep until, and six fixed-interval
+ * retries all failed identically (#172).
+ */
+describe("secondary rate limit", () => {
+  const limited = (opts: { headers?: Record<string, string>; body?: unknown } = {}) =>
+    makeResponse({
+      status: 403,
+      headers: opts.headers ?? {},
+      body: opts.body ?? { message: "You have exceeded a secondary rate limit" },
+    });
+
+  it("backs off across REPEATED throttling, which one auth retry cannot cover", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock
+        .mockResolvedValueOnce(limited())
+        .mockResolvedValueOnce(limited())
+        .mockResolvedValueOnce(makeResponse({ status: 200, body: { ok: true } }));
+      const promise = mod.ghRequest<{ ok: boolean }>("/some/path");
+      await vi.runAllTimersAsync();
+      await expect(promise).resolves.toEqual({ ok: true });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      // Same credential throughout — this is not a token problem, and spending
+      // the one auth retry on it leaves nothing for a real 403.
+      const authOf = (call: unknown[]) =>
+        (call[1] as { headers: Record<string, string> }).headers.Authorization;
+      expect(authOf(fetchMock.mock.calls[2])).toBe(authOf(fetchMock.mock.calls[0]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("honours retry-after when GitHub sends one", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock
+        .mockResolvedValueOnce(limited({ headers: { "retry-after": "5" }, body: {} }))
+        .mockResolvedValueOnce(makeResponse({ status: 200, body: { ok: true } }));
+      const promise = mod.ghRequest("/some/path");
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1_500);
+      await promise;
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a PRIMARY-quota 403 alone — that one has a real reset to wait for", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        makeResponse({
+          status: 403,
+          headers: { "x-ratelimit-remaining": "0" },
+          body: { message: "API rate limit exceeded" },
+        }),
+      )
+      .mockResolvedValueOnce(makeResponse({ status: 200, body: { ok: true } }));
+    // Falls through to the auth retry, as before — one retry, then the answer.
+    await expect(mod.ghRequest("/some/path")).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after bounded backoff instead of retrying forever", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockResolvedValue(limited());
+      const promise = mod.ghRequest("/some/path").catch((e: Error) => e);
+      await vi.runAllTimersAsync();
+      const err = (await promise) as Error;
+      expect(err).toBeInstanceOf(Error);
+      // Three backoffs plus the auth retry — more attempts than the single
+      // retry that existed before, and still bounded.
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(4);
+      expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(6);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("explains the GraphQL form, which arrives as a 200 and is never retried", async () => {
+    // A write may already have taken effect, so a blind retry is worse than an
+    // honest failure — the message has to carry the recovery instead.
+    fetchMock.mockResolvedValue(
+      makeResponse({
+        status: 200,
+        body: { errors: [{ message: "API rate limit already exceeded for user ID 187915592." }] },
+      }),
+    );
+    const err = await mod.ghGraphQL("mutation { x }").catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toMatch(/SECONDARY/);
+    expect((err as Error).message).toMatch(/wait for checks to go/);
+    // One call: a write that may already have landed is not retried blindly.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

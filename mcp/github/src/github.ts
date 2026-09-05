@@ -258,6 +258,7 @@ async function ghFetch(
   init: RequestInit & { body?: string } = {},
 ): Promise<Response> {
   let retriedAuth = false;
+  let throttled = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const token = await getToken();
@@ -266,6 +267,26 @@ async function ghFetch(
       headers["Content-Type"] = "application/json";
     }
     const res = await fetch(url, { ...init, headers });
+
+    // The SECONDARY limit, which is a different thing from the quota
+    // `gh api rate_limit` reports and needs a different response. It throttles
+    // bursts of mutations under concurrent-agent load while the primary quota
+    // still shows thousands remaining — so the documented "check rate_limit and
+    // sleep until reset" recovery has nothing to sleep until, and six retries
+    // at a fixed 60s all failed identically (#172).
+    //
+    // Classified before the 401/403 branch below, because it arrives as a 403
+    // and would otherwise be read as a stale credential and burn the one auth
+    // retry on a problem no token can fix.
+    if (await isSecondaryLimit(res) && throttled < THROTTLE_BACKOFF_MS.length) {
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : THROTTLE_BACKOFF_MS[throttled];
+      throttled += 1;
+      await sleep(waitMs);
+      continue;
+    }
 
     // 401 is an invalid token; 403 is a valid token that lacks a scope. Both
     // mean the cached one is the wrong credential to be holding, and only the
@@ -286,6 +307,38 @@ async function ghFetch(
     }
 
     return res;
+  }
+}
+
+/**
+ * Backoff for the secondary limit, in ms. Bounded and short: this is a burst
+ * throttle that clears in seconds, and a caller waiting on a tool call is worse
+ * served by a long sleep than by an error saying what to do instead.
+ */
+const THROTTLE_BACKOFF_MS = [2_000, 8_000, 20_000];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** The phrases GitHub uses for the secondary limit, across REST and GraphQL. */
+const SECONDARY_LIMIT_RE =
+  /secondary rate limit|abuse detection|rate limit already exceeded|exceeded a secondary/i;
+
+/**
+ * Whether a response is the secondary limit rather than a permission problem or
+ * the primary quota. Reads a CLONE so the caller still gets an unconsumed body.
+ */
+async function isSecondaryLimit(res: Response): Promise<boolean> {
+  if (res.status !== 403 && res.status !== 429) return false;
+  if (res.headers.get("retry-after")) return true;
+  // `x-ratelimit-remaining: 0` with a 403 is the PRIMARY quota, which is a
+  // different failure with a real reset time — not this.
+  if (res.headers.get("x-ratelimit-remaining") === "0") return false;
+  try {
+    return SECONDARY_LIMIT_RE.test(await res.clone().text());
+  } catch {
+    return false;
   }
 }
 
@@ -383,7 +436,24 @@ export async function ghGraphQL<T = unknown>(
 
   const body = (await res.json()) as GraphQLResponse<T>;
   if (body.errors?.length) {
-    throw new Error(`GitHub GraphQL error: ${body.errors.map((e) => e.message).join("; ")}`);
+    const detail = body.errors.map((e) => e.message).join("; ");
+    // GraphQL reports the secondary limit as a 200 carrying an error, so the
+    // HTTP-level handling in `ghFetch` never sees it. Not retried here — the
+    // mutation may well have taken effect, and a blind retry on a write is
+    // worse than an honest failure. Said in terms the caller can act on
+    // instead, because the obvious next move (sleep until the reset that
+    // `rate_limit` reports) is the one that cannot work (#172).
+    if (SECONDARY_LIMIT_RE.test(detail)) {
+      throw new Error(
+        `GitHub GraphQL error: ${detail}\n\n` +
+          "This is the SECONDARY (burst/abuse) limit, not the primary quota — `gh api rate_limit` " +
+          "will still show thousands remaining, and its reset time is not the one to wait for. " +
+          "It clears in seconds to minutes under reduced concurrency. Retry a few times with real " +
+          "backoff; if arming auto-merge is what failed, the fallback is to wait for checks to go " +
+          "green and then merge — never merge now with checks pending.",
+      );
+    }
+    throw new Error(`GitHub GraphQL error: ${detail}`);
   }
   if (body.data === undefined) {
     throw new Error("GitHub GraphQL response had no data");
