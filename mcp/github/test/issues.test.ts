@@ -490,6 +490,54 @@ describe("milestone_ensure", () => {
     const ms = JSON.parse(res.content[0].text) as { number: number };
     expect(ms.number).toBe(4);
   });
+
+  it("normalizes HTML-escaped titles before matching, so an escaped and unescaped title resolve to the same milestone (#212)", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+      if (init.method === "GET" && url.includes("/milestones")) {
+        return makeResponse({
+          status: 200,
+          body: [{ number: 5, title: "Foo &amp; Bar" }],
+        });
+      }
+      return makeResponse({ status: 500, body: { message: "should not create" } });
+    });
+    const handler = await getIssueHandler("milestone_ensure");
+    const res = await handler({ repo: "octo/repo", title: "Foo & Bar" });
+    expect(res.isError).toBeFalsy();
+    const ms = JSON.parse(res.content[0].text) as { number: number };
+    expect(ms.number).toBe(5);
+  });
+});
+
+describe("milestone_update", () => {
+  it("PATCHes the given fields and returns the updated milestone", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "PATCH" && url.endsWith("/milestones/5")) {
+        expect(init.body).toContain('"state":"closed"');
+        return makeResponse({ status: 200, body: { number: 5, title: "v1", state: "closed" } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("milestone_update");
+    const res = await handler({ repo: "octo/repo", number: 5, state: "closed" });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text)).toEqual({ number: 5, title: "v1", state: "closed" });
+  });
+});
+
+describe("milestone_delete", () => {
+  it("DELETEs the milestone and confirms", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+      if (init.method === "DELETE" && url.endsWith("/milestones/5")) {
+        return makeResponse({ status: 204 });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("milestone_delete");
+    const res = await handler({ repo: "octo/repo", number: 5 });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text)).toEqual({ number: 5, deleted: true });
+  });
 });
 
 describe("issue_add_sub_issue", () => {
