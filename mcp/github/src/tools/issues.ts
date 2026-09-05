@@ -35,7 +35,7 @@ import {
   setProjectSingleSelect,
 } from "../project.js";
 import { setIssueStatus } from "../issue-status.js";
-import { labelNames, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";
+import { labelNames, pick, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";
 import {
   acquireClaimLock,
   claimBranchName,
@@ -179,9 +179,17 @@ export function registerIssueTools(server: McpServer): void {
           .optional()
           .describe("Filter to issues having all of these labels."),
         limit: z.number().int().positive().optional().describe("Max issues (<=1000, default 30)."),
+        fields: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Project each issue down to just these keys (e.g. [\"number\",\"title\",\"state\"]) " +
+              "— cuts response size for a dedupe/skim pass across many issues. Omit for the full " +
+              "slimmed shape.",
+          ),
       },
     },
-    async ({ repo, state, labels, limit }) => {
+    async ({ repo, state, labels, limit, fields }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
         // The /issues endpoint mixes in PRs, so filter them out and page until
@@ -197,7 +205,7 @@ export function registerIssueTools(server: McpServer): void {
             filter: (item) => !("pull_request" in item) || !item.pull_request,
           },
         );
-        return jsonText(issuesOnly.map((i) => slimIssue(i)));
+        return jsonText(issuesOnly.map((i) => pick(slimIssue(i), fields)));
       } catch (err) {
         return errorResult(err);
       }
