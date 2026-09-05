@@ -130,6 +130,45 @@ cd .worktrees/bootstrap
 | `package.json`, prettier, markdownlint, commitlint, husky | See the traps below. |
 | `.gitignore` | Add `.worktrees/` and `.claude/settings.local.json` here. |
 | `.editorconfig`, `.claude/settings.json` | |
+| `renovate.json` | Extends the shared preset. Three lines, and it is the difference between dependency currency being a repo-by-repo decision and a fleet default. |
+
+**Dependency currency and vulnerability scanning ship with the scaffold, not later.** Five repos
+independently forgot, and one shipped `continue-on-error: true` on its audit job — which is an audit
+job that cannot fail. Both halves are org-published; neither is worth hand-rolling.
+
+`renovate.json` — the preset lives in `platform` and is referenced by path, not by package name
+(`@garrettmakesitllc/renovate-config` is the npm identity, and `extends` does not resolve it):
+
+```json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["local>GarrettMakesItLLC/platform//packages/renovate-config/index.json"]
+}
+```
+
+A repo needing a version held back adds a `packageRules` entry beside `extends`, with the reason and
+an issue link in its `description` — never by dropping the preset.
+
+The audit gate is a `workflow_call` job in `ci.yml`, wired into `ci-success`'s `needs:` so a
+high/critical advisory blocks the merge instead of appearing in a run summary nobody reads:
+
+```yaml
+  dependency-audit:
+    name: Dependency audit
+    needs: [changes]
+    if: >-
+      needs.changes.outputs.code == 'true' &&
+      needs.changes.outputs.is_draft != 'true'
+    uses: GarrettMakesItLLC/platform/.github/workflows/dependency-audit.yml@main
+    secrets:
+      node-auth-token: ${{ secrets.GMI_PACKAGES_TOKEN }}
+```
+
+Path-filtered like the other code jobs, so add it to `ci-success`'s `allow-skipped` list on the same
+`code != 'true'` condition — a docs-only PR skips it legitimately; anything else skipping it is a
+failure. The workflow takes `audit-level` (default `high`), `working-directory`, `omit-dev`, and an
+`allowlist-node-roots` for a specific understood advisory — reach for the allowlist, never for
+`continue-on-error`.
 
 **Not** `.github/ISSUE_TEMPLATE/` or `.github/PULL_REQUEST_TEMPLATE.md`. `GarrettMakesItLLC/.github`
 supplies those to every repo that does not define its own — a local copy is drift, and it has to be
@@ -179,6 +218,7 @@ A new repo should not carry its own copy of anything the org already publishes:
 | Issue and PR templates | `GarrettMakesItLLC/.github`, automatically |
 | Composite actions, reusable workflows | `GarrettMakesItLLC/ci`, pinned `@v1` — never `@main` |
 | Design system, shared logic, lint/tsconfig | `@gmi/*` from GitHub Packages |
+| Renovate preset, dependency-audit gate | `GarrettMakesItLLC/platform` — see step 6 |
 
 Calling `GarrettMakesItLLC/ci` from a private repo needs Actions access granted, or every `uses:`
 resolves to a 404 that reads like a typo:
@@ -194,7 +234,12 @@ gh api repos/GarrettMakesItLLC/<Name> --jq .default_branch                    # 
 gh api repos/GarrettMakesItLLC/<Name>/rulesets --jq '[.[].name]'              # the three
 gh api "repos/GarrettMakesItLLC/<Name>/labels?per_page=100" --jq length       # 18
 gh pr checks <N> --repo GarrettMakesItLLC/<Name>                              # contexts exist and pass
+gh api repos/GarrettMakesItLLC/<Name>/contents/renovate.json --jq .name       # renovate.json
 ```
+
+`gh pr checks` is also where you confirm `Dependency audit` actually ran. A repo carrying
+`renovate.json` with no audit job gets PRs it never blocks on, which is the half-wired state this
+step exists to prevent.
 
 A repo whose ruleset requires a context that never appeared is worse than an unprotected one: it looks
 protected and cannot merge.
