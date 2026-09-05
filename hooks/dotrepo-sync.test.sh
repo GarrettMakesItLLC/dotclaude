@@ -139,6 +139,87 @@ printf '%s' "$out" | grep -q 'diverged' \
   || { echo "FAIL: diverged repo must not be pulled"; fail=1; }
 rm -rf "$(dirname "$c1")" "$(dirname "$c2")"
 
+# --- pulled sources for a compiled artifact: rebuilds it (#325) ---
+# The github MCP runs from a gitignored `dist/`, so a pull deploys its sources
+# and not the thing executed. Asserted with a stub `npm` on PATH, because what
+# matters is that the build is INVOKED for the right change and skipped for the
+# wrong one — not that a real esbuild ran.
+mcp_pair() {
+  local clone="$1" second
+  second="$(mktemp -d)/second"
+  git clone --quiet "$(git -C "$clone" remote get-url origin)" "$second"
+  git -C "$second" config user.email test@example.com
+  git -C "$second" config user.name test
+  mkdir -p "$second/mcp/github/src"
+  echo '{"name":"m"}' > "$second/mcp/github/package.json"
+  echo 'export const x = 1;' > "$second/mcp/github/src/index.ts"
+  git -C "$second" add mcp
+  git -C "$second" commit --quiet -m mcp
+  git -C "$second" push --quiet origin "HEAD:$(git -C "$clone" rev-parse --abbrev-ref HEAD)"
+  rm -rf "$(dirname "$second")"
+}
+
+# A stub npm that records its invocation. `mode` picks pass or fail.
+stub_npm() {
+  local bin="$1" mode="$2"
+  mkdir -p "$bin"
+  cat > "$bin/npm" <<STUB
+#!/usr/bin/env bash
+echo "npm \$*" >> "$bin/calls"
+[ "$mode" = ok ] && exit 0
+exit 1
+STUB
+  chmod +x "$bin/npm"
+}
+
+c1="$(make_pair)"; c2="$(make_pair)"
+mcp_pair "$c1"
+mkdir -p "$c1/mcp/github/node_modules"
+bin="$(mktemp -d)"; stub_npm "$bin" ok
+out="$(PATH="$bin:$PATH" run "$c1" "$c2")"; code=$?
+[ "$code" = 0 ] || { echo "FAIL(rebuild): must exit 0, got $code"; fail=1; }
+grep -q 'run --silent build' "$bin/calls" 2>/dev/null \
+  || { echo "FAIL(rebuild): should have run the MCP build, calls: $(cat "$bin/calls" 2>/dev/null)"; fail=1; }
+printf '%s' "$out" | grep -q 'rebuilt github MCP' \
+  || { echo "FAIL(rebuild): should report the rebuild, got: $out"; fail=1; }
+rm -rf "$bin" "$(dirname "$c1")" "$(dirname "$c2")"
+
+# --- a pull that does not touch those sources: no build ---
+# Rebuilding on every pull would add seconds to every session start for nothing.
+c1="$(make_pair)"; c2="$(make_pair)"
+mkdir -p "$c1/mcp/github/node_modules"
+echo '{"name":"m"}' > "$c1/mcp/github/package.json"
+advance_remote "$c1"
+bin="$(mktemp -d)"; stub_npm "$bin" ok
+out="$(PATH="$bin:$PATH" run "$c1" "$c2")"; code=$?
+[ "$code" = 0 ] || { echo "FAIL(no-rebuild): must exit 0, got $code"; fail=1; }
+[ ! -f "$bin/calls" ] \
+  || { echo "FAIL(no-rebuild): must not build when sources are untouched, calls: $(cat "$bin/calls")"; fail=1; }
+rm -rf "$bin" "$(dirname "$c1")" "$(dirname "$c2")"
+
+# --- no node_modules: skipped, silently ---
+# A first-run install is minutes; a session start must never pay for it.
+c1="$(make_pair)"; c2="$(make_pair)"
+mcp_pair "$c1"
+bin="$(mktemp -d)"; stub_npm "$bin" ok
+out="$(PATH="$bin:$PATH" run "$c1" "$c2")"; code=$?
+[ "$code" = 0 ] || { echo "FAIL(no-install): must exit 0, got $code"; fail=1; }
+[ ! -f "$bin/calls" ] \
+  || { echo "FAIL(no-install): must not build without an install present"; fail=1; }
+rm -rf "$bin" "$(dirname "$c1")" "$(dirname "$c2")"
+
+# --- the build fails: still exit 0, but say the code is STALE ---
+# Silence here reproduces the original bug: a stale build is a working build.
+c1="$(make_pair)"; c2="$(make_pair)"
+mcp_pair "$c1"
+mkdir -p "$c1/mcp/github/node_modules"
+bin="$(mktemp -d)"; stub_npm "$bin" fail
+out="$(PATH="$bin:$PATH" run "$c1" "$c2")"; code=$?
+[ "$code" = 0 ] || { echo "FAIL(build-fail): must exit 0, got $code"; fail=1; }
+printf '%s' "$out" | grep -q 'STALE' \
+  || { echo "FAIL(build-fail): a failed build must say the MCP is stale, got: $out"; fail=1; }
+rm -rf "$bin" "$(dirname "$c1")" "$(dirname "$c2")"
+
 # --- missing directory: silent, exit 0 ---
 out="$(run "/nonexistent-dotclaude-$$" "/nonexistent-dotfiles-$$")"; code=$?
 [ "$code" = 0 ] || { echo "FAIL: must exit 0 with missing repos, got $code"; fail=1; }
