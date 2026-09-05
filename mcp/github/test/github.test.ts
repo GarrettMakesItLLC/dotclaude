@@ -343,28 +343,173 @@ describe("execGh", () => {
     expect(capturedOptions?.maxBuffer).toBe(32 * 1024 * 1024);
   });
 
-  it("strips GH_TOKEN/GITHUB_TOKEN from the spawned gh process's env, even when both are set", async () => {
-    const prevGhToken = process.env.GH_TOKEN;
-    const prevGithubToken = process.env.GITHUB_TOKEN;
-    process.env.GH_TOKEN = "gho_narrowscopetoken";
-    process.env.GITHUB_TOKEN = "gho_narrowscopetoken";
+  /**
+   * Spawned `gh` has to use the SAME credential `ghRequest` chose, or the
+   * Projects v2 calls that go through here fail on a scope the REST calls have.
+   * It used to be handed the env with both token vars stripped, which made it
+   * agree only by coincidence.
+   */
+  it("hands the spawned gh process the token this server selected", async () => {
+    process.env.GH_TOKEN = "gho_ambient_narrow";
     try {
       vi.resetModules();
       let capturedEnv: NodeJS.ProcessEnv | undefined;
-      execFileMock.mockImplementation((_c: string, _a: string[], ...rest: unknown[]) => {
+      execFileMock.mockImplementation((_c: string, args: string[], ...rest: unknown[]) => {
         const cb = rest[rest.length - 1] as (e: unknown, o?: unknown) => void;
+        if (args[0] === "auth" && args[1] === "token") {
+          cb(null, { stdout: "gho_keyring_wide\n", stderr: "" });
+          return;
+        }
         if (rest.length > 1) capturedEnv = (rest[0] as { env?: NodeJS.ProcessEnv }).env;
         cb(null, { stdout: "ok\n", stderr: "" });
       });
+      // Keyring covers repo+read:org+workflow+project; the ambient one does not.
+      fetchMock.mockImplementation(async (_url: string, init: { headers: Record<string, string> }) =>
+        makeResponse({
+          status: 200,
+          body: {},
+          headers: {
+            "x-oauth-scopes": init.headers.Authorization.includes("keyring")
+              ? "repo, read:org, workflow, project"
+              : "repo, read:org",
+          },
+        }),
+      );
       const { execGh } = await import("../src/github.js");
       await execGh(["project", "item-list"]);
-      expect(capturedEnv?.GH_TOKEN).toBeUndefined();
+      expect(capturedEnv?.GH_TOKEN).toBe("gho_keyring_wide");
       expect(capturedEnv?.GITHUB_TOKEN).toBeUndefined();
     } finally {
-      if (prevGhToken === undefined) delete process.env.GH_TOKEN;
-      else process.env.GH_TOKEN = prevGhToken;
-      if (prevGithubToken === undefined) delete process.env.GITHUB_TOKEN;
-      else process.env.GITHUB_TOKEN = prevGithubToken;
+      delete process.env.GH_TOKEN;
+    }
+  });
+});
+
+/**
+ * Which credential wins used to be a policy — strip the env var, trust the
+ * keyring — and the policy was right on some machines and exactly backwards on
+ * others. On one box the keyring login carried `gist, read:org, repo, workflow`
+ * while the stripped PAT also carried `project`, so the fallback was what lost
+ * the scope and Effort/Priority silently stopped being settable (#263, #225).
+ * Both are measured now; neither is the default.
+ */
+describe("token selection", () => {
+  const scopesByToken = (map: Record<string, string | null>) =>
+    async (_url: string, init: { headers: Record<string, string> }) => {
+      const token = init.headers.Authorization.replace("Bearer ", "");
+      const scopes = map[token];
+      return makeResponse({
+        status: 200,
+        body: {},
+        headers: scopes === null || scopes === undefined ? {} : { "x-oauth-scopes": scopes },
+      });
+    };
+
+  const withKeyring = (keyring: string) =>
+    setGhResponses((args) => {
+      if (args[0] === "auth" && args[1] === "token") return `${keyring}\n`;
+      if (args[0] === "repo" && args[1] === "view") return "octo/defaultrepo\n";
+      throw new Error(`unexpected gh args: ${args.join(" ")}`);
+    });
+
+  const authHeaderOf = (call: unknown[]) =>
+    (call[1] as { headers: Record<string, string> }).headers.Authorization;
+
+  it("uses the ambient token when it covers more of the required scopes", async () => {
+    process.env.GH_TOKEN = "tok_ambient";
+    try {
+      vi.resetModules();
+      withKeyring("tok_keyring");
+      fetchMock.mockImplementation(
+        scopesByToken({ tok_keyring: "repo, read:org", tok_ambient: "repo, read:org, project" }),
+      );
+      const m = await import("../src/github.js");
+      await m.ghRequest("/some/path");
+      const last = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+      expect(authHeaderOf(last)).toBe("Bearer tok_ambient");
+    } finally {
+      delete process.env.GH_TOKEN;
+    }
+  });
+
+  it("keeps the keyring token when it is the wider one", async () => {
+    process.env.GH_TOKEN = "tok_ambient";
+    try {
+      vi.resetModules();
+      withKeyring("tok_keyring");
+      fetchMock.mockImplementation(
+        scopesByToken({ tok_keyring: "repo, read:org, workflow, project", tok_ambient: "repo" }),
+      );
+      const m = await import("../src/github.js");
+      await m.ghRequest("/some/path");
+      const last = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+      expect(authHeaderOf(last)).toBe("Bearer tok_keyring");
+    } finally {
+      delete process.env.GH_TOKEN;
+    }
+  });
+
+  it("accepts read:project as covering project", async () => {
+    process.env.GH_TOKEN = "tok_ambient";
+    try {
+      vi.resetModules();
+      withKeyring("tok_keyring");
+      fetchMock.mockImplementation(
+        scopesByToken({ tok_keyring: "repo", tok_ambient: "repo, read:project" }),
+      );
+      const m = await import("../src/github.js");
+      await m.ghRequest("/some/path");
+      const last = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+      expect(authHeaderOf(last)).toBe("Bearer tok_ambient");
+    } finally {
+      delete process.env.GH_TOKEN;
+    }
+  });
+
+  it("falls back to the keyring when a token's scopes cannot be read", async () => {
+    // A fine-grained PAT reports no x-oauth-scopes at all. Unknown is not the
+    // same as empty, and must not be scored as zero.
+    process.env.GH_TOKEN = "tok_ambient";
+    try {
+      vi.resetModules();
+      withKeyring("tok_keyring");
+      fetchMock.mockImplementation(
+        scopesByToken({ tok_keyring: "repo", tok_ambient: null }),
+      );
+      const m = await import("../src/github.js");
+      await m.ghRequest("/some/path");
+      const last = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+      expect(authHeaderOf(last)).toBe("Bearer tok_keyring");
+    } finally {
+      delete process.env.GH_TOKEN;
+    }
+  });
+
+  it("probes nothing when only one credential exists", async () => {
+    vi.resetModules();
+    withKeyring("tok_keyring");
+    fetchMock.mockResolvedValue(makeResponse({ status: 200, body: { ok: true } }));
+    const m = await import("../src/github.js");
+    await m.ghRequest("/some/path");
+    // One request: the caller's. No scope probe, because there is no choice.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(authHeaderOf(fetchMock.mock.calls[0])).toBe("Bearer tok_keyring");
+  });
+
+  it("uses the ambient token when there is no keyring login at all", async () => {
+    process.env.GH_TOKEN = "tok_ambient";
+    try {
+      vi.resetModules();
+      setGhResponses((args) => {
+        if (args[0] === "auth" && args[1] === "token") throw new Error("not logged in");
+        return "octo/defaultrepo\n";
+      });
+      fetchMock.mockResolvedValue(makeResponse({ status: 200, body: { ok: true } }));
+      const m = await import("../src/github.js");
+      await m.ghRequest("/some/path");
+      expect(authHeaderOf(fetchMock.mock.calls[0])).toBe("Bearer tok_ambient");
+    } finally {
+      delete process.env.GH_TOKEN;
     }
   });
 });
