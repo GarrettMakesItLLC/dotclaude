@@ -97,7 +97,7 @@ command -v python3 >/dev/null 2>&1 || exit 0
 # the heredoc IS python3's stdin (that's how `python3 -` gets its script), so
 # piping JSON in on top of it would just be discarded.
 candidates="$(INPUT_JSON="$input" python3 - <<'PYEOF' 2>/dev/null
-import json, os, re, sys
+import json, os, re, shlex, sys
 
 try:
     obj = json.loads(os.environ.get("INPUT_JSON", ""))
@@ -248,13 +248,67 @@ if tool == "Bash":
             if tgt and tgt not in ("/dev/null", "&1", "&2") and not tgt.startswith("&"):
                 out.append(f"{base}\t{tgt}" if base else tgt)
 
-        # sed -i / --in-place: grab all non-flag trailing tokens on that
-        # pipeline segment as candidate targets (sed accepts multiple files).
-        if re.search(r"\bsed\b.*(-i\b|--in-place\b)", seg):
-            for tok in seg.split():
-                if not tok.startswith("-") and tok != "sed" and "sed" not in tok:
-                    tgt = tok.strip(QUOTES)
-                    out.append(f"{base}\t{tgt}" if base else tgt)
+        # sed -i / --in-place: the FILES it edits, which means skipping the
+        # script.
+        #
+        # This used to take every non-flag token on the segment, so `sed -i
+        # 's/a/b/' file` reported the script as a write target — and the
+        # suggested fix, prefixing it with an absolute directory, was nonsense
+        # because the flagged token is a program (#295, #313).
+        #
+        # It also used to find `sed` with `\bsed\b` anywhere in the segment.
+        # A hyphen is a word boundary, so the branch name
+        # `issue-295-worktree-guard-blocks-sed-i-by-reading-t` matched, and
+        # `git worktree add <dir> <that-branch>` was parsed as a sed
+        # invocation whose "files" were `git`, `worktree` and `add`. The guard
+        # blocked its own prescribed remedy. `sed` is now looked for as an
+        # actual command token.
+        # Shell-aware, because a sed script routinely contains spaces:
+        # `sed -i "s/module: 'a',/module: 'b',/" file` splits into four
+        # whitespace tokens and three of them look like paths (#313). Falls
+        # back to a plain split if the segment will not tokenise — a partial
+        # read is better than dropping the check entirely.
+        try:
+            toks_seg = shlex.split(seg)
+        except ValueError:
+            toks_seg = seg.split()
+        sed_at = next(
+            (
+                i
+                for i, t in enumerate(toks_seg)
+                if t.strip(QUOTES) == "sed" or t.strip(QUOTES).endswith("/sed")
+            ),
+            None,
+        )
+        if sed_at is not None and any(
+            t == "-i" or t.startswith("-i") or t == "--in-place" or t.startswith("--in-place=")
+            for t in toks_seg[sed_at + 1 :]
+        ):
+            # Positional parse, the way sed reads its own argv: `-e`/`-f` take
+            # the next token, `--expression=`/`--file=` carry theirs, and the
+            # first bare token is the script UNLESS a flag already supplied
+            # one. Everything after that is a file.
+            script_from_flag = False
+            expect_flag_arg = False
+            script_seen = False
+            for tok in toks_seg[sed_at + 1 :]:
+                if expect_flag_arg:
+                    expect_flag_arg = False
+                    continue
+                if tok in ("-e", "-f", "--expression", "--file"):
+                    script_from_flag = True
+                    expect_flag_arg = True
+                    continue
+                if tok.startswith("--expression=") or tok.startswith("--file="):
+                    script_from_flag = True
+                    continue
+                if tok.startswith("-"):
+                    continue
+                if not script_seen and not script_from_flag:
+                    script_seen = True
+                    continue
+                tgt = tok.strip(QUOTES)
+                out.append(f"{base}\t{tgt}" if base else tgt)
 
         # cp/mv/install/tee: last non-flag token is the destination. `tee
         # FILE`'s one argument is both its first and last non-flag token, so

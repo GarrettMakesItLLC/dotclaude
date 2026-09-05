@@ -91,6 +91,10 @@ check 2 Bash command "printf x >> $CONV/src/appended.ts"
 
 # Should BLOCK — sed -i and cp/mv/tee destinations.
 check 2 Bash command "sed -i 's/a/b/' $CONV/src/existing.ts"
+check 2 Bash command "sed -i -e 's/a/b/' $CONV/src/existing.ts"
+check 2 Bash command "sed -i.bak 's/a/b/' $CONV/src/existing.ts"
+# Several files after one script: every one of them is a real target.
+check 2 Bash command "sed -i 's/a/b/' /tmp/ok.ts $CONV/src/existing.ts"
 check 2 Bash command "cp /tmp/whatever.ts $CONV/src/copied.ts"
 check 2 Bash command "mv /tmp/whatever.ts $CONV/src/moved.ts"
 check 2 Bash command "some-generator | tee $CONV/src/teed.ts"
@@ -98,6 +102,23 @@ check 2 Bash command "some-generator | tee $CONV/src/teed.ts"
 # Should ALLOW — a read-only Bash command with no write pattern at all.
 check 0 Bash command "cat $CONV/src/existing.ts"
 check 0 Bash command "git -C $CONV status"
+
+# Should ALLOW — sed's SCRIPT is a program, not a write target (#295, #313).
+# The file is absolute and correctly named; only the script looked relative.
+check 0 Bash command "sed -i '1s|^node_modules/\$|node_modules|' $CONV/.worktrees/wt/.gitignore"
+check 0 Bash command "sed -i \"s/module: 'a',/module: 'b',/\" $CONV/.worktrees/wt/f.ts"
+check 0 Bash command "sed -i -e 's/a/b/' -e 's/c/d/' $CONV/.worktrees/wt/f.ts"
+check 0 Bash command "sed -i --expression='s/a/b/' $CONV/.worktrees/wt/f.ts"
+# A script supplied by -f is a FILE sed reads, not one it writes.
+check 0 Bash command "sed -i -f /tmp/script.sed $CONV/.worktrees/wt/f.ts"
+
+# Should ALLOW — `sed` inside another word is not the sed command (#295). A
+# hyphen is a word boundary, so a branch name containing `-sed-i-` used to
+# make the guard parse `git`, `worktree` and `add` as sed's files — blocking
+# its own prescribed remedy.
+check 0 Bash command "git -C $CONV worktree add $CONV/.worktrees/w2 issue-295-blocks-sed-i-by-reading"
+check 0 Bash command "git -C $CONV log --oneline --grep=sed-i"
+check 0 Bash command "grep -r parsed-input $CONV/src"
 
 # Should ALLOW — redirection is present but targets a linked worktree, not the
 # main tree; proves Bash candidates go through the same worktree/config-repo
