@@ -84,6 +84,36 @@ describe("ghRequest — token + 401 retry", () => {
     expect(tokenCalls).toHaveLength(2);
   });
 
+  /**
+   * A missing OAuth scope comes back 403, not 401. Only 401 cleared the cache,
+   * so granting the scope with `gh auth refresh` changed nothing until the
+   * process restarted — and the error kept reciting the OLD scope list while
+   * `gh auth status` showed the new one (#302).
+   */
+  it("retries once on 403 too, because a scope grant needs a fresh token", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        makeResponse({ status: 403, body: { message: "Resource not accessible by integration" } }),
+      )
+      .mockResolvedValueOnce(makeResponse({ status: 200, body: { ok: true } }));
+
+    const result = await mod.ghRequest<{ ok: boolean }>("/some/path");
+
+    expect(result).toEqual({ ok: true });
+    const tokenCalls = execFileMock.mock.calls.filter(
+      (c) => c[1][0] === "auth" && c[1][1] === "token",
+    );
+    expect(tokenCalls).toHaveLength(2);
+  });
+
+  it("surfaces a persistent 403 — a second one is a real permission answer", async () => {
+    // The retry must not mask a genuine denial as an infinite refetch loop.
+    fetchMock.mockResolvedValue(makeResponse({ status: 403, body: { message: "Forbidden" } }));
+
+    await expect(mod.ghRequest("/some/path")).rejects.toThrow(/HTTP 403/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("does not loop forever on a persistent 401 — retries exactly once then surfaces the error", async () => {
     fetchMock.mockResolvedValue(
       makeResponse({ status: 401, body: { message: "Bad credentials" } }),

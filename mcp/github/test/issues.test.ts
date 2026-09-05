@@ -881,6 +881,74 @@ describe("issue_claim", () => {
   });
 
   /**
+   * A hostname identifies a BOX, not a holder — several sessions per machine is
+   * the normal case with agent teams. Reading "same machine" as "probably mine"
+   * is how one session force-pushed over another's branch and dropped four
+   * reviewed files (#308). Only a matching SESSION is yours.
+   */
+  describe("who holds the lock", () => {
+    const claimWith = async (stampSession: string | null, mySession: string | null) => {
+      const prev = process.env.CLAIM_SESSION_ID;
+      if (mySession) process.env.CLAIM_SESSION_ID = mySession;
+      else delete process.env.CLAIM_SESSION_ID;
+      const stamp: Record<string, unknown> = {
+        branch: "issue-8-fix-the-thing",
+        holder: "DESKTOP-A51GURL",
+        claimed_at: "2026-07-01T00:00:00.000Z",
+      };
+      if (stampSession) stamp.session = stampSession;
+      const prevMachine = process.env.CLAIM_MACHINE_ID;
+      process.env.CLAIM_MACHINE_ID = "DESKTOP-A51GURL";
+      fetchMock.mockImplementation(
+        mockClaim({
+          refStatus: 422,
+          calls: [],
+          commentsBody: [{ body: `x\n<!-- claim-lock: ${JSON.stringify(stamp)} -->` }],
+        }),
+      );
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+      if (prev === undefined) delete process.env.CLAIM_SESSION_ID;
+      else process.env.CLAIM_SESSION_ID = prev;
+      if (prevMachine === undefined) delete process.env.CLAIM_MACHINE_ID;
+      else process.env.CLAIM_MACHINE_ID = prevMachine;
+      return res.content[0].text;
+    };
+
+    it("says it is YOURS when the session matches", async () => {
+      const text = await claimWith("sess-aaa", "sess-aaa");
+      expect(text).toContain("BY THIS SESSION");
+      expect(text).not.toContain("ANOTHER session");
+    });
+
+    it("says another session on this machine — not 'probably yours'", async () => {
+      const text = await claimWith("sess-bbb", "sess-aaa");
+      expect(text).toContain("ANOTHER session");
+      expect(text).toContain("not yours to resume");
+      expect(text).not.toContain("BY THIS SESSION");
+      // The old copy invited exactly the action that caused the incident.
+      expect(text).not.toMatch(/most likely your own earlier session/);
+    });
+
+    it("names the holding session, so it can be addressed directly", async () => {
+      const text = await claimWith("sess-bbb", "sess-aaa");
+      expect(text).toContain("sess-bbb");
+    });
+
+    it("falls back to machine-level wording for a stamp with no session", async () => {
+      // Stamps written before this existed must keep resolving.
+      const text = await claimWith(null, "sess-aaa");
+      expect(text).toContain("ANOTHER session");
+      expect(text).not.toContain("BY THIS SESSION");
+    });
+
+    it("never claims a lock as yours when this session has no id at all", async () => {
+      const text = await claimWith("sess-bbb", null);
+      expect(text).not.toContain("BY THIS SESSION");
+    });
+  });
+
+  /**
    * A lock outlives its issue (#300): GitHub deletes a branch when ITS OWN PR
    * merges, and one PR commonly closes several issues, so every lock but the
    * PR head survives.
