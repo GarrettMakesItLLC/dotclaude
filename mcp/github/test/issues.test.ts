@@ -588,6 +588,57 @@ describe("issue_set_status", () => {
   });
 
   /**
+   * A bulk triage sweep re-blocked an issue an hour after the owner had cleared
+   * it, and his answer then sat unread (#315). Warned rather than refused: the
+   * sweep may be right, and failing hard mid-sweep is its own mess — the point
+   * is that it cannot be silent.
+   */
+  describe("re-blocking an answered issue", () => {
+    const respondWith = (body: string) =>
+      async (url: string, init: { method?: string; body?: string }) => {
+        if (init.method === "GET" && url.endsWith("/issues/6376")) {
+          return makeResponse({ status: 200, body: { labels: [{ name: "status:ready" }], body } });
+        }
+        if (init.method === "PUT" && url.endsWith("/labels")) {
+          const sent = JSON.parse(init.body as string).labels as string[];
+          return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+        }
+        return makeResponse({ status: 500 });
+      };
+
+    it("warns when status:blocked lands on an issue with a ticked owner-action box", async () => {
+      fetchMock.mockImplementation(respondWith("## ⛔ Owner action required\n\n- [x] Option 1"));
+      const handler = await getIssueHandler("issue_set_status");
+      const res = await handler({ repo: "octo/repo", number: 6376, status: "blocked" });
+
+      const out = JSON.parse(res.content[0].text) as { labels: string[]; _warnings?: string[] };
+      // The write still happens — this is a warning, not a gate.
+      expect(res.isError).toBeFalsy();
+      expect(out.labels).toContain("status:blocked");
+      expect(out._warnings?.[0]).toMatch(/ticked owner-action box/);
+      expect(out._warnings?.[0]).toMatch(/buries that answer/);
+    });
+
+    it("stays quiet when nothing has been answered", async () => {
+      fetchMock.mockImplementation(respondWith("## ⛔ Owner action required\n\n- [ ] Option 1"));
+      const handler = await getIssueHandler("issue_set_status");
+      const res = await handler({ repo: "octo/repo", number: 6376, status: "blocked" });
+      expect(JSON.parse(res.content[0].text)).not.toHaveProperty("_warnings");
+    });
+
+    it("stays quiet for any status other than blocked", async () => {
+      // Moving an answered issue to ready or in-progress is acting ON the
+      // answer, which is the behaviour this wants, not the one it guards.
+      fetchMock.mockImplementation(respondWith("- [x] Option 1"));
+      const handler = await getIssueHandler("issue_set_status");
+      for (const status of ["ready", "in-progress"]) {
+        const res = await handler({ repo: "octo/repo", number: 6376, status });
+        expect(JSON.parse(res.content[0].text), status).not.toHaveProperty("_warnings");
+      }
+    });
+  });
+
+  /**
    * `status:backlog` was retired from the taxonomy but is still on issues filed
    * before it went — so it has to be stripped like any other status label.
    * Stripping only the live names leaves the issue wearing two at once, which

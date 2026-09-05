@@ -126,6 +126,47 @@ describe("slimIssue", () => {
     });
   });
 
+  /**
+   * The signal that somebody answered an issue's owner-action checklist (#315).
+   *
+   * Comment author cannot carry it — every agent posts under the owner's
+   * account — and enumerating OUTSTANDING actions with `- [ ]` hides an
+   * answered issue by construction, since the answered row is exactly the one
+   * that does not match.
+   */
+  describe("owner_action_answered", () => {
+    const withBody = (body: string | null) => slimIssue({ ...rawIssue(), body });
+
+    it("is set when a checklist box is ticked", () => {
+      expect(withBody("- [x] **Option 1**").owner_action_answered).toBe(true);
+      expect(withBody("- [X] shouty").owner_action_answered).toBe(true);
+      expect(withBody("* [x] asterisk bullet").owner_action_answered).toBe(true);
+      expect(withBody("  - [x] indented").owner_action_answered).toBe(true);
+      expect(
+        withBody("## ⛔ Owner action required\n\n- [ ] one\n- [x] two\n").owner_action_answered,
+      ).toBe(true);
+    });
+
+    it("is absent while every box is still open, so it never fires on a fresh issue", () => {
+      expect(withBody("- [ ] one\n- [ ] two")).not.toHaveProperty("owner_action_answered");
+      expect(withBody("no checklist at all")).not.toHaveProperty("owner_action_answered");
+      expect(withBody(null)).not.toHaveProperty("owner_action_answered");
+    });
+
+    it("does not fire on prose that merely contains [x]", () => {
+      expect(withBody("the array is a[x] here")).not.toHaveProperty("owner_action_answered");
+      expect(withBody("see matrix[x][y]")).not.toHaveProperty("owner_action_answered");
+    });
+
+    it("rides on a LIST entry, not only a single view", () => {
+      // The whole point: an agent scanning a blocked queue never opens the
+      // answered one, so the flag has to survive the body being stripped.
+      const listed = slimIssue({ ...rawIssue(), body: "- [x] answered" });
+      expect(listed).not.toHaveProperty("body");
+      expect(listed.owner_action_answered).toBe(true);
+    });
+  });
+
   it("omits body by default and includes it on a single-issue view", () => {
     expect(slimIssue(rawIssue())).not.toHaveProperty("body");
     expect(slimIssue(rawIssue(), { body: true }).body).toBe("## What\nthe body");

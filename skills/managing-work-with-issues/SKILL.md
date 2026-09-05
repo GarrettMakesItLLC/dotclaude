@@ -56,6 +56,17 @@ Work that is scoped and startable but not yet prioritised has no status of its o
 
 Before applying `blocked`, try to resolve it. A missing env var you can fetch from Railway/Vercel, a fact you can grep for, a bug you can reproduce — those are work, not blockers. Only what genuinely requires Garrett's hands or judgement earns the label.
 
+### A blocked issue may already be answered
+
+**Garrett answers in a comment and by ticking a box. He does not usually change the label.** So an issue can carry a complete answer and still read as blocked to every session after it.
+
+- **Check before you skip.** `owner_action_answered: true` on an issue means a box on its checklist is ticked — read it and act, do not pass over it. Read the newest comments too; an answer can arrive with no box touched at all.
+- **Author is not the signal.** Every agent posts under Garrett's account, so a comment reading `GarrettMakesIt` proves nothing. His voice is: conversational, unpolished, typos. Agent comments are structured, with headings and estimates.
+- **Never enumerate outstanding actions with `^- \[ \]` alone.** The answered issue is precisely the row that does not match, so that grep reports an answered queue as untouched. Scan `^- \[[xX]\]` in the same pass. A sweep of 56 blocked issues once reported all 56 unanswered while three carried complete answers (#315).
+- **Do not re-block over an answer.** A bulk label sweep once re-applied `status:blocked` an hour after he had cleared it, and the answer sat unread. `issue_set_status` warns on this; heed the warning rather than moving on.
+
+An answer can be **partial, or in tension with the code**, and neither means ignore it. Where the chosen option would do something the code says is wrong, state the conflict with the numbers and re-ask — do not silently build it, and do not silently substitute a different option.
+
 ## Filing an issue
 
 Clear title; body with **what + why + a `file:line` pointer**; type, effort, and priority set; milestone and relationships where known. **No assignee at creation** — unassigned until claimed. `status:ready` when fully scoped, `blocked` only when Garrett is genuinely required.
