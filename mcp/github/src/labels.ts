@@ -6,7 +6,6 @@ export interface LabelSpec {
 
 /** Every status value, in lifecycle order — the single source of truth for `status:*`. */
 export const ISSUE_STATUSES = [
-  "backlog",
   "ready",
   "blocked",
   "waiting",
@@ -31,18 +30,21 @@ export const ISSUE_PRIORITIES = ["urgent", "high", "medium", "low"] as const;
 export type IssuePriority = (typeof ISSUE_PRIORITIES)[number];
 
 /**
- * Marker labels — orthogonal to status/type/source, and to each other. `epic`
- * says what an issue *is* in the tracker's shape; `launch-blocker` says what it
- * gates. Neither is a state, so neither is mutually exclusive with anything.
+ * Marker labels — orthogonal to status/type/source. `launch-blocker` says what
+ * an issue gates. Not a state, so not mutually exclusive with anything.
+ *
+ * No `epic` marker: GitHub's native sub-issue hierarchy already shows an
+ * issue is an epic in the UI (open/closed sub-issue count, parent/child
+ * links) — a label restating that is pure duplication.
  */
-export const ISSUE_MARKERS = ["epic", "launch-blocker"] as const;
+export const ISSUE_MARKERS = ["launch-blocker"] as const;
 export type IssueMarker = (typeof ISSUE_MARKERS)[number];
 
 /**
- * Where a report came from. The first two are an app's in-app reporter; the
- * per-app values name the app for reports cross-filed elsewhere; `agent` and
- * `code-review` are internal provenance, which is why `defaultStatus` treats
- * them like the owner rather than like an unverifiable third-party report.
+ * Where a report came from — provenance metadata only, doesn't affect initial
+ * status. The first two are an app's in-app reporter; the per-app values name
+ * the app for reports cross-filed elsewhere; `agent` and `code-review` are
+ * internal provenance.
  */
 export const ISSUE_SOURCES = [
   "owner",
@@ -55,9 +57,6 @@ export const ISSUE_SOURCES = [
 ] as const;
 export type IssueSource = (typeof ISSUE_SOURCES)[number];
 
-/** Sources whose reports are trusted as verified — no owner verification step. */
-export const TRUSTED_SOURCES: readonly IssueSource[] = ["owner", "agent", "code-review"];
-
 /**
  * Label appearance, keyed by taxonomy value rather than by label name, so a new
  * status/type/source is a type error until it has one.
@@ -65,7 +64,6 @@ export const TRUSTED_SOURCES: readonly IssueSource[] = ["owner", "agent", "code-
 type LabelStyle = Omit<LabelSpec, "name">;
 
 const STATUS_STYLES: Record<IssueStatus, LabelStyle> = {
-  backlog: { color: "c5def5", description: "Captured, not yet scoped or prioritized" },
   ready: { color: "0e8a16", description: "Fully scoped, ready to start" },
   blocked: { color: "b60205", description: "Needs the owner: a decision, a credential, or verification" },
   waiting: { color: "d4c5f9", description: "Depends on another issue; needs nothing from the owner" },
@@ -86,7 +84,6 @@ const RETIRED_EFFORT_COLORS: Record<IssueEffort, string> = {
 };
 
 const MARKER_STYLES: Record<IssueMarker, LabelStyle> = {
-  epic: { color: "7057ff", description: "Index issue: carries the scope and its sub-issues, never worked directly" },
   "launch-blocker": { color: "cc0000", description: "Must clear before public launch" },
 };
 
@@ -171,6 +168,8 @@ export const DEPRECATED_LABELS: LabelSpec[] = [
   { name: "bug", color: "ededed", description: "DEPRECATED historical label — use type:bug on new work" },
   { name: "enhancement", color: "ededed", description: "DEPRECATED historical label — use type:feature on new work" },
   { name: "documentation", color: "ededed", description: "DEPRECATED historical label — use type:task on new work" },
+  { name: "epic", color: "7057ff", description: "DEPRECATED — GitHub's native sub-issue hierarchy already shows this; do not apply to new issues" },
+  { name: "status:backlog", color: "c5def5", description: "DEPRECATED — no milestone set is backlog; do not apply to new issues" },
   ...ISSUE_TYPES.map((t) => ({
     name: typeLabel(t),
     color: TYPE_STYLES[t].color,
@@ -204,8 +203,16 @@ export function isKnownLabel(name: string): boolean {
   );
 }
 
-/** Every `status:*` label name — the mutually-exclusive status set. */
-export const STATUS_LABEL_NAMES: string[] = ISSUE_STATUSES.map(statusLabel);
+/**
+ * Every `status:*` label name, live or retired — the set a status write strips
+ * before applying the new one. Retired values belong here because they are
+ * still attached to issues opened before they were retired: stripping only the
+ * live names would leave such an issue wearing two status labels at once.
+ */
+export const STATUS_LABEL_NAMES: string[] = [
+  ...ISSUE_STATUSES.map(statusLabel),
+  ...DEPRECATED_LABELS.filter((l) => l.name.startsWith("status:")).map((l) => l.name),
+];
 
 /** GitHub native issue-type name (title-cased) for a given type label value. */
 export function nativeTypeName(type: IssueType): string {

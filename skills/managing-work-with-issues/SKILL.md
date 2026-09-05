@@ -32,12 +32,12 @@ GitHub's auto-close needs the keyword before **each** number: `Closes #1, closes
 
 ## Taxonomy
 
-- **status:** `backlog` → `ready` → `in-progress` → `in-review`; `blocked` or `waiting` from any state. Exactly one at a time.
+- **status:** `ready` → `in-progress` → `in-review`; `blocked` or `waiting` from any state. Exactly one at a time. There is no `backlog` status — an issue with no milestone is the backlog.
 - **type:** native GitHub issue type — `Bug` / `Feature` / `Task` (`issue_set_type`, or `issue_open`'s `type` param). No label; the native field is the only source of truth.
 - **effort:** the shared project's Effort field — how much judgment a task takes, and which model it calls for. `trivial` — mechanical, single-file, no judgment calls, a Haiku-class task. `standard` — bounded scope, known patterns, the default, Sonnet-class task. `complex` — cross-cutting, ambiguous, or one-way-door, an Opus-class task. Set with `issue_set_effort` (or `issue_open`'s `effort` param, once the issue is a project item).
 - **priority:** the shared project's Priority field — `urgent` / `high` / `medium` / `low`. Set with `issue_set_priority` (or `issue_open`'s `priority` param).
-- **source:** where the report came from. `owner` / `user-feedback` arrived through an app's in-app reporter; `musclebuddy` / `redthread` / `adventureos` name the app instead, for reports cross-filed somewhere else; `agent` and `code-review` are internal provenance — an audit or sweep found it, or a review did. **`owner`, `agent` and `code-review` are trusted**: they carry their evidence, so their defects start `ready` rather than waiting to be verified.
-- **markers:** orthogonal to all three above, and to each other. `epic` — an index of sub-issues, never worked directly. `launch-blocker` — must clear before public launch.
+- **source:** where the report came from. `owner` / `user-feedback` arrived through an app's in-app reporter; `musclebuddy` / `redthread` / `adventureos` name the app instead, for reports cross-filed somewhere else; `agent` and `code-review` are internal provenance — an audit or sweep found it, or a review did. **Provenance only**: `source` records who reported something, and never changes the status an issue opens in.
+- **markers:** orthogonal to all three above. `launch-blocker` — must clear before public launch. There is no `epic` marker: GitHub's native sub-issue hierarchy already shows that an issue is an index of children.
 
 An app may carry axes of its own outside this taxonomy (`area:*`, `module:*`, musclebuddy's `beta-feedback` / `idea`). They aren't drift — `labels_audit` lists them as unrecognized for review, not for deletion.
 
@@ -45,15 +45,27 @@ An app may carry axes of its own outside this taxonomy (`area:*`, `module:*`, mu
 
 Provision a repo once with `labels_ensure`, then check it with `labels_audit`. `label_list` shows usage counts, and `label_update` renames a legacy label into the taxonomy without losing the issues that carry it. New repos also want the issue/PR templates from `templates/` copied into `.github/`.
 
-### `blocked` vs `waiting` vs `backlog`
+### `blocked` vs `waiting`
 
 These three get conflated, and the cost is real: agents skip a `blocked` queue wholesale, so an over-applied `blocked` hides startable work.
 
 - **`blocked` means it needs Garrett** — a decision only he can make, a credential only he can mint, an asset only he can author, or a dashboard only he can see. Nothing else. Every `blocked` issue carries a **`## ⛔ Owner action required`** section: a checklist of the literal steps, an estimate, and — where there is a defensible default — a recommendation he can just say yes to. "Blocked on the owner" without those steps is an unfinished issue.
 - **`waiting` means it depends on another issue**, not a person. It carries a **`## ⏳ Waiting on #N`** section naming the dependency and stating plainly that nothing is needed from Garrett. An agent seeing `waiting` should check whether the dependency has landed and re-label to `ready` if so. `issue_list_blocked_by` is how you check that — it lists the issue numbers still blocking this one; `issue_set_blocked_by` is how you record the relationship in the first place, when filing or triaging a `waiting` issue.
-- **`backlog` means nothing is outstanding at all** — it is scoped and startable, just not prioritised.
+
+Work that is scoped and startable but not yet prioritised has no status of its own: it is `ready` with no milestone. The milestone is what schedules it; leaving it off is what makes it backlog.
 
 Before applying `blocked`, try to resolve it. A missing env var you can fetch from Railway/Vercel, a fact you can grep for, a bug you can reproduce — those are work, not blockers. Only what genuinely requires Garrett's hands or judgement earns the label.
+
+### A blocked issue may already be answered
+
+**Garrett answers in a comment and by ticking a box. He does not usually change the label.** So an issue can carry a complete answer and still read as blocked to every session after it.
+
+- **Check before you skip.** `owner_action_answered: true` on an issue means a box on its checklist is ticked — read it and act, do not pass over it. Read the newest comments too; an answer can arrive with no box touched at all.
+- **Author is not the signal.** Every agent posts under Garrett's account, so a comment reading `GarrettMakesIt` proves nothing. His voice is: conversational, unpolished, typos. Agent comments are structured, with headings and estimates.
+- **Never enumerate outstanding actions with `^- \[ \]` alone.** The answered issue is precisely the row that does not match, so that grep reports an answered queue as untouched. Scan `^- \[[xX]\]` in the same pass. A sweep of 56 blocked issues once reported all 56 unanswered while three carried complete answers (#315).
+- **Do not re-block over an answer.** A bulk label sweep once re-applied `status:blocked` an hour after he had cleared it, and the answer sat unread. `issue_set_status` warns on this; heed the warning rather than moving on.
+
+An answer can be **partial, or in tension with the code**, and neither means ignore it. Where the chosen option would do something the code says is wrong, state the conflict with the numbers and re-ask — do not silently build it, and do not silently substitute a different option.
 
 ## Filing an issue
 
@@ -65,7 +77,7 @@ A follow-up issue is **only** for a finding genuinely out of scope, or a blocker
 
 Every issue that isn't a standalone one-off answers two questions, and they are different questions:
 
-- **Parent epic — "what is this part of?"** A native sub-issue relationship (`issue_open` with `parent`, or `issue_add_sub_issue`). The epic is an **index, not work**: labelled `epic`, its body links its children and carries the scope statement, and nothing is ever implemented on it directly.
+- **Parent epic — "what is this part of?"** A native sub-issue relationship (`issue_open` with `parent`, or `issue_add_sub_issue`). The epic is an **index, not work**: its body links its children and carries the scope statement, and nothing is ever implemented on it directly. The parent/child links and the sub-issue counter are what mark it as an epic — no label restates them.
 - **Milestone — "which push does this ship in?"** Found-or-created by exact title (`issue_open` with `milestone`, or `milestone_ensure`). Titles are themed and dated: `Feature Gaps — surface & wire (2026-06)`, `Pre-Launch Audit (2026-07-09)`.
 
 An issue with a milestone and no parent is orphaned work; an issue with a parent and no milestone is unscheduled work. Both are how a backlog becomes unreadable.
@@ -84,7 +96,7 @@ Files with matching `type:*` + `source:*`. The status depends on **who reported 
 - **A third party's defect report → verify it yourself first, in good faith, the same as any other bug.** Reproduce it: grep the code, hit the route, render the page, read the log line the report points at. Confirmed ⇒ `status:ready` and fix it — a bug report is not less true for being filed by someone other than Garrett, and a real defect (a literal `/<studio>` placeholder leaking onto a live page is exactly this kind) is verifiable from the repo whether or not you know the reporter. `status:blocked` is for what you genuinely cannot pin down this way — no repro, no matching code path, needs an account/environment/credential only Garrett has — not the default starting state.
 - **Any idea or feature request → `status:blocked`, whoever filed it.** These need his intent before they are built, and he develops them *with* an agent rather than receiving a finished guess. This is a different axis from the defect case above: a request for new behavior is a scope decision, not a fact to verify.
 
-The in-app reporter applies a `source:*` label, so `source:owner` vs `source:user-feedback` is already correct on arrival — do not re-derive *that*. The *status* is still yours to set by the verify-first rule above: `source:*` says who reported it, not whether it's confirmed. `issue_open` defaults new defect reports to `status:ready` when `source` and `type` are passed; downgrade to `blocked` only after you've actually tried and failed to verify.
+The in-app reporter applies a `source:*` label, so `source:owner` vs `source:user-feedback` is already correct on arrival — do not re-derive *that*. The *status* is still yours to set by the verify-first rule above: `source:*` says who reported it, not whether it's confirmed. `issue_open` opens everything `status:ready` regardless of `source` and `type`; set `blocked` yourself, either at filing time for a request that needs his intent or after you've actually tried and failed to verify a report.
 
 ## Tooling
 

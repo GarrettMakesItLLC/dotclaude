@@ -1,6 +1,6 @@
 import { cacheKey, ghRequest, invalidate } from "./github.js";
 import { STATUS_LABEL_NAMES, statusLabel, type IssueStatus } from "./labels.js";
-import { labelNames, type RawLabel } from "./slim.js";
+import { hasTickedOwnerAction, labelNames, type RawLabel } from "./slim.js";
 
 /**
  * Set the single `status:*` label on an issue, preserving all other labels.
@@ -23,8 +23,8 @@ export async function setIssueStatus(
   name: string,
   number: number,
   status?: IssueStatus,
-): Promise<{ number: number; labels: string[] }> {
-  const issue = await ghRequest<{ labels: { name: string }[] }>(
+): Promise<{ number: number; labels: string[]; _warnings?: string[] }> {
+  const issue = await ghRequest<{ labels: { name: string }[]; body?: string | null }>(
     `/repos/${owner}/${name}/issues/${number}`,
   );
   const kept = issue.labels
@@ -44,5 +44,21 @@ export async function setIssueStatus(
     );
   }
   invalidate(cacheKey("issue", `${owner}/${name}`, number));
-  return { number, labels: appliedNames };
+
+  // Re-blocking an issue whose owner-action checklist has a ticked box buries
+  // an answer, and a bulk triage sweep is where that happens — one did exactly
+  // this an hour after the owner had cleared the block, and the answer then sat
+  // unread (#315). Warned rather than refused: the sweep may be right, and a
+  // hard failure mid-sweep is its own mess. The point is that it cannot be
+  // silent.
+  const warnings =
+    status === "blocked" && hasTickedOwnerAction(issue.body)
+      ? [
+          `#${number} has a ticked owner-action box, which means somebody answered it. ` +
+            "Re-applying status:blocked buries that answer — read the checklist and the newest " +
+            "comments before letting this stand.",
+        ]
+      : [];
+
+  return { number, labels: appliedNames, ...(warnings.length ? { _warnings: warnings } : {}) };
 }

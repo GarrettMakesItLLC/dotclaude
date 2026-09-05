@@ -36,7 +36,12 @@ The mechanically-checkable subset of `running-an-audit`'s realms, run against th
 - [ ] No secrets in the diff; no API key reachable from a frontend bundle.
 - [ ] Any new image: alt text. Any new page: meta title + description, exactly one `<h1>` (`running-an-audit/references/seo-metadata.md`).
 - [ ] No new emoji-as-icon usage; no new purple/violet accent that isn't already in the token system (`running-an-audit/references/visual-anti-slop.md`).
-- [ ] Any new async surface: loading, error, and empty states present — see `running-an-audit/references/ux-coherence.md`, don't re-derive it here.
+- [ ] Any new async surface: loading, error, and empty states present, using a skeleton where the shape is known rather than a spinner — see `running-an-audit/references/ux-coherence.md`, don't re-derive it here.
+- [ ] Any new UI at a phone viewport: no horizontal document scroll, tap targets ≥44px, no hover-only affordance (`running-an-audit/references/responsive-mobile.md`).
+- [ ] Any new icon-only button: accessible name *and* tooltip. Any new link or button: it actually goes somewhere (`running-an-audit/references/site-hygiene-launch-tells.md`).
+- [ ] Any new mutation: wrapped in a transaction if multi-step, idempotent if externally triggered, and it produces a visible success or error message (`running-an-audit/references/data-integrity-safety.md`).
+- [ ] Any new outbound call: explicit timeout, and a stated behaviour when the dependency is down (`running-an-audit/references/resilience-dependencies.md`).
+- [ ] Any new client-side role or permission check: the server-side counterpart exists (`running-an-audit/references/security-access-control.md`).
 
 ## 2. Account for every finding
 

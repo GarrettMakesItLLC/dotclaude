@@ -22,13 +22,13 @@ import {
   statusLabel,
   sourceLabel,
   effortModelMismatch,
-  TRUSTED_SOURCES,
   type IssueEffort,
   type IssueSource,
   type IssueStatus,
   type IssueType,
 } from "../labels.js";
 import {
+  addProjectItem,
   findProjectItem,
   getProjectField,
   invalidateProjectItem,
@@ -59,18 +59,14 @@ async function resolveAssignees(assignees: string[]): Promise<string[]> {
 }
 
 /**
- * The status an issue starts in when the caller doesn't name one.
- *
- * A defect the owner reported himself is already verified — his account of
- * running software settles whether it happens — so it starts ready. So does one
- * an agent or a code review found, since both carry the evidence with them.
- * Anyone else's defect report is one unverified account, and a feature request
- * needs his intent before it is built: both wait on him.
+ * The status an issue starts in when the caller doesn't name one: always
+ * ready. Source and type used to route some reports to an auto-blocked
+ * verification queue; that routing added a triage step nobody wanted and is
+ * gone — an issue that genuinely needs the owner is marked blocked
+ * explicitly, not inferred from who filed it.
  */
-function defaultStatus(source?: IssueSource, type?: IssueType): IssueStatus {
-  if (!source) return "ready";
-  if (TRUSTED_SOURCES.includes(source)) return type === "feature" ? "blocked" : "ready";
-  return "blocked";
+function defaultStatus(): IssueStatus {
+  return "ready";
 }
 
 const HTML_ENTITIES: Record<string, string> = {
@@ -132,10 +128,18 @@ async function ensureMilestone(
  * case-insensitive on both sides — option names on the project are
  * capitalized (e.g. "Complex") while callers pass the lowercase enum value,
  * but a caller passing mixed case is matched too.
- * Throws if the issue isn't a project item, or the field has no such option —
- * callers that want best-effort behavior (issue_open) catch around this;
- * callers that want a hard failure (issue_set_effort/issue_set_priority) let
- * it propagate to their own try/catch.
+ * An issue that isn't on the board yet is ADDED rather than rejected. Effort
+ * and Priority live on the project, so "not a project item" is a missing setup
+ * step the caller cannot be expected to do out-of-band — and it made
+ * `issue_open`'s `effort`/`priority` params inert on every newly-created
+ * issue, since nothing adds the issue between creating it and setting the
+ * fields (platform#745). `addProjectV2ItemById` is idempotent, so this is
+ * safe on an issue already on the board.
+ *
+ * Throws if the field has no such option — callers that want best-effort
+ * behavior (issue_open) catch around this; callers that want a hard failure
+ * (issue_set_effort/issue_set_priority) let it propagate to their own
+ * try/catch.
  */
 async function applyProjectSingleSelect(
   owner: string,
@@ -144,12 +148,8 @@ async function applyProjectSingleSelect(
   fieldName: string,
   optionValue: string,
 ): Promise<void> {
-  const item = await findProjectItem(owner, name, number);
-  if (!item) {
-    throw new Error(
-      `Issue #${number} in ${owner}/${name} is not on the GarrettMakesItLLC — Work project — add it first.`,
-    );
-  }
+  const existing = await findProjectItem(owner, name, number);
+  const item = existing ?? { id: await addProjectItem(owner, name, number) };
   const field = await getProjectField(fieldName);
   const option = field.options?.find(
     (o) => o.name.toLowerCase() === optionValue.toLowerCase(),
@@ -461,19 +461,27 @@ export function registerIssueTools(server: McpServer): void {
     "issue_add_sub_issue",
     {
       description:
-        "Link an existing issue as a sub-issue (child) of another. Both are issue numbers in the same repo.",
+        "Link an existing issue as a sub-issue (child) of another. Parent and child may be in " +
+        "different repos (same org) — pass `sub_repo` for the child's repo if it differs from " +
+        "the parent's `repo`.",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Parent issue number."),
         sub_number: z.number().int().positive().describe("Child issue number to nest under the parent."),
+        sub_repo: repoParam.describe(
+          'The CHILD\'s repo as "owner/name", if different from `repo` (the parent\'s repo). ' +
+            "Defaults to `repo` when omitted, matching the same-repo case.",
+        ),
       },
     },
-    async ({ repo, number, sub_number }) => {
+    async ({ repo, number, sub_number, sub_repo }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        // The sub_issues endpoint takes the child's database id, not its number.
+        const { owner: subOwner, name: subName } = await resolveRepo(sub_repo ?? repo);
+        // The sub_issues endpoint takes the child's database id, not its number — looked up in
+        // the CHILD's own repo, which may differ from the parent's (#234).
         const child = await ghRequest<{ id: number }>(
-          `/repos/${owner}/${name}/issues/${sub_number}`,
+          `/repos/${subOwner}/${subName}/issues/${sub_number}`,
         );
         const data = await ghRequest(
           `/repos/${owner}/${name}/issues/${number}/sub_issues`,
@@ -870,8 +878,9 @@ export function registerIssueTools(server: McpServer): void {
         "Create a fully-formed issue in one call: composes status/type/source labels, sets the " +
         "native issue type (best-effort), finds-or-creates and attaches a milestone by title, and " +
         "nests it under a parent as a sub-issue — instead of hand-composing across several tool calls. " +
-        "Status defaults to `ready`, except third-party feedback and owner feature requests, which " +
-        "start `blocked` awaiting the owner. " +
+        "Status always defaults to `ready` — nothing is auto-routed to `blocked` based on who filed it " +
+        "or what kind of report it is. Mark an issue `blocked` explicitly when it genuinely can't move " +
+        "without the owner (a decision, a credential, an external dependency). " +
         "The issue itself is always created first; milestone/sub-issue enrichment is best-effort — " +
         "on partial failure the created issue is still returned, annotated with a `_warnings` array.",
       inputSchema: {
@@ -883,18 +892,17 @@ export function registerIssueTools(server: McpServer): void {
           .enum(ISSUE_STATUSES)
           .optional()
           .describe(
-            "Initial status. Defaults to `ready`; to `blocked` for third-party feedback and for any " +
-              "`source: owner` feature request. Use `waiting` when the issue depends on another " +
-              "issue rather than on a person.",
+            "Initial status. Defaults to `ready`. Use `blocked` only when the issue genuinely can't " +
+              "move without the owner, and `waiting` when it depends on another issue rather than a person.",
           ),
         source: z
           .enum(ISSUE_SOURCES)
           .optional()
           .describe(
-            "Where the report came from, if it is feedback. `owner` / `user-feedback` are how it " +
-              "arrived — an app's in-app reporter, filed in that app's own repo. The per-app values " +
-              "name which app, for reports cross-filed elsewhere. `owner` is trusted, so his defects " +
-              "start `ready` instead of awaiting verification.",
+            "Where the report came from, for provenance only — it no longer changes the initial " +
+              "status. `owner` / `user-feedback` are how it arrived — an app's in-app reporter, filed " +
+              "in that app's own repo. The per-app values name which app, for reports cross-filed " +
+              "elsewhere.",
           ),
         effort: z
           .enum(ISSUE_EFFORTS)
@@ -919,16 +927,33 @@ export function registerIssueTools(server: McpServer): void {
           .positive()
           .optional()
           .describe("Parent issue number; nests the new issue as its sub-issue."),
+        parent_repo: repoParam.describe(
+          'The PARENT\'s repo as "owner/name", if different from `repo` (the new issue\'s repo). ' +
+            "Defaults to `repo` when omitted, matching the same-repo case.",
+        ),
         assignees: z
           .array(z.string())
           .optional()
           .describe('Usernames to assign, or "@me". Default: unassigned.'),
       },
     },
-    async ({ repo, title, body, type, status, source, effort, priority, milestone, parent, assignees }) => {
+    async ({
+      repo,
+      title,
+      body,
+      type,
+      status,
+      source,
+      effort,
+      priority,
+      milestone,
+      parent,
+      parent_repo,
+      assignees,
+    }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const effectiveStatus: IssueStatus = status ?? defaultStatus(source, type);
+        const effectiveStatus: IssueStatus = status ?? defaultStatus();
 
         const labels = [statusLabel(effectiveStatus)];
         if (source) labels.push(sourceLabel(source));
@@ -979,8 +1004,13 @@ export function registerIssueTools(server: McpServer): void {
 
         if (parent) {
           try {
+            // Resolved independently from the new issue's own repo (#234) — a parent in a
+            // different repo (same org) must be posted to via ITS repo, not the child's.
+            const { owner: parentOwner, name: parentName } = await resolveRepo(
+              parent_repo ?? repo,
+            );
             // The sub_issues endpoint takes the child's database id, already captured above.
-            await ghRequest(`/repos/${owner}/${name}/issues/${parent}/sub_issues`, {
+            await ghRequest(`/repos/${parentOwner}/${parentName}/issues/${parent}/sub_issues`, {
               method: "POST",
               body: { sub_issue_id: id },
             });
