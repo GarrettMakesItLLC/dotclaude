@@ -332,10 +332,15 @@ export function registerPrTools(server: McpServer): void {
     {
       description:
         "Enable auto-merge on a pull request (GitHub merges it automatically once required " +
-        "checks — and the merge queue, where enabled — clear). Prefer this over " +
-        "`gh pr merge --auto --squash`: that CLI subcommand issues extra GraphQL calls beyond " +
-        "the single mutation this tool sends, and trips GitHub's secondary rate limit under " +
-        "concurrent-agent load in a way a lone `enablePullRequestAutoMerge` call does not (#238).",
+        "checks — and the merge queue, where enabled — clear), then READ BACK the state that " +
+        "resulted. Prefer this over `gh pr merge --auto --squash`: that CLI subcommand issues " +
+        "extra GraphQL calls beyond the mutation this tool sends, and trips GitHub's secondary " +
+        "rate limit under concurrent-agent load in a way a lone mutation does not (#238). " +
+        "Returns `armed` (the observed state, not the mutation's say-so), plus " +
+        "`in_merge_queue`, `auto_merge_request`, and `merge_state_status`. On a branch with a " +
+        "required merge queue, `auto_merge_request` stays null even when the PR is enqueued — " +
+        "`in_merge_queue` is the signal there, and checking the wrong one reads as a silent " +
+        "failure every time (#259).",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Pull request number."),
@@ -351,15 +356,88 @@ export function registerPrTools(server: McpServer): void {
         const pr = await ghRequest<{ node_id: string }>(
           `/repos/${owner}/${name}/pulls/${number}`,
         );
-        await ghGraphQL(
-          `mutation($id: ID!, $method: PullRequestMergeMethod!) {
-            enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $method }) {
-              clientMutationId
+
+        // A branch whose ruleset requires a merge queue pins the merge method,
+        // and the mutation rejects any explicit one. Retried without it rather
+        // than surfaced, because the caller's `method` is a preference and the
+        // queue's is a rule (#259).
+        let methodUsed: string | null = method;
+        try {
+          await ghGraphQL(
+            `mutation($id: ID!, $method: PullRequestMergeMethod!) {
+              enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $method }) {
+                clientMutationId
+              }
+            }`,
+            { id: pr.node_id, method: method.toUpperCase() },
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!/merge (strategy|method)/i.test(msg)) throw err;
+          await ghGraphQL(
+            `mutation($id: ID!) {
+              enablePullRequestAutoMerge(input: { pullRequestId: $id }) {
+                clientMutationId
+              }
+            }`,
+            { id: pr.node_id },
+          );
+          methodUsed = null;
+        }
+
+        // The mutation returning cleanly is not evidence the PR is armed. It
+        // no-ops on a PR not yet eligible to enqueue — checks still running —
+        // and the caller is told to arm and stop watching, so a false success
+        // leaves the PR unmerged indefinitely with nothing to notice it.
+        //
+        // Both signals are read because they are different mechanisms:
+        // `autoMergeRequest` is populated by the plain auto-merge path and
+        // stays NULL for a merge-queue entry, so checking it alone on a
+        // queue-required branch is a false negative every time — not just
+        // under the vanished-auto-merge failure (#236) it looks identical to.
+        const state = await ghGraphQL<{
+          repository: {
+            pullRequest: {
+              isInMergeQueue: boolean;
+              mergeStateStatus: string;
+              autoMergeRequest: { enabledAt: string; mergeMethod: string } | null;
+            } | null;
+          };
+        }>(
+          `query($owner: String!, $name: String!, $number: Int!) {
+            repository(owner: $owner, name: $name) {
+              pullRequest(number: $number) {
+                isInMergeQueue
+                mergeStateStatus
+                autoMergeRequest { enabledAt mergeMethod }
+              }
             }
           }`,
-          { id: pr.node_id, method: method.toUpperCase() },
+          { owner, name, number },
         );
-        return jsonText({ number, auto_merge_enabled: true, method });
+        const observed = state.repository?.pullRequest ?? null;
+        const inQueue = observed?.isInMergeQueue ?? false;
+        const autoMerge = observed?.autoMergeRequest ?? null;
+        const armed = inQueue || autoMerge !== null;
+
+        const result: Record<string, unknown> = {
+          number,
+          armed,
+          in_merge_queue: inQueue,
+          auto_merge_request: autoMerge,
+          merge_state_status: observed?.mergeStateStatus ?? null,
+          method: methodUsed,
+        };
+        if (!armed) {
+          result._warnings = [
+            `The mutation succeeded but PR #${number} is not armed: neither queued nor carrying ` +
+              `an auto-merge request (mergeStateStatus: ${observed?.mergeStateStatus ?? "unknown"}). ` +
+              "GitHub no-ops this on a PR not yet eligible — most often checks still running — " +
+              "rather than erroring. Call again once checks finish; do NOT treat this as armed " +
+              "and stop watching.",
+          ];
+        }
+        return jsonText(result);
       } catch (err) {
         return errorResult(err);
       }
