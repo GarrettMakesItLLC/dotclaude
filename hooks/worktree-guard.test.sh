@@ -352,6 +352,27 @@ check 0 Bash command "cd $CONV && gh issue list --jq '.[]|select(.updatedAt > \"
 check 0 Bash command "cd $CONV && awk '\$1 > 5 {print}' data.txt"
 check 2 Bash command "cd $CONV && echo hi > \"src/quoted target.ts\""
 
+# --- a linked node_modules is refused wherever it is made (#273) -----------
+# Pointing one worktree's node_modules at a sibling's does not share the
+# install: npm materialises a real directory on the new side and empties the
+# original, and the breakage then surfaces as bundler errors about exports that
+# are all present. Blocked on the DESTINATION being node_modules; linking a
+# single package into one, or anything else anywhere, is untouched.
+check 2 Bash command "ln -s $CONV/.worktrees/wt/node_modules node_modules"
+check 2 Bash command "ln -sf ../other/node_modules ./node_modules"
+check 2 Bash command "ln -s /a/b/node_modules"            # implied destination
+check 2 Bash command "cd /tmp && ln -s /a/b/node_modules node_modules/"
+check 2 Bash command "cp -as /a/b/node_modules node_modules"
+check 2 Bash command "cp -al /a/b/node_modules node_modules"
+check 2 Bash command "/bin/ln --symbolic /a/b/node_modules node_modules"
+check 0 Bash command "ln -s /a/b/node_modules/.bin/vitest /tmp/vitest"
+check 0 Bash command "ln -s ../packages/engine /tmp/node_modules/@x/engine"
+check 0 Bash command "ln -s /a/b/dist /tmp/dist"
+check 0 Bash command "ls -la node_modules"
+check 0 Bash command "echo 'ln -s x node_modules is a bad idea'"
+# A real copy is a real install, and stays allowed.
+check 0 Bash command "cp -r /a/b/node_modules /tmp/node_modules"
+
 if [ "$fail" = 0 ]; then
   
 echo "worktree-guard: all cases passed"
