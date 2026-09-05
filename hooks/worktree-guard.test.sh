@@ -211,7 +211,13 @@ check 0 Bash command "cd $CONV && cd .worktrees/wt && echo hi > notes.md"
 
 # Should ALLOW — an unresolvable `cd` target (a variable) makes the guard
 # refuse to judge anything relative afterward, rather than guess a root.
-check 0 Bash command "cd \$SOME_VAR && echo hi > notes.md"
+# An unresolvable `cd` still BLOCKS: the destination is unknowable, and
+# unknowable is the risk — `$VAR` can expand into a sibling worktree. This
+# case used to assert allow, which would have let exactly that through; what
+# was actually wrong was the MESSAGE, which told the operator to use an
+# absolute path they do not have. It now says which case it is (#320).
+check 2 Bash command "cd \$SOME_VAR && echo hi > notes.md"
+check 2 Bash command "cd - && echo hi > notes.md"
 
 # Should still BLOCK — an ABSOLUTE write-target after an unresolvable `cd`
 # is unaffected (never depended on the tracked base to begin with).
