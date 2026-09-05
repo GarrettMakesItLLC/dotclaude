@@ -166,6 +166,33 @@ This sits directly on `bootstrapping-a-product-repo`'s path — a project needin
 `VITE_*` or a build-time secret set before its first deploy cannot stay inside
 the MCP (#240).
 
+### No Docker daemon in the agent sandbox
+
+`docker` is on PATH here and cannot reach a daemon: no `/var/run/docker.sock`,
+and `sudo` wants a password, so no agent shell can start one. Docker Desktop's
+WSL integration is the fix and is Garrett's toggle
+([#152](https://github.com/GarrettMakesItLLC/dotclaude/issues/152),
+[#153](https://github.com/GarrettMakesItLLC/dotclaude/issues/153)).
+
+Until then, **a schema-only Prisma migration does not need a database**, which
+is the case that most often looks blocked and is not:
+
+```bash
+prisma migrate diff \
+  --from-schema-datamodel <old-schema> --to-schema-datamodel <new-schema> --script
+```
+
+That variant is fully offline. `--from-migrations` is not — it wants a
+`--shadow-database-url`. Write the output to
+`prisma/migrations/<timestamp>_<name>/migration.sql` by hand, append whatever
+the repo's convention adds that `migrate diff` cannot know about (RLS
+statements, in repos that use them), then `prisma generate`, `prisma validate`
+and `tsc --noEmit` — all offline, and together they verify everything short of
+applying it.
+
+What genuinely needs a live database: applying the migration, and any RLS
+check. Those wait for CI or for the toggle above.
+
 ### Railway MCP gap — `update-service` silently drops `source`
 
 `mcp__plugin_railway_railway__update-service` accepts a `source` field, returns
