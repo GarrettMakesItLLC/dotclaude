@@ -44,6 +44,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * `execGh` resolves the server's chosen token once per process (#263), which
+ * spawns `gh auth token`. That is setup, not a project call — counting it would
+ * make every retry assertion here about credential plumbing instead of retries.
+ */
+const projectCalls = () =>
+  execFileMock.mock.calls.filter(
+    (c: unknown[]) => !((c[1] as string[])[0] === "auth" && (c[1] as string[])[1] === "token"),
+  ).length;
+
 describe("getProjectField", () => {
   it("finds a field by name, including its options", async () => {
     ghSuccess(
@@ -92,7 +102,7 @@ describe("getProjectField", () => {
     });
     const { getProjectField } = await import("../src/project.js");
     await expect(getProjectField("Effort")).rejects.toThrow("some other gh failure");
-    expect(execFileMock).toHaveBeenCalledTimes(1);
+    expect(projectCalls()).toBe(1);
   });
 
   it("wraps gh's explicit missing-scope error with the actionable fix, without retrying (#4051)", async () => {
@@ -107,7 +117,7 @@ describe("getProjectField", () => {
     });
     const { getProjectField } = await import("../src/project.js");
     await expect(getProjectField("Effort")).rejects.toThrow("gh auth refresh -s project");
-    expect(execFileMock).toHaveBeenCalledTimes(1);
+    expect(projectCalls()).toBe(1);
   });
 
   it("wraps a second \"unknown owner type\" (post-retry) with the actionable fix (#4051)", async () => {
@@ -118,7 +128,7 @@ describe("getProjectField", () => {
     const { getProjectField } = await import("../src/project.js");
     await expect(getProjectField("Effort")).rejects.toThrow("gh auth refresh -s project");
     // One initial attempt + one retry — the retry still exists for the genuine race (#147).
-    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(projectCalls()).toBe(2);
   });
 
   it("caches the field list across calls, but a miss triggers one refetch before giving up", async () => {
