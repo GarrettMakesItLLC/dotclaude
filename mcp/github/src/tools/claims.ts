@@ -173,10 +173,16 @@ export function registerClaimTools(server: McpServer): void {
       description:
         "Survey every claim currently held on the remote: the `issue-*` lock branches, each with " +
         "who claimed it and when (from its stamp comment, when one was posted), its last commit " +
-        "(author + time), and any open PR. Call this BEFORE picking up work — a claim held by " +
-        "another machine lives in a local worktree you cannot see, but its pushed lock branch is " +
-        "visible here. A branch with a stale last commit and no PR is a candidate for " +
-        "`claim_release`.",
+        "(author + time), the state of its issue, and any open PR. Call this BEFORE picking up " +
+        "work — a claim held by another machine lives in a local worktree you cannot see, but " +
+        "its pushed lock branch is visible here.\n\n" +
+        "`issue_state` is the signal for whether a claim is dead. A row marked `closed` is a " +
+        "leftover lock (closing an issue does not delete its branch) and is safe to " +
+        "`claim_release`; `dead_claims` counts them. An `open` row is live work — pick something " +
+        "else — however quiet it looks.\n\n" +
+        "**Never read `last_commit_at` as activity.** A holder\'s commits can sit unpushed in a " +
+        "worktree this cannot see, so a months-quiet branch may be someone\'s live work and " +
+        "releasing it destroys it. Set `include_closed: false` to survey only live claims.",
       inputSchema: {
         repo: repoParam,
         limit: z
@@ -185,9 +191,16 @@ export function registerClaimTools(server: McpServer): void {
           .positive()
           .optional()
           .describe("Max in-flight branches to detail (default 30)."),
+        include_closed: z
+          .boolean()
+          .optional()
+          .describe(
+            "Include locks whose issue is already closed — leftovers, not work in progress. " +
+              "Default true so they stay visible for cleanup; false surveys only live claims.",
+          ),
       },
     },
-    async ({ repo, limit }) => {
+    async ({ repo, limit, include_closed: includeClosed = true }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
         const [refs, pulls] = await Promise.all([
@@ -207,12 +220,21 @@ export function registerClaimTools(server: McpServer): void {
         const rows = await Promise.all(
           branches.map(async ({ branch, sha }) => {
             const issue = issueNumberForBranch(branch) ?? null;
-            const [commit, stamp] = await Promise.all([
+            const [commit, stamp, issueState] = await Promise.all([
               ghRequest<CommitResponse>(`/repos/${owner}/${name}/commits/${sha}`).catch(
                 // A ref whose commit is unreadable still counts as in-flight.
                 () => null,
               ),
               issue ? latestClaimStamp(owner, name, issue, branch) : Promise.resolve(null),
+              // The one sound signal for whether a claim is dead. Closing an
+              // issue does not delete its lock branch, so the ref outlives the
+              // work and the protocol's "anything listed is being worked" rule
+              // then steers every session away from issues nobody holds.
+              issue
+                ? ghRequest<{ state?: string }>(`/repos/${owner}/${name}/issues/${issue}`)
+                    .then((i) => i.state ?? null)
+                    .catch(() => null)
+                : Promise.resolve(null),
             ]);
             const pr = prByHead.get(branch);
             return {
@@ -221,6 +243,9 @@ export function registerClaimTools(server: McpServer): void {
               sha,
               claimed_by: stamp?.holder ?? null,
               claimed_at: stamp?.claimed_at ?? null,
+              issue_state: issueState,
+              /** A lock whose issue is closed. Safe to `claim_release`; not work in progress. */
+              dead: issueState === "closed",
               last_commit_at: commit?.commit?.author?.date ?? null,
               last_commit_author: commit?.commit?.author?.name ?? null,
               last_commit_message: commit?.commit?.message?.split("\n")[0] ?? null,
@@ -237,7 +262,25 @@ export function registerClaimTools(server: McpServer): void {
         );
 
         rows.sort((a, b) => (b.last_commit_at ?? "").localeCompare(a.last_commit_at ?? ""));
-        return jsonText(rows);
+
+        const dead = rows.filter((r) => r.dead);
+        const shown = includeClosed ? rows : rows.filter((r) => !r.dead);
+        // A count rather than only per-row flags: the failure this fixes is a
+        // reader skimming the list and treating its length as "work in
+        // progress", which is what hid six dead locks among eight rows.
+        return jsonText({
+          live_claims: rows.length - dead.length,
+          dead_claims: dead.length,
+          ...(dead.length > 0
+            ? {
+                note:
+                  `${dead.length} lock(s) below have a closed issue and are leftovers rather ` +
+                  `than work in progress — release them with claim_release. Judge by issue_state, ` +
+                  `never by last_commit_at: a holder's commits can sit unpushed where this cannot see them.`,
+              }
+            : {}),
+          claims: shown,
+        });
       } catch (err) {
         return errorResult(err);
       }
