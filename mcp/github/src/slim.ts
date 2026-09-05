@@ -101,6 +101,24 @@ function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
   return out as Partial<T>;
 }
 
+/**
+ * A ticked box on an issue body's owner-action checklist.
+ *
+ * An agent writes an `⛔ Owner action required` list unchecked, so a `[x]`
+ * anywhere in the body is somebody answering — and it is the ONE signal for
+ * that which a machine can read. Comment author cannot be used: every agent
+ * posts under the owner's account, so the only thing separating his reply from
+ * an agent's is its voice.
+ *
+ * This exists because scanning for OUTSTANDING actions (`- [ ]`) hides an
+ * answered issue by construction — the answered row is precisely the one that
+ * does not match. A sweep of 56 blocked issues reported all 56 unanswered
+ * while three carried complete answers (#315).
+ */
+export function hasTickedOwnerAction(body: string | null | undefined): boolean {
+  return body != null && /^\s*[-*]\s*\[[xX]\]/m.test(body);
+}
+
 export function slimIssue(raw: RawIssue, opts: { body?: boolean } = {}): Record<string, unknown> {
   const sub = raw.sub_issues_summary;
   return compact({
@@ -121,6 +139,9 @@ export function slimIssue(raw: RawIssue, opts: { body?: boolean } = {}): Record<
     updated_at: raw.updated_at,
     closed_at: raw.closed_at,
     html_url: raw.html_url,
+    // Surfaced even when the body is not returned, so a LIST shows it. An
+    // agent scanning a blocked queue never opens the answered one otherwise.
+    owner_action_answered: hasTickedOwnerAction(raw.body) ? true : undefined,
     body: opts.body ? (raw.body ?? "") : undefined,
   });
 }
