@@ -105,6 +105,48 @@ check 0 'rm -rf "/tmp/x"'
 check 0 'rm -f /etc/foo'
 check 0 'rrm -rf /'
 
+# --- git stash where refs/stash is shared with sibling worktrees (#297, #275).
+# `refs/stash` is ONE repo-wide stack: a linked worktree isolates the working
+# tree and the index, never the ref namespace. Two agents interleaving push/pop
+# meant one popped the other's entry, with no error from git either time.
+#
+# Run from PURPOSE-BUILT repos, not from wherever the suite happens to be
+# invoked. The rule keys on `git worktree list`, so an ambient cwd makes the
+# answer depend on the developer's shell — green from a worktree, red from a
+# plain checkout, and CI is a plain checkout (#269).
+stash_repo="$(mktemp -d)/multi"
+git init -q "$stash_repo"
+git -C "$stash_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git -C "$stash_repo" worktree add -q "$stash_repo/.worktrees/wt" -b feat 2>/dev/null
+(
+  cd "$stash_repo" || exit 1
+  check 2 'git stash'
+  check 2 'git stash push -m wip'
+  check 2 'git stash -u'
+  check 2 'git stash pop'
+  check 2 'git stash apply'
+  check 2 'git stash drop'
+  # Reads are fine — seeing the stack is how you discover somebody else's entry.
+  check 0 'git stash list'
+  check 0 'git stash show'
+  # Not a stash at all, and prose that merely mentions one.
+  check 0 'git status'
+  check 0 'echo git stash is repo-wide >> notes.md'
+) || fail=1
+rm -rf "$(dirname "$stash_repo")"
+
+# A repo with a single worktree has no sibling to collide with, so stashing is
+# the operator's own business.
+solo="$(mktemp -d)/solo"
+git init -q "$solo"
+git -C "$solo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+(
+  cd "$solo" || exit 1
+  check 0 'git stash push -m wip'
+  check 0 'git stash pop'
+) || fail=1
+rm -rf "$(dirname "$solo")"
+
 if [ "$fail" = 0 ]; then
   echo "git-guard: all cases passed"
 fi

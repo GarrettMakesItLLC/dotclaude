@@ -31,6 +31,10 @@
 # exits 0 and lets the edit through. A guard that bricks every edit is far worse
 # than one that occasionally misses — it is a backstop, not the only boundary.
 #
+# NOT ABOUT THE MAIN TREE (#273): one Bash rule fires wherever it is run —
+# creating `node_modules` as a symlink or hardlink tree. Its damage lands in
+# the directory it points AT, so the main-tree question does not apply.
+#
 # BASH COVERAGE (#92): a `Bash` command is scanned for write patterns —
 # redirection (`>`, `>>`), `sed -i`/`--in-place`, `cp`/`mv`/`install`/`tee`
 # destinations, and a Python `open(path, "w"/"a"/...)` call anywhere in the
@@ -85,6 +89,106 @@ input="$(cat)"
 
 # Need python3 to parse the tool_input JSON. No parser -> fail open.
 command -v python3 >/dev/null 2>&1 || exit 0
+
+# A linked `node_modules` — checked before anything else, because it is the one
+# write here whose damage lands somewhere the command never names.
+#
+# Pointing a throwaway worktree's `node_modules` at a sibling's, to skip a
+# multi-minute install, does not share the install: something in the npm/npx
+# path resolves through the link, materialises a real directory on the new
+# side, and leaves the ORIGINAL holding one entry. The sibling belongs to
+# another agent in a swarm, and it is now broken.
+#
+# What makes it worth a guard rather than a lesson is that the failure is
+# misattributed by construction. A missing install surfaces through the bundler
+# as source-level errors naming real files and real symbols — six "No matching
+# export in packages/engine/src/index.ts" from esbuild, for exports that are
+# all present — minutes after tsc, eslint and vitest all passed. It reads as a
+# regression from the last edit, so the debugging goes into code that is fine
+# (#273).
+#
+# Scoped to the destination being `node_modules` itself. Linking a single
+# package into one, or anything else anywhere, is untouched.
+# Its own stderr is kept and its exit status checked, for the same reason the
+# main extractor's are: a crashed check that returns nothing is indistinguishable
+# from one that found nothing, and the whole rule goes quiet (#319).
+link_err="$(mktemp 2>/dev/null || echo /tmp/worktree-guard-link-err.$$)"
+link_verdict="$(INPUT_JSON="$input" python3 - <<'PYEOF' 2>"$link_err"
+import json, os, re, shlex, sys
+
+try:
+    obj = json.loads(os.environ.get("INPUT_JSON", ""))
+except Exception:
+    sys.exit(0)
+if obj.get("tool_name", "") != "Bash":
+    sys.exit(0)
+cmd = obj.get("tool_input", {}).get("command") or ""
+
+# `ln -s` makes the symlink; `cp -s`/`cp -al` make a tree of them. Each takes
+# its destination last, and `ln -s SRC` with no destination lands the link in
+# the cwd under the source's basename — which is `node_modules` exactly when
+# the source is one.
+LINKERS = {"ln", "cp"}
+
+def is_node_modules(tok):
+    return tok.strip("\"'").rstrip("/").split("/")[-1] == "node_modules"
+
+for seg in re.split(r"&&|\|\||\||;|\n", cmd):
+    try:
+        toks = shlex.split(seg)
+    except ValueError:
+        toks = seg.split()
+    if not toks:
+        continue
+    cmd_tok = toks[0].split("/")[-1]
+    if cmd_tok not in LINKERS:
+        continue
+    flags = [t for t in toks[1:] if t.startswith("-")]
+    letters = "".join(f.lstrip("-") for f in flags if not f.startswith("--"))
+    symbolic = "s" in letters or "--symbolic" in flags or "--symbolic-link" in flags
+    hardlinked = cmd_tok == "cp" and ("l" in letters or "--link" in flags)
+    if not (symbolic or hardlinked):
+        continue
+    operands = [t for t in toks[1:] if not t.startswith("-")]
+    if not operands:
+        continue
+    # The destination, or — for a one-operand `ln -s SRC` — the implied one.
+    target = operands[-1] if len(operands) > 1 else operands[0]
+    if is_node_modules(target):
+        print(seg.strip())
+        break
+PYEOF
+)"
+link_status=$?
+if [ "$link_status" -ne 0 ]; then
+  echo "⛔ dotclaude worktree-guard could not inspect this command, so it is refusing it." >&2
+  echo "Reason: the node_modules-link check exited $link_status. That is a bug in the guard," >&2
+  echo "  not a verdict on your command (#319)." >&2
+  [ -s "$link_err" ] && { echo "Check error:" >&2; sed 's/^/    /' "$link_err" >&2; }
+  echo "Fix: repair hooks/worktree-guard.sh. WORKTREE_GUARD_OFF=1 unblocks you meanwhile." >&2
+  rm -f "$link_err"
+  exit 2
+fi
+rm -f "$link_err"
+if [ -n "$link_verdict" ]; then
+  echo "⛔ dotclaude worktree-guard blocked this command." >&2
+  echo "Reason: it creates \`node_modules\` as a link:" >&2
+  echo "    $link_verdict" >&2
+  echo "  This does not share one install between two worktrees. npm resolves through" >&2
+  echo "  the link, materialises a real directory on THIS side, and empties the one you" >&2
+  echo "  pointed at — which in a swarm belongs to another agent. The breakage then" >&2
+  echo "  surfaces as bundler errors naming real files and real exports, so the next" >&2
+  echo "  hour goes into debugging source that is fine (#273)." >&2
+  echo "Instead, either:" >&2
+  echo "  - give the throwaway worktree its own real install — slow, but the only" >&2
+  echo "    correct option the moment the two trees' lockfiles differ at all; or" >&2
+  echo "  - skip the second worktree: commit your work in progress on the branch you" >&2
+  echo "    are on (\`git commit\`, undone with \`git reset --soft HEAD~1\`), check out" >&2
+  echo "    the baseline in place, and reuse the install that is already correct for" >&2
+  echo "    this tree. Not \`git stash\` — \`refs/stash\` is shared across every" >&2
+  echo "    worktree of the repo, which is its own version of this bug." >&2
+  exit 2
+fi
 # Edit/Write/MultiEdit use file_path; NotebookEdit uses notebook_path; Bash
 # uses command, scanned below for write patterns instead of a single path.
 # Emits one candidate path per line — bash variables cannot hold an embedded
