@@ -112,5 +112,22 @@ script="$owner_repo/bin/setup-worktree.sh"
 [ -x "$script" ] || exit 0
 
 # Surface the script's own output to the user; never fail the hook on its exit.
-"$script" "$target" || true
+#
+# But do NOT swallow the exit code. An install that half-ran leaves a worktree
+# that looks usable and is not: with an empty `node_modules`, Node resolution
+# and `npx` walk UP the real filesystem past the worktree and bind to the main
+# checkout's install instead — so the tree runs, against another checkout's
+# dependencies, and the first sign is a phantom type error or a Prisma client
+# that does not match the schema in front of you (#175). Nothing about that
+# reads as "the install did not happen".
+#
+# Still exit 0 — this hook must never block a shell — but say so.
+if ! "$script" "$target"; then
+  rc=$?
+  echo "⚠ dotclaude worktree-bootstrap: $script exited $rc for $target." >&2
+  echo "  That worktree is primed INCOMPLETELY. An empty node_modules does not fail" >&2
+  echo "  loudly — Node resolves upward to the main checkout and the tree runs against" >&2
+  echo "  another checkout's dependencies. Re-run the script by hand before trusting a" >&2
+  echo "  typecheck, lint or test result from it." >&2
+fi
 exit 0
