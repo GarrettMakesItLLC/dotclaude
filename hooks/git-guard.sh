@@ -26,6 +26,14 @@
 #   - `rm -rf *` / `rm -rf .` whose danger depends on the current directory
 #     (e.g. `cd / && rm -rf *`) — we can't know CWD, so a bare glob/dot is not
 #     blocked. Only explicit dangerous path arguments are.
+#
+# NARROW ESCAPE (#185): GIT_GUARD_HOOK_PROVEN_KILLED=1 lifts ONLY the
+# --no-verify/-n block (not force-push or .env), for the one case where "fix
+# the hook" has no meaning — the hook process was OOM-killed by unrelated
+# swarm contention and never evaluated the diff at all. Deliberately a
+# different, narrower variable than a blanket --no-verify escape hatch; the
+# bypass is always logged loudly to stderr even though the command is
+# allowed through, so it's never silent.
 
 set -uo pipefail
 
@@ -88,8 +96,25 @@ fi
 printf '%s' "$scrubbed" | grep -Eq '(^|[^[:alnum:]_./-])git([[:space:]]|$)' || exit 0
 
 # 1) Never bypass git hooks: --no-verify, commit -n, or -c core.hooksPath=...
-if printf '%s' "$scrubbed" | grep -Eq -- '--no-verify'; then
-  block "git --no-verify is forbidden. Fix the failing hook (gitleaks/lint/typecheck) and commit normally — then make a NEW commit."
+#
+# NARROW ESCAPE (#185): the failing signal can be the hook process getting
+# OOM-killed by unrelated swarm contention, not a real problem with the diff —
+# "fix the hook" has no meaning when the hook never evaluated the diff at all.
+# GIT_GUARD_HOOK_PROVEN_KILLED=1 lifts ONLY this specific block (not the
+# force-push or .env rules below), and only after the caller has actually
+# confirmed the kill — via the hook's own "Killed" / exit 137 output, or
+# `dmesg | grep -i "killed process"` naming the hook's process. It is
+# deliberately a different, narrower variable than a blanket --no-verify
+# escape hatch, and the bypass is always logged loudly to stderr so it is
+# never silent even though the command itself is allowed through.
+if [ -n "${GIT_GUARD_HOOK_PROVEN_KILLED:-}" ]; then
+  if printf '%s' "$scrubbed" | grep -Eq -- '--no-verify'; then
+    echo "⚠️  dotclaude git-guard: allowing git --no-verify — GIT_GUARD_HOOK_PROVEN_KILLED is set." >&2
+    echo "   This bypasses commit hooks. Only legitimate when the hook was proven OOM-killed" >&2
+    echo "   (exit 137 / dmesg 'Killed process'), not when it found a real problem." >&2
+  fi
+elif printf '%s' "$scrubbed" | grep -Eq -- '--no-verify'; then
+  block "git --no-verify is forbidden. Fix the failing hook (gitleaks/lint/typecheck) and commit normally — then make a NEW commit. If the hook was OOM-killed by unrelated swarm contention (exit 137, or 'dmesg | grep -i \"killed process\"' names it) rather than finding a real problem, set GIT_GUARD_HOOK_PROVEN_KILLED=1 for this one command."
 fi
 if printf '%s' "$scrubbed" | grep -Eiq -- '-c[[:space:]=]*core\.hookspath'; then
   block "git -c core.hooksPath=... disables hooks (same effect as --no-verify). Forbidden — fix the hook and retry."
@@ -102,7 +127,13 @@ commit_args="$(printf '%s' "$scrubbed" \
   | perl -0777 -ne 'while (/git\s+commit((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)/gs) { print "$1\n" }')"
 if [ -n "$commit_args" ] \
    && printf '%s' "$commit_args" | grep -Eq '(^|[[:space:]])-[a-zA-Z]*n[a-zA-Z]*([[:space:]]|$)'; then
-  block "git commit -n bypasses hooks (short for --no-verify). Forbidden — fix the hook and retry."
+  if [ -n "${GIT_GUARD_HOOK_PROVEN_KILLED:-}" ]; then
+    echo "⚠️  dotclaude git-guard: allowing git commit -n — GIT_GUARD_HOOK_PROVEN_KILLED is set." >&2
+    echo "   This bypasses commit hooks. Only legitimate when the hook was proven OOM-killed" >&2
+    echo "   (exit 137 / dmesg 'Killed process'), not when it found a real problem." >&2
+  else
+    block "git commit -n bypasses hooks (short for --no-verify). Forbidden — fix the hook and retry. If the hook was OOM-killed by unrelated swarm contention (exit 137, or 'dmesg | grep -i \"killed process\"' names it) rather than finding a real problem, set GIT_GUARD_HOOK_PROVEN_KILLED=1 for this one command."
+  fi
 fi
 
 # 2) Force-push to main/master is the user's call, never Claude's. Covers

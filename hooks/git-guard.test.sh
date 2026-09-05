@@ -147,6 +147,35 @@ git -C "$solo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 ) || fail=1
 rm -rf "$(dirname "$solo")"
 
+# --- #185: GIT_GUARD_HOOK_PROVEN_KILLED narrows ONLY the --no-verify/-n
+# block, and only when actually set.
+check_env() {
+  local want="$1" envval="$2" cmd="$3"
+  local got
+  printf '%s' "$cmd" \
+    | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
+    | GIT_GUARD_HOOK_PROVEN_KILLED="$envval" "$GUARD" >/dev/null 2>&1
+  got=$?
+  if [ "$got" != "$want" ]; then
+    echo "FAIL: want exit $want, got $got for (GIT_GUARD_HOOK_PROVEN_KILLED=$envval): $cmd"
+    fail=1
+  fi
+}
+
+# Should ALLOW — the escape hatch lifts --no-verify/-n when actually set.
+check_env 0 1 'git commit --no-verify -m "x"'
+check_env 0 1 'git commit -nm "x"'
+check_env 0 1 'git push --no-verify'
+
+# Should still BLOCK — unset (or empty) leaves the normal block in place.
+check_env 2 '' 'git commit --no-verify -m "x"'
+
+# Should still BLOCK — the escape is narrow: force-push and .env rules are
+# UNAFFECTED even with the var set.
+check_env 2 1 'git push --force origin main'
+check_env 2 1 'git add .env'
+check_env 2 1 'git -c core.hooksPath=/tmp/x commit -m "y"'
+
 if [ "$fail" = 0 ]; then
   echo "git-guard: all cases passed"
 fi
