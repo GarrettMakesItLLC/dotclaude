@@ -22,13 +22,13 @@ import {
   statusLabel,
   sourceLabel,
   effortModelMismatch,
-  TRUSTED_SOURCES,
   type IssueEffort,
   type IssueSource,
   type IssueStatus,
   type IssueType,
 } from "../labels.js";
 import {
+  addProjectItem,
   findProjectItem,
   getProjectField,
   invalidateProjectItem,
@@ -59,18 +59,14 @@ async function resolveAssignees(assignees: string[]): Promise<string[]> {
 }
 
 /**
- * The status an issue starts in when the caller doesn't name one.
- *
- * A defect the owner reported himself is already verified — his account of
- * running software settles whether it happens — so it starts ready. So does one
- * an agent or a code review found, since both carry the evidence with them.
- * Anyone else's defect report is one unverified account, and a feature request
- * needs his intent before it is built: both wait on him.
+ * The status an issue starts in when the caller doesn't name one: always
+ * ready. Source and type used to route some reports to an auto-blocked
+ * verification queue; that routing added a triage step nobody wanted and is
+ * gone — an issue that genuinely needs the owner is marked blocked
+ * explicitly, not inferred from who filed it.
  */
-function defaultStatus(source?: IssueSource, type?: IssueType): IssueStatus {
-  if (!source) return "ready";
-  if (TRUSTED_SOURCES.includes(source)) return type === "feature" ? "blocked" : "ready";
-  return "blocked";
+function defaultStatus(): IssueStatus {
+  return "ready";
 }
 
 /**
@@ -103,10 +99,18 @@ async function ensureMilestone(
  * case-insensitive on both sides — option names on the project are
  * capitalized (e.g. "Complex") while callers pass the lowercase enum value,
  * but a caller passing mixed case is matched too.
- * Throws if the issue isn't a project item, or the field has no such option —
- * callers that want best-effort behavior (issue_open) catch around this;
- * callers that want a hard failure (issue_set_effort/issue_set_priority) let
- * it propagate to their own try/catch.
+ * An issue that isn't on the board yet is ADDED rather than rejected. Effort
+ * and Priority live on the project, so "not a project item" is a missing setup
+ * step the caller cannot be expected to do out-of-band — and it made
+ * `issue_open`'s `effort`/`priority` params inert on every newly-created
+ * issue, since nothing adds the issue between creating it and setting the
+ * fields (platform#745). `addProjectV2ItemById` is idempotent, so this is
+ * safe on an issue already on the board.
+ *
+ * Throws if the field has no such option — callers that want best-effort
+ * behavior (issue_open) catch around this; callers that want a hard failure
+ * (issue_set_effort/issue_set_priority) let it propagate to their own
+ * try/catch.
  */
 async function applyProjectSingleSelect(
   owner: string,
@@ -115,12 +119,8 @@ async function applyProjectSingleSelect(
   fieldName: string,
   optionValue: string,
 ): Promise<void> {
-  const item = await findProjectItem(owner, name, number);
-  if (!item) {
-    throw new Error(
-      `Issue #${number} in ${owner}/${name} is not on the GarrettMakesItLLC — Work project — add it first.`,
-    );
-  }
+  const existing = await findProjectItem(owner, name, number);
+  const item = existing ?? { id: await addProjectItem(owner, name, number) };
   const field = await getProjectField(fieldName);
   const option = field.options?.find(
     (o) => o.name.toLowerCase() === optionValue.toLowerCase(),
@@ -800,8 +800,9 @@ export function registerIssueTools(server: McpServer): void {
         "Create a fully-formed issue in one call: composes status/type/source labels, sets the " +
         "native issue type (best-effort), finds-or-creates and attaches a milestone by title, and " +
         "nests it under a parent as a sub-issue — instead of hand-composing across several tool calls. " +
-        "Status defaults to `ready`, except third-party feedback and owner feature requests, which " +
-        "start `blocked` awaiting the owner. " +
+        "Status always defaults to `ready` — nothing is auto-routed to `blocked` based on who filed it " +
+        "or what kind of report it is. Mark an issue `blocked` explicitly when it genuinely can't move " +
+        "without the owner (a decision, a credential, an external dependency). " +
         "The issue itself is always created first; milestone/sub-issue enrichment is best-effort — " +
         "on partial failure the created issue is still returned, annotated with a `_warnings` array.",
       inputSchema: {
@@ -813,18 +814,17 @@ export function registerIssueTools(server: McpServer): void {
           .enum(ISSUE_STATUSES)
           .optional()
           .describe(
-            "Initial status. Defaults to `ready`; to `blocked` for third-party feedback and for any " +
-              "`source: owner` feature request. Use `waiting` when the issue depends on another " +
-              "issue rather than on a person.",
+            "Initial status. Defaults to `ready`. Use `blocked` only when the issue genuinely can't " +
+              "move without the owner, and `waiting` when it depends on another issue rather than a person.",
           ),
         source: z
           .enum(ISSUE_SOURCES)
           .optional()
           .describe(
-            "Where the report came from, if it is feedback. `owner` / `user-feedback` are how it " +
-              "arrived — an app's in-app reporter, filed in that app's own repo. The per-app values " +
-              "name which app, for reports cross-filed elsewhere. `owner` is trusted, so his defects " +
-              "start `ready` instead of awaiting verification.",
+            "Where the report came from, for provenance only — it no longer changes the initial " +
+              "status. `owner` / `user-feedback` are how it arrived — an app's in-app reporter, filed " +
+              "in that app's own repo. The per-app values name which app, for reports cross-filed " +
+              "elsewhere.",
           ),
         effort: z
           .enum(ISSUE_EFFORTS)
@@ -875,7 +875,7 @@ export function registerIssueTools(server: McpServer): void {
     }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const effectiveStatus: IssueStatus = status ?? defaultStatus(source, type);
+        const effectiveStatus: IssueStatus = status ?? defaultStatus();
 
         const labels = [statusLabel(effectiveStatus)];
         if (source) labels.push(sourceLabel(source));

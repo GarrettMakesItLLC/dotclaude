@@ -246,6 +246,69 @@ export function invalidateProjectItem(owner: string, repo: string, issueNumber: 
   cachedItemsByIssue.delete(`${owner}/${repo}#${issueNumber}`);
 }
 
+const ISSUE_NODE_ID_QUERY = `
+  query($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) {
+      issue(number: $number) { id }
+    }
+  }
+`;
+
+const ADD_ITEM_MUTATION = `
+  mutation($projectId: ID!, $contentId: ID!) {
+    addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+      item { id }
+    }
+  }
+`;
+
+interface IssueNodeIdResponse {
+  repository?: { issue?: { id: string } | null } | null;
+}
+
+interface AddItemResponse {
+  addProjectV2ItemById?: { item?: { id: string } | null } | null;
+}
+
+/**
+ * Add an issue to the project, returning its item id.
+ *
+ * Effort and Priority live on the PROJECT, not the issue, so they can only be
+ * set on something that is already a project item. `issue_open` created the
+ * issue and then tried to set them, with no step in between — so both params
+ * were inert on every newly-created issue that a project workflow did not
+ * happen to auto-add, reporting the miss in `_warnings` rather than doing the
+ * one call that would have fixed it (platform#745).
+ *
+ * `addProjectV2ItemById` is idempotent: adding an issue already on the board
+ * returns the existing item rather than duplicating it, so a caller does not
+ * have to check first.
+ */
+export async function addProjectItem(
+  owner: string,
+  repo: string,
+  issueNumber: number,
+): Promise<string> {
+  const issue = await ghGraphQL<IssueNodeIdResponse>(ISSUE_NODE_ID_QUERY, {
+    owner,
+    repo,
+    number: issueNumber,
+  });
+  const contentId = issue.repository?.issue?.id;
+  if (!contentId) throw new Error(`Could not resolve ${owner}/${repo}#${issueNumber}`);
+
+  const added = await ghGraphQL<AddItemResponse>(ADD_ITEM_MUTATION, {
+    projectId: PROJECT_ID,
+    contentId,
+  });
+  const itemId = added.addProjectV2ItemById?.item?.id;
+  if (!itemId) throw new Error(`Adding ${owner}/${repo}#${issueNumber} to the project returned no item`);
+
+  // The cached "not on the board" answer is now wrong.
+  invalidateProjectItem(owner, repo, issueNumber);
+  return itemId;
+}
+
 /** Set a single-select field's value on a project item, by option id. */
 export async function setProjectSingleSelect(
   itemId: string,

@@ -27,6 +27,33 @@ print(json.dumps({"tool_name":sys.argv[1],"tool_input":{sys.argv[2]:sys.argv[3]}
   fi
 }
 
+# --- the guard must fail CLOSED when its own extractor is broken (#319).
+# A misplaced import once switched the whole guard off: empty output was
+# indistinguishable from "this command writes nothing", so every BLOCK case
+# silently passed as allowed. Proven by breaking a copy on purpose.
+BROKEN="$TMP/guard-broken.sh"
+sed 's/^import json, os, re, shlex, sys$/&\nraise RuntimeError("deliberate breakage")/' \
+  "$GUARD" > "$BROKEN"
+chmod +x "$BROKEN"
+broken_got=$(python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"echo hello"}}))
+' | "$BROKEN" >/dev/null 2>&1; echo $?)
+if [ "$broken_got" != "2" ]; then
+  echo "FAIL: want 2, got $broken_got for a BROKEN extractor (must fail closed, #319)"
+  fail=1
+fi
+# And the same input through the real guard is allowed, so the case above is
+# measuring the breakage rather than the command.
+healthy_got=$(python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"echo hello"}}))
+' | "$GUARD" >/dev/null 2>&1; echo $?)
+if [ "$healthy_got" != "0" ]; then
+  echo "FAIL: want 0, got $healthy_got for 'echo hello' through a healthy guard"
+  fail=1
+fi
+
 # --- convention repo: .worktrees/ gitignored, one commit, one linked worktree
 CONV="$TMP/conv"
 mkdir -p "$CONV"
@@ -91,13 +118,50 @@ check 2 Bash command "printf x >> $CONV/src/appended.ts"
 
 # Should BLOCK — sed -i and cp/mv/tee destinations.
 check 2 Bash command "sed -i 's/a/b/' $CONV/src/existing.ts"
+check 2 Bash command "sed -i -e 's/a/b/' $CONV/src/existing.ts"
+check 2 Bash command "sed -i.bak 's/a/b/' $CONV/src/existing.ts"
+# Several files after one script: every one of them is a real target.
+check 2 Bash command "sed -i 's/a/b/' /tmp/ok.ts $CONV/src/existing.ts"
 check 2 Bash command "cp /tmp/whatever.ts $CONV/src/copied.ts"
 check 2 Bash command "mv /tmp/whatever.ts $CONV/src/moved.ts"
 check 2 Bash command "some-generator | tee $CONV/src/teed.ts"
 
+# Should ALLOW — an arrow is not a redirect, and a `#` comment is prose (#289,
+# #271, #258). Each of these blocked on a bare word taken from an arrow's
+# right-hand side.
+check 0 Bash command "railway variable set X --stdin  # curl -> stdin -> Railway; done"
+check 0 Bash command "psql -w -c \"SELECT 1 WHERE c.relname <> 'x';\""
+check 0 Bash command "gh api repos/O/R/issues/3 --jq '\"\\(.n) -> \\(.m)\"'"
+check 0 Bash command "node -e 'const f=()=>{console.log(1)};f()'"
+check 0 Bash command "echo build  # writes dist/out.js -> nowhere real"
+
+# A `#` only opens a comment at the start of a token, so these keep working.
+check 2 Bash command "sed -i 's#a#b#' $CONV/src/existing.ts"
+check 2 Bash command "curl -s https://x/y#frag > $CONV/src/frag.ts"
+# And a real redirect after a comment on an EARLIER line is still a redirect.
+check 2 Bash command "# note
+echo hi > $CONV/src/afterco.ts"
+
 # Should ALLOW — a read-only Bash command with no write pattern at all.
 check 0 Bash command "cat $CONV/src/existing.ts"
 check 0 Bash command "git -C $CONV status"
+
+# Should ALLOW — sed's SCRIPT is a program, not a write target (#295, #313).
+# The file is absolute and correctly named; only the script looked relative.
+check 0 Bash command "sed -i '1s|^node_modules/\$|node_modules|' $CONV/.worktrees/wt/.gitignore"
+check 0 Bash command "sed -i \"s/module: 'a',/module: 'b',/\" $CONV/.worktrees/wt/f.ts"
+check 0 Bash command "sed -i -e 's/a/b/' -e 's/c/d/' $CONV/.worktrees/wt/f.ts"
+check 0 Bash command "sed -i --expression='s/a/b/' $CONV/.worktrees/wt/f.ts"
+# A script supplied by -f is a FILE sed reads, not one it writes.
+check 0 Bash command "sed -i -f /tmp/script.sed $CONV/.worktrees/wt/f.ts"
+
+# Should ALLOW — `sed` inside another word is not the sed command (#295). A
+# hyphen is a word boundary, so a branch name containing `-sed-i-` used to
+# make the guard parse `git`, `worktree` and `add` as sed's files — blocking
+# its own prescribed remedy.
+check 0 Bash command "git -C $CONV worktree add $CONV/.worktrees/w2 issue-295-blocks-sed-i-by-reading"
+check 0 Bash command "git -C $CONV log --oneline --grep=sed-i"
+check 0 Bash command "grep -r parsed-input $CONV/src"
 
 # Should ALLOW — redirection is present but targets a linked worktree, not the
 # main tree; proves Bash candidates go through the same worktree/config-repo
@@ -145,13 +209,26 @@ EOF"
 # Should ALLOW — chained cd's (cd a && cd b) accumulate into the worktree.
 check 0 Bash command "cd $CONV && cd .worktrees/wt && echo hi > notes.md"
 
-# Should ALLOW — an unresolvable `cd` target (a variable) makes the guard
-# refuse to judge anything relative afterward, rather than guess a root.
-check 0 Bash command "cd \$SOME_VAR && echo hi > notes.md"
+# An unresolvable `cd` still BLOCKS: the destination is unknowable, and
+# unknowable is the risk — `$VAR` can expand into a sibling worktree. This case
+# used to assert allow, which would have let exactly that through; what was
+# actually wrong was the MESSAGE, which told the operator to use an absolute
+# path they do not have. It now says which case it is (#320).
+#
+# Run from a KNOWN cwd inside the convention worktree. The guard's verdict on a
+# relative target depends on whether its cwd is an untrusted worktree, so these
+# cases silently measured the developer's shell: green from a plain checkout,
+# red from inside a worktree, and CI is a plain checkout (#269). A test whose
+# answer depends on where it was run is not a test.
+(
+  cd "$CONV/.worktrees/wt" || exit 1
+  check 2 Bash command "cd \$SOME_VAR && echo hi > notes.md"
+  check 2 Bash command "cd - && echo hi > notes.md"
 
-# Should still BLOCK — an ABSOLUTE write-target after an unresolvable `cd`
-# is unaffected (never depended on the tracked base to begin with).
-check 2 Bash command "cd \$SOME_VAR && echo hi > $CONV/src/absolute.md"
+  # An ABSOLUTE write-target after an unresolvable `cd` is unaffected — it never
+  # depended on the tracked base to begin with.
+  check 2 Bash command "cd \$SOME_VAR && echo hi > $CONV/src/absolute.md"
+) || fail=1
 
 # --- MuscleBuddy#3962: a write-target whose LEADING segment is an unexpanded
 # shell expansion decides nothing about which tree it lands in, so climbing it

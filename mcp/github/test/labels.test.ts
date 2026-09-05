@@ -94,9 +94,9 @@ describe("labels_ensure", () => {
     expect(patched).toContain("bug");
     expect(patched).toContain("documentation");
     // The fixture 404s only on `/enhancement`; every other DEPRECATED_LABELS entry
-    // (8 of the 9 — bug, documentation, the three type:* and three complexity:*
-    // retirees) PATCHes as if it already exists on this repo.
-    expect(summary.deprecated).toBe(8);
+    // (10 of the 11 — bug, documentation, epic, status:backlog, the three type:*
+    // and three complexity:* retirees) PATCHes as if it already exists on this repo.
+    expect(summary.deprecated).toBe(10);
     // A deprecated label is never brought into existence.
     expect(posted).not.toContain("bug");
     expect(posted).not.toContain("enhancement");
@@ -220,7 +220,7 @@ describe("labels_audit", () => {
       clean: boolean;
     };
     expect(out.missing).toContain("status:blocked");
-    expect(out.missing).toContain("epic");
+    expect(out.missing).toContain("launch-blocker");
     expect(out.missing).not.toContain("status:ready");
     // Present but not yet retitled — its description still reads as live.
     expect(out.deprecated_present).toEqual(["bug"]);
@@ -312,10 +312,15 @@ describe("taxonomy", () => {
     for (const n of REMOVABLE_DEFAULT_LABELS) expect(canonical.has(n)).toBe(false);
   });
 
-  it("treats owner, agent and code-review as trusted, and nothing else", async () => {
-    const { TRUSTED_SOURCES, ISSUE_SOURCES } = await import("../src/labels.js");
-    expect([...TRUSTED_SOURCES].sort()).toEqual(["agent", "code-review", "owner"]);
-    for (const s of TRUSTED_SOURCES) expect(ISSUE_SOURCES).toContain(s);
+  it("retires `epic` and `status:backlog` rather than carrying them as live values", async () => {
+    const { ISSUE_STATUSES, ISSUE_MARKERS, DEPRECATED_LABELS } = await import("../src/labels.js");
+    // GitHub's native sub-issue hierarchy shows what `epic` used to say, and an
+    // issue with no milestone is what `status:backlog` used to say.
+    expect(ISSUE_STATUSES).not.toContain("backlog");
+    expect(ISSUE_MARKERS).not.toContain("epic");
+    const retired = DEPRECATED_LABELS.map((l) => l.name);
+    expect(retired).toContain("epic");
+    expect(retired).toContain("status:backlog");
   });
 
   it("gives every label a distinct name and color, so two axes never look alike", async () => {
@@ -324,10 +329,16 @@ describe("taxonomy", () => {
     expect(new Set(ISSUE_LABELS.map((l) => l.color)).size).toBe(ISSUE_LABELS.length);
   });
 
-  it("includes waiting in the status set, and STATUS_LABEL_NAMES covers all of it", async () => {
-    const { ISSUE_STATUSES, STATUS_LABEL_NAMES } = await import("../src/labels.js");
+  it("includes waiting in the status set, and STATUS_LABEL_NAMES covers every status label, live or retired", async () => {
+    const { ISSUE_STATUSES, DEPRECATED_LABELS, STATUS_LABEL_NAMES } = await import(
+      "../src/labels.js"
+    );
     expect(ISSUE_STATUSES).toContain("waiting");
-    expect(STATUS_LABEL_NAMES).toEqual(ISSUE_STATUSES.map((s) => `status:${s}`));
+    const retired = DEPRECATED_LABELS.map((l) => l.name).filter((n) => n.startsWith("status:"));
+    expect(retired.length).toBeGreaterThan(0);
+    expect([...STATUS_LABEL_NAMES].sort()).toEqual(
+      [...ISSUE_STATUSES.map((s) => `status:${s}`), ...retired].sort(),
+    );
   });
 
 });

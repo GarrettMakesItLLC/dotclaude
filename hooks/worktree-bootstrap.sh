@@ -33,8 +33,13 @@ except Exception:
 ' 2>/dev/null)" || exit 0
 
 # Only care about `git worktree add`. Anything else: silent no-op.
+#
+# Matched on the two words in sequence rather than the literal string
+# "git worktree add", because a global flag sits between them in the form that
+# creates a worktree in ANOTHER repo — `git -C <dir> worktree add …` — which is
+# exactly the case #312 is about, and which the substring test never fired on.
 case "$command_str" in
-  *"git worktree add"*) ;;
+  *worktree*add*) ;;
   *) exit 0 ;;
 esac
 
@@ -46,9 +51,16 @@ try:
     toks = shlex.split(sys.stdin.read())
 except Exception:
     sys.exit(0)
-if "add" not in toks:
+# `worktree` immediately followed by `add`, so the loose shell prefilter above
+# cannot be satisfied by the two words appearing anywhere in a command — a
+# commit message, or `git worktree list && mkdir add`.
+pair = next(
+    (i for i in range(len(toks) - 1) if toks[i] == "worktree" and toks[i + 1] == "add"),
+    None,
+)
+if pair is None:
     sys.exit(0)
-rest = toks[toks.index("add") + 1:]
+rest = toks[pair + 2:]
 skip_next = False
 flags_with_arg = {"-b", "-B", "--reason", "--lock"}
 for t in rest:
@@ -74,7 +86,29 @@ case "$target" in
 esac
 [ -d "$target" ] || exit 0
 
-script="$project_dir/bin/setup-worktree.sh"
+# The script belongs to the repo the WORKTREE was created in, which is not
+# necessarily the session's project (#312). A session whose project is
+# MuscleBuddy running `cd ~/workspace/platform && git worktree add …` created a
+# platform worktree and then primed it with MuscleBuddy's setup script —
+# installing the wrong repo's dependencies into it, or, when MuscleBuddy had a
+# script and platform did not, priming a tree that should have been left alone.
+#
+# Ask git which repo actually owns the new worktree. `--show-toplevel` from
+# inside it gives the worktree's own root; `--git-common-dir` resolves to the
+# MAIN checkout's `.git`, whose parent is the repo whose `bin/` holds the
+# script — a linked worktree does not carry one of its own.
+# Falls back to the project dir when git cannot answer — an unusual layout, or
+# a target that is not in a repo at all. That is the prior behaviour, so this
+# is never worse than before, only better where git does know.
+owner_repo="$(git -C "$target" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+if [ -n "$owner_repo" ]; then
+  owner_repo="$(dirname "$owner_repo")"
+else
+  owner_repo="$project_dir"
+fi
+[ -d "$owner_repo" ] || exit 0
+
+script="$owner_repo/bin/setup-worktree.sh"
 [ -x "$script" ] || exit 0
 
 # Surface the script's own output to the user; never fail the hook on its exit.
