@@ -444,9 +444,20 @@ describe("pr_merge", () => {
 });
 
 describe("pr_auto_merge", () => {
-  it("resolves the PR's node_id via REST, then sends a single enablePullRequestAutoMerge mutation", async () => {
-    let mutationVariables: Record<string, unknown> | undefined;
-    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+  /**
+   * `armed` is READ BACK, never taken from the mutation. The mutation no-ops on
+   * a PR not yet eligible to enqueue and reports success anyway, and callers are
+   * told to arm and stop watching — so a false success leaves a PR unmerged
+   * indefinitely with nothing to notice (#259).
+   */
+  const respond = (opts: {
+    queued?: boolean;
+    autoMerge?: { enabledAt: string; mergeMethod: string } | null;
+    mergeStateStatus?: string;
+    mutationError?: string;
+    onMutation?: (vars: Record<string, unknown>, query: string) => void;
+  }) =>
+    async (url: string, init: { method?: string; body?: string }) => {
       if ((init.method === undefined || init.method === "GET") && url.endsWith("/pulls/42")) {
         return makeResponse({ status: 200, body: { node_id: "PR_kwabc123" } });
       }
@@ -455,30 +466,112 @@ describe("pr_auto_merge", () => {
           query: string;
           variables: Record<string, unknown>;
         };
-        expect(parsed.query).toContain("enablePullRequestAutoMerge");
-        mutationVariables = parsed.variables;
+        if (parsed.query.includes("enablePullRequestAutoMerge")) {
+          opts.onMutation?.(parsed.variables, parsed.query);
+          if (opts.mutationError && "method" in parsed.variables) {
+            return makeResponse({ status: 200, body: { errors: [{ message: opts.mutationError }] } });
+          }
+          return makeResponse({
+            status: 200,
+            body: { data: { enablePullRequestAutoMerge: { clientMutationId: null } } },
+          });
+        }
         return makeResponse({
           status: 200,
-          body: { data: { enablePullRequestAutoMerge: { clientMutationId: null } } },
+          body: {
+            data: {
+              repository: {
+                pullRequest: {
+                  isInMergeQueue: opts.queued ?? false,
+                  mergeStateStatus: opts.mergeStateStatus ?? "CLEAN",
+                  autoMergeRequest: opts.autoMerge ?? null,
+                },
+              },
+            },
+          },
         });
       }
       return makeResponse({ status: 500 });
-    });
+    };
+
+  it("resolves the node_id via REST, sends the mutation, then reads back the armed state", async () => {
+    let mutationVariables: Record<string, unknown> | undefined;
+    fetchMock.mockImplementation(
+      respond({
+        autoMerge: { enabledAt: "2026-09-05T12:00:00Z", mergeMethod: "SQUASH" },
+        onMutation: (v) => {
+          mutationVariables = v;
+        },
+      }),
+    );
 
     const handler = await getPrHandler("pr_auto_merge");
     const res = await handler({ repo: "octo/repo", number: 42, method: "squash" });
 
     expect(res.isError).toBeFalsy();
     expect(mutationVariables).toEqual({ id: "PR_kwabc123", method: "SQUASH" });
-    const body = JSON.parse(res.content[0].text) as {
-      number: number;
-      auto_merge_enabled: boolean;
-      method: string;
-    };
-    expect(body).toEqual({ number: 42, auto_merge_enabled: true, method: "squash" });
+    const body = JSON.parse(res.content[0].text);
+    expect(body.armed).toBe(true);
+    expect(body.in_merge_queue).toBe(false);
+    expect(body.auto_merge_request).toEqual({
+      enabledAt: "2026-09-05T12:00:00Z",
+      mergeMethod: "SQUASH",
+    });
+    expect(body).not.toHaveProperty("_warnings");
   });
 
-  it("surfaces a GraphQL error (e.g. merge queue required, or auto-merge not allowed) as a tool error", async () => {
+  it("counts a merge-queue entry as armed, though autoMergeRequest stays null", async () => {
+    // The signal a queue-required branch actually gives. Reading
+    // `autoMergeRequest` there is a false negative every time, and it looks
+    // identical to the vanished-auto-merge failure (#236).
+    fetchMock.mockImplementation(respond({ queued: true, autoMerge: null }));
+    const handler = await getPrHandler("pr_auto_merge");
+    const res = await handler({ repo: "octo/repo", number: 42, method: "squash" });
+
+    const body = JSON.parse(res.content[0].text);
+    expect(body.armed).toBe(true);
+    expect(body.in_merge_queue).toBe(true);
+    expect(body.auto_merge_request).toBeNull();
+    expect(body).not.toHaveProperty("_warnings");
+  });
+
+  it("warns instead of claiming success when the mutation no-ops", async () => {
+    fetchMock.mockImplementation(
+      respond({ queued: false, autoMerge: null, mergeStateStatus: "BLOCKED" }),
+    );
+    const handler = await getPrHandler("pr_auto_merge");
+    const res = await handler({ repo: "octo/repo", number: 42, method: "squash" });
+
+    const body = JSON.parse(res.content[0].text);
+    expect(body.armed).toBe(false);
+    expect(body.merge_state_status).toBe("BLOCKED");
+    expect(body._warnings[0]).toMatch(/not armed/);
+    expect(body._warnings[0]).toMatch(/do NOT treat this as armed/);
+  });
+
+  it("retries without a merge method when the queue's ruleset pins it", async () => {
+    const queries: string[] = [];
+    fetchMock.mockImplementation(
+      respond({
+        queued: true,
+        mutationError: "The merge strategy for dev is set by the merge queue",
+        onMutation: (_v, q) => queries.push(q),
+      }),
+    );
+    const handler = await getPrHandler("pr_auto_merge");
+    const res = await handler({ repo: "octo/repo", number: 42, method: "squash" });
+
+    expect(res.isError).toBeFalsy();
+    expect(queries).toHaveLength(2);
+    expect(queries[1]).not.toContain("$method");
+    const body = JSON.parse(res.content[0].text);
+    expect(body.armed).toBe(true);
+    // Null, not "squash" — the queue chose, and reporting the caller's
+    // preference back would be a claim about something that did not happen.
+    expect(body.method).toBeNull();
+  });
+
+  it("surfaces a GraphQL error (e.g. auto-merge not allowed) as a tool error", async () => {
     fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
       if ((init.method === undefined || init.method === "GET") && url.endsWith("/pulls/42")) {
         return makeResponse({ status: 200, body: { node_id: "PR_kwabc123" } });
