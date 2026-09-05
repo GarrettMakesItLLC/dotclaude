@@ -119,6 +119,26 @@ export function hasTickedOwnerAction(body: string | null | undefined): boolean {
   return body != null && /^\s*[-*]\s*\[[xX]\]/m.test(body);
 }
 
+/**
+ * Further project an already-slimmed object down to just the named keys —
+ * the common case is a dedupe pass across many issues/PRs that only needs
+ * `number`/`title`/`state` (#184). `undefined`/empty `fields` returns `obj`
+ * unchanged, so this is a no-op unless a caller opts in. An unrecognized key
+ * name is silently dropped rather than erroring — a projection is cosmetic,
+ * not a contract worth failing a whole list call over.
+ */
+export function pick<T extends Record<string, unknown>>(
+  obj: T,
+  fields: string[] | undefined,
+): Partial<T> {
+  if (!fields || fields.length === 0) return obj;
+  const out: Record<string, unknown> = {};
+  for (const key of fields) {
+    if (key in obj) out[key] = obj[key];
+  }
+  return out as Partial<T>;
+}
+
 export function slimIssue(raw: RawIssue, opts: { body?: boolean } = {}): Record<string, unknown> {
   const sub = raw.sub_issues_summary;
   return compact({

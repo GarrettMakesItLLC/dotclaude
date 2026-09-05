@@ -14,7 +14,7 @@ import {
 } from "../github.js";
 import { getChecksSummary } from "../checks.js";
 import { setIssueStatus } from "../issue-status.js";
-import { actorLogins, slimComment, slimPr, type RawPull } from "../slim.js";
+import { actorLogins, pick, slimComment, slimPr, type RawPull } from "../slim.js";
 
 interface PullRequest {
   number: number;
@@ -49,16 +49,24 @@ export function registerPrTools(server: McpServer): void {
           .optional()
           .describe('Filter by head, formatted "user:ref-name" or "ref-name".'),
         limit: z.number().int().positive().optional().describe("Max items (<=1000, default 30)."),
+        fields: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Project each PR down to just these keys (e.g. [\"number\",\"title\",\"state\"]) " +
+              "— cuts response size for a dedupe/skim pass across many PRs. Omit for the full " +
+              "slimmed shape.",
+          ),
       },
     },
-    async ({ repo, state, base, head, limit }) => {
+    async ({ repo, state, base, head, limit, fields }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
         const data = await ghPaginate<RawPull>(`/repos/${owner}/${name}/pulls`, {
           query: { state, base, head },
           limit,
         });
-        return jsonText(data.map((p) => slimPr(p)));
+        return jsonText(data.map((p) => pick(slimPr(p), fields)));
       } catch (err) {
         return errorResult(err);
       }
