@@ -13,26 +13,129 @@ let cachedRepo: string | null = null;
 let cachedViewer: string | null = null;
 
 /**
- * Env for every spawned `gh` process, with `GH_TOKEN`/`GITHUB_TOKEN` stripped.
+ * Env with `GH_TOKEN`/`GITHUB_TOKEN` stripped — used to ask `gh` for its
+ * KEYRING credential specifically, since `gh` prefers an env-var token over its
+ * own stored login whenever one is present.
  *
- * `gh` prefers an env-var token over its own keyring-stored login when both are
- * present. On a machine where `GH_TOKEN` is set globally (for git operations,
- * CI-style tooling, etc.) but scoped narrower than the interactive `gh auth
- * login` credential — missing `project`, for instance — that env var silently
- * shadows the wider-scoped login for every `gh` call this server makes, and
- * `gh auth refresh` cannot fix it: there is no stored credential behind an
- * env-var token to refresh (#219, #205, #204, #203, #188). Stripping the env
- * var lets `gh` fall back to its own keyring login, which is what an
- * interactive `gh auth login` on this machine actually grants scopes to. If no
- * keyring login exists either, `gh` fails exactly as it would have with an
- * unset `GH_TOKEN` — no regression for a CI-only environment.
+ * This is a way of naming one candidate, not a policy about which wins. See
+ * `selectToken` below for that.
  */
-const GH_SPAWN_ENV = (() => {
+const GH_KEYRING_ENV = (() => {
   const env = { ...process.env };
   delete env.GH_TOKEN;
   delete env.GITHUB_TOKEN;
   return env;
 })();
+
+/**
+ * The scopes this server actually needs. `project` covers the Projects v2
+ * fields (Effort, Priority); `read:project` is the read-only form GitHub also
+ * accepts for the queries here.
+ */
+const REQUIRED_SCOPES = ["repo", "read:org", "workflow", "project"] as const;
+
+/** Whether a scope set satisfies one required scope, allowing read-only forms. */
+function satisfies(scopes: Set<string>, required: string): boolean {
+  if (scopes.has(required)) return true;
+  return scopes.has(`read:${required}`);
+}
+
+/**
+ * The classic OAuth scopes a token carries, or `null` when that is unknowable —
+ * a fine-grained PAT reports no `x-oauth-scopes` header at all, and a failed
+ * probe must not be read as "no scopes".
+ */
+async function probeScopes(token: string): Promise<Set<string> | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/`, { headers: buildHeaders(token) });
+    if (!res.ok) return null;
+    const header = res.headers.get("x-oauth-scopes");
+    if (header == null) return null;
+    return new Set(
+      header
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Choose between the keyring login and the ambient `GH_TOKEN`/`GITHUB_TOKEN` by
+ * MEASURING both, rather than by assuming which is wider.
+ *
+ * This used to strip the env var unconditionally, on the theory that the
+ * interactive `gh auth login` is the wider-scoped credential. That is true on
+ * some machines (#219, #205, #204, #203, #188) and exactly backwards on others:
+ * on one box the keyring login carried `gist, read:org, repo, workflow` while
+ * the stripped PAT carried `project` as well, so the fallback was what lost the
+ * scope — and Effort and Priority silently stopped being settable (#263, #225).
+ *
+ * Neither credential is reliably the better one, so neither gets to be the
+ * default. Both are probed for the scopes this server needs and the one
+ * covering more of them wins. Ties, and any candidate whose scopes cannot be
+ * read (a fine-grained PAT reports none), fall back to the keyring — the prior
+ * behaviour, so this is never worse than before and is better wherever the
+ * measurement actually distinguishes them.
+ */
+async function selectToken(): Promise<{ token: string; source: string }> {
+  let keyring: string | null = null;
+  try {
+    const { stdout } = await execFileAsync("gh", ["auth", "token"], { env: GH_KEYRING_ENV });
+    keyring = stdout.trim() || null;
+  } catch {
+    keyring = null;
+  }
+
+  const ambient = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim() || null;
+
+  if (!keyring && !ambient) {
+    throw new Error(
+      "Failed to obtain a GitHub token: `gh auth token` produced nothing and no " +
+        "GH_TOKEN/GITHUB_TOKEN is set. Run `gh auth login` to authenticate the " +
+        "GitHub CLI, then try again.",
+    );
+  }
+  if (!ambient) return { token: keyring as string, source: "gh keyring" };
+  if (!keyring) return { token: ambient, source: "GH_TOKEN/GITHUB_TOKEN" };
+  if (keyring === ambient) return { token: keyring, source: "gh keyring" };
+
+  const [keyringScopes, ambientScopes] = await Promise.all([
+    probeScopes(keyring),
+    probeScopes(ambient),
+  ]);
+  if (!keyringScopes || !ambientScopes) return { token: keyring, source: "gh keyring" };
+
+  const score = (scopes: Set<string>) =>
+    REQUIRED_SCOPES.filter((r) => satisfies(scopes, r)).length;
+  return score(ambientScopes) > score(keyringScopes)
+    ? { token: ambient, source: "GH_TOKEN/GITHUB_TOKEN" }
+    : { token: keyring, source: "gh keyring" };
+}
+
+/**
+ * Env for a spawned `gh`, carrying the token this server chose.
+ *
+ * Spawned `gh` has to agree with `ghRequest` about which credential is in use,
+ * or the Projects v2 calls that go through `execGh` fail on a scope the REST
+ * calls have. Resolved lazily because choosing requires network probes.
+ */
+let ghSpawnEnv: NodeJS.ProcessEnv | null = null;
+async function spawnEnv(): Promise<NodeJS.ProcessEnv> {
+  if (ghSpawnEnv) return ghSpawnEnv;
+  try {
+    ghSpawnEnv = { ...GH_KEYRING_ENV, GH_TOKEN: await getToken() };
+  } catch {
+    // No resolvable credential. `gh` may still have one this server could not
+    // read, and it will produce its own error if not — which is a better
+    // message than anything about token selection. Degrade to the stripped
+    // env, which is what this did before.
+    ghSpawnEnv = GH_KEYRING_ENV;
+  }
+  return ghSpawnEnv;
+}
 
 /**
  * Process-lifetime memo for single-object reads (`issue_view`, `pr_view`,
@@ -61,24 +164,10 @@ export function invalidate(key: string): void {
   objectCache.delete(key);
 }
 
-/**
- * Fetch the GitHub token by spawning `gh auth token`.
- * Throws a clear, actionable error if `gh` is not authenticated.
- */
+/** The widest of the available credentials — see `selectToken`. */
 async function fetchToken(): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("gh", ["auth", "token"], { env: GH_SPAWN_ENV });
-    const token = stdout.trim();
-    if (!token) {
-      throw new Error("empty token");
-    }
-    return token;
-  } catch {
-    throw new Error(
-      "Failed to obtain a GitHub token via `gh auth token`. " +
-        "Run `gh auth login` to authenticate the GitHub CLI, then try again.",
-    );
-  }
+  const { token } = await selectToken();
+  return token;
 }
 
 /**
@@ -90,7 +179,7 @@ export async function execGh(args: string[]): Promise<string> {
   try {
     const { stdout } = await execFileAsync("gh", args, {
       maxBuffer: 32 * 1024 * 1024,
-      env: GH_SPAWN_ENV,
+      env: await spawnEnv(),
     });
     return stdout.trim();
   } catch (err) {
@@ -102,6 +191,10 @@ export async function execGh(args: string[]): Promise<string> {
 async function getToken(): Promise<string> {
   if (cachedToken) return cachedToken;
   cachedToken = await fetchToken();
+  // The spawn env holds a copy of the token, so a refetch (a 401/403 retry)
+  // has to invalidate it too or `gh` keeps using the credential REST just
+  // rejected.
+  ghSpawnEnv = null;
   return cachedToken;
 }
 
@@ -400,7 +493,7 @@ export async function resolveRepo(repo?: string): Promise<RepoRef> {
         const { stdout } = await execFileAsync(
           "gh",
           ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-          { env: GH_SPAWN_ENV },
+          { env: await spawnEnv() },
         );
         cachedRepo = stdout.trim();
       } catch {
