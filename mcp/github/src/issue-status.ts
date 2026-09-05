@@ -1,5 +1,5 @@
 import { cacheKey, ghRequest, invalidate } from "./github.js";
-import { STATUS_LABEL_NAMES, statusLabel, type IssueStatus } from "./labels.js";
+import { isStatusLabel, statusLabel, type IssueStatus } from "./labels.js";
 import { hasTickedOwnerAction, labelNames, type RawLabel } from "./slim.js";
 
 /**
@@ -29,7 +29,7 @@ export async function setIssueStatus(
   );
   const kept = issue.labels
     .map((l) => l.name)
-    .filter((n) => !STATUS_LABEL_NAMES.includes(n));
+    .filter((n) => !isStatusLabel(n));
   const next = status ? [...kept, statusLabel(status)] : kept;
   const applied = await ghRequest<RawLabel[]>(
     `/repos/${owner}/${name}/issues/${number}/labels`,

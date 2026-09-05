@@ -62,10 +62,13 @@ sync_repo() {
     return 0
   fi
 
-  local err
+  local before after err
+  before="$(git -C "$dir" rev-parse HEAD 2>/dev/null)"
   err="$(git -C "$dir" pull --ff-only --quiet 2>&1)"
   if [ $? -eq 0 ]; then
     notes+=("$label: pulled $behind new commit(s)")
+    after="$(git -C "$dir" rev-parse HEAD 2>/dev/null)"
+    rebuild_artifacts "$dir" "$label" "$before" "$after"
     return 0
   fi
 
@@ -80,6 +83,36 @@ sync_repo() {
     notes+=("$label: $behind commit(s) behind — an incoming commit changes \`$blocker\`, which the app has edited locally. Nothing was overwritten. Commit or discard your \`$blocker\` and the next session pulls.")
   else
     notes+=("$label: $behind commit(s) behind, fast-forward failed — resolve by hand")
+  fi
+}
+
+# Compiled artifacts that are NOT tracked, so a pull updates their sources and
+# leaves the thing actually executed untouched.
+#
+# The github MCP runs from `mcp/github/dist/index.js`, and `dist/` is
+# gitignored. Pulling therefore deploys every hook (they run from the checkout)
+# and none of the MCP (#325): the dist stayed four weeks and sixteen commits
+# stale while agents kept hitting bugs whose fixes had merged. Nothing said so,
+# because a stale build is a working build.
+#
+# Rebuilt only when the pull actually touched the sources, and only when the
+# install is already present — a first-run `npm ci` is minutes of session start,
+# and this hook must never be why a session is slow to open. Failure is a note,
+# never a non-zero exit.
+rebuild_artifacts() {
+  local dir="$1" label="$2" before="$3" after="$4"
+  [ -n "$before" ] && [ -n "$after" ] && [ "$before" != "$after" ] || return 0
+
+  local mcp="$dir/mcp/github"
+  [ -f "$mcp/package.json" ] || return 0
+  [ -d "$mcp/node_modules" ] || return 0
+
+  git -C "$dir" diff --quiet "$before" "$after" -- mcp/github/src mcp/github/package.json 2>/dev/null && return 0
+
+  if (cd "$mcp" && npm run --silent build >/dev/null 2>&1); then
+    notes+=("$label: rebuilt github MCP (sources changed) — restart the session to pick it up")
+  else
+    notes+=("$label: github MCP sources changed but \`npm run build\` failed in \`$mcp\` — it is running STALE code until you build it by hand")
   fi
 }
 
