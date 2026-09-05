@@ -712,6 +712,70 @@ describe("issue_set_status", () => {
     expect(res.isError).toBeFalsy();
     expect(JSON.parse(res.content[0].text).labels).not.toContain("status:backlog");
   });
+
+  /**
+   * The axis is its namespace, not a list. An allowlist leaves any `status:*`
+   * label this file has not heard of attached — one created by hand, carried
+   * in from another tracker, or landed on the repo ahead of the taxonomy — and
+   * the issue ends up wearing two statuses, which is the exact failure #257
+   * reported and the one an allowlist reproduces every time it drifts.
+   */
+  it("strips a status:* label that is in no taxonomy list at all", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "GET" && url.endsWith("/issues/4479")) {
+        return makeResponse({
+          status: 200,
+          body: {
+            labels: [
+              { name: "status:on-hold" },
+              { name: "status:needs-triage" },
+              { name: "source:agent" },
+            ],
+          },
+        });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        const sent = JSON.parse(init.body as string).labels as string[];
+        expect(sent).toEqual(["source:agent", "status:blocked"]);
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_set_status");
+    const res = await handler({ repo: "octo/repo", number: 4479, status: "blocked" });
+    expect(res.isError).toBeFalsy();
+    const labels = JSON.parse(res.content[0].text).labels as string[];
+    expect(labels.filter((n) => n.startsWith("status:"))).toEqual(["status:blocked"]);
+  });
+
+  /** Clearing means clearing: zero `status:*` left, whatever they were. */
+  it("clears every status:* label when no status is given", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "GET" && url.endsWith("/issues/4479")) {
+        return makeResponse({
+          status: 200,
+          body: {
+            labels: [
+              { name: "status:blocked" },
+              { name: "status:backlog" },
+              { name: "status:on-hold" },
+              { name: "source:agent" },
+            ],
+          },
+        });
+      }
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        const sent = JSON.parse(init.body as string).labels as string[];
+        expect(sent).toEqual(["source:agent"]);
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_set_status");
+    const res = await handler({ repo: "octo/repo", number: 4479 });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text).labels).toEqual(["source:agent"]);
+  });
 });
 
 describe("issue_set_type", () => {
