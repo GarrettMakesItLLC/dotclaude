@@ -68,7 +68,8 @@ machine. Plugins not listed ship skills only.
 | Railway | `railway` | OAuth — `mcp__plugin_railway_railway__*` (read-only ops allowlisted in `settings.json`) |
 | Vercel | `vercel` | OAuth — deployments, build/runtime logs, projects |
 | Sentry | `sentry` | OAuth (Sentry account) |
-| Playwright | `playwright` | None — drives a local browser |
+| Playwright | `playwright` (hand-registered, not the plugin) | None — drives the bundled Chromium |
+| Chrome DevTools | `chrome-devtools` (hand-registered, not the plugin) | None — drives the bundled Chromium |
 
 ### Railway `get-logs` on build logs — token-limit workaround
 
@@ -107,17 +108,35 @@ vendored here to patch. Tracked at
 [#95](https://github.com/GarrettMakesItLLC/dotclaude/issues/95); revisit once
 a plugin update adds a compact/fields option or fixes server-side filtering.
 
-**Playwright in a sandbox without root** (WSL2, containers): `@playwright/mcp`
-defaults to the `chrome` channel at `/opt/google/chrome/chrome`, which needs a
-root-only system install. The plugin's `.mcp.json` (in the marketplace
-package at `~/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/playwright/.mcp.json`,
-not vendored in this repo) hardcodes `npx @playwright/mcp@latest` with no
-`--browser`/`--executable-path` override, so there's no session-level way to
-point it at a different channel. Workaround: `npx playwright install
-chromium` (bundled build, no `--with-deps`, no root) — `bootstrap.sh`
-pre-fetches it, but the MCP server itself still only looks for `chrome`, so
-browser tools remain unusable until the plugin's own config gains a
-`--browser=chromium` override upstream.
+### Browser MCPs run on the bundled Chromium, not a system Chrome
+
+Both browser plugins default to the Chrome `stable` channel — a system install
+at `/opt/google/chrome/chrome`. That is root-only, and `npx playwright install
+chrome` escalates to a `sudo` password prompt no agent shell can answer, so in
+a sandbox (WSL2, containers) every browser tool failed at the first call with
+`Chromium distribution 'chrome' is not found`. The channel is fixed in each
+plugin's own `.mcp.json`, which lives in the marketplace package and is
+overwritten on refresh, so there was nothing to override.
+
+The Playwright-bundled Chromium needs no root, runs headless, and speaks CDP,
+which satisfies both servers. So `playwright@claude-plugins-official` and
+`chrome-devtools-mcp@claude-plugins-official` are **disabled** in
+`settings.json`, and `bootstrap.sh` registers the same upstream packages
+directly with the browser named:
+
+```bash
+claude mcp add --scope user playwright -- npx -y @playwright/mcp@latest --browser chromium
+claude mcp add --scope user chrome-devtools -- \
+  npx -y chrome-devtools-mcp@latest --executablePath ~/.cache/ms-playwright/chromium-<rev>/chrome-linux64/chrome
+```
+
+`--browser chromium` lets Playwright find its own build; `chrome-devtools-mcp`
+has no equivalent channel for it and takes the path. The path carries a
+revision that moves with the Playwright version, so bootstrap re-resolves and
+re-registers on every run rather than skipping when already present.
+
+If a machine does grow a real system Chrome, re-enabling the plugins is the
+better answer — nothing here depends on the hand-registered names.
 
 ### Vercel plugin gap — no env-var read/write tool
 
