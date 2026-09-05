@@ -99,6 +99,22 @@ check 2 Bash command "cp /tmp/whatever.ts $CONV/src/copied.ts"
 check 2 Bash command "mv /tmp/whatever.ts $CONV/src/moved.ts"
 check 2 Bash command "some-generator | tee $CONV/src/teed.ts"
 
+# Should ALLOW — an arrow is not a redirect, and a `#` comment is prose (#289,
+# #271, #258). Each of these blocked on a bare word taken from an arrow's
+# right-hand side.
+check 0 Bash command "railway variable set X --stdin  # curl -> stdin -> Railway; done"
+check 0 Bash command "psql -w -c \"SELECT 1 WHERE c.relname <> 'x';\""
+check 0 Bash command "gh api repos/O/R/issues/3 --jq '\"\\(.n) -> \\(.m)\"'"
+check 0 Bash command "node -e 'const f=()=>{console.log(1)};f()'"
+check 0 Bash command "echo build  # writes dist/out.js -> nowhere real"
+
+# A `#` only opens a comment at the start of a token, so these keep working.
+check 2 Bash command "sed -i 's#a#b#' $CONV/src/existing.ts"
+check 2 Bash command "curl -s https://x/y#frag > $CONV/src/frag.ts"
+# And a real redirect after a comment on an EARLIER line is still a redirect.
+check 2 Bash command "# note
+echo hi > $CONV/src/afterco.ts"
+
 # Should ALLOW — a read-only Bash command with no write pattern at all.
 check 0 Bash command "cat $CONV/src/existing.ts"
 check 0 Bash command "git -C $CONV status"

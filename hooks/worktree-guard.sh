@@ -166,7 +166,36 @@ if tool == "Bash":
             i += 1
         return spans
 
-    blanked = blank_heredoc_bodies(cmd)
+    def strip_comments(text):
+        """Blank an unquoted `# …` comment tail, preserving length.
+
+        A comment is prose, and prose contains arrows: `# curl -> stdin ->
+        Railway` yielded `stdin` and `Railway` as write targets and blocked a
+        command that touches no file (#289).
+
+        `#` only opens a comment at the start of a token — start of line, or
+        after whitespace. That is what keeps `s#a#b#` (a sed script), a URL
+        fragment and `--color=always#x` intact, since none of those has
+        whitespace before the `#`. Blanked rather than cut so every span and
+        offset computed elsewhere still lines up.
+        """
+        spans = quoted_spans(text)
+        out_chars = list(text)
+        i = 0
+        n = len(text)
+        while i < n:
+            if text[i] == "#" and not any(lo <= i < hi for lo, hi in spans):
+                if i == 0 or text[i - 1] in " \t\n":
+                    j = text.find("\n", i)
+                    j = n if j == -1 else j
+                    for k in range(i, j):
+                        out_chars[k] = " "
+                    i = j
+                    continue
+            i += 1
+        return "".join(out_chars)
+
+    blanked = strip_comments(blank_heredoc_bodies(cmd))
 
     # Track a leading `cd <dir>` chain (`cd a && cd b && write relfile`) so a
     # RELATIVE write-target is resolved against the directory the shell would
@@ -237,7 +266,12 @@ if tool == "Bash":
         # comparison, not a redirect — excluded by requiring the target look
         # like a path, not `]`).
         quoted = quoted_spans(seg)
-        for m in re.finditer(r"(?<![&\d])>>?\s*([^\s|&;><)]+)", seg):
+        # `->`, `=>` and `<>` are arrows and an operator, not redirections.
+        # A `-` or `=` before the `>` never begins one, and `<>` is SQL's
+        # not-equals (#271, #289, #258). Excluded here as well as by the
+        # quoted-span test, because an arrow also turns up unquoted — in a
+        # comment, or in `env -u X railway … --stdin`-style prose.
+        for m in re.finditer(r"(?<![&\d=\-<])>>?\s*([^\s|&;><)]+)", seg):
             # A `>` INSIDE a quoted argument is data, not an operator: a jq
             # filter (`select(.date > "2026-01-01")`), an awk program, a commit
             # message. The operator itself is never quoted — only its target
