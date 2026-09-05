@@ -23,6 +23,14 @@ Non-privacy legal exposure. Every item names its authority; a finding without on
 - **DMCA §512** — designated agent registered with the US Copyright Office (an external action: check the ledger before filing), notice-and-takedown flow, counter-notice, repeat-infringer strike policy.
 - **Content-safety statutes** where user-to-user contact or classifieds exist: FOSTA-SESTA safe-harbor posture, CSAM detection and reporting obligations, platform-liability boundaries.
 
+## Foundational documents
+
+Cheap to check, expensive to be missing entirely:
+
+- **Terms of Service / EULA present**, reachable from the footer, and actually governs the product shipped (not a template's placeholder product name).
+- **Privacy Policy present**, and its "last updated" date is real — a static date left over from a template, never moved when the policy changed, is its own finding.
+- **The Privacy Policy discloses AI use** where the product processes user data through an LLM (own model or a third-party API) — this is a sub-processor disclosure (see `privacy-data-processing.md`) and a distinct, commonly-missed clause in its own right.
+
 ## Privacy-adjacent legal surfaces
 
 Detailed in `privacy-data-processing.md`; these are the *published-document* halves:

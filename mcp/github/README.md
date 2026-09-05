@@ -162,7 +162,7 @@ Claims:
 Labels:
 
 - `labels_ensure` — idempotently provision the canonical taxonomy (`status:*`,
-  `source:*`, and the markers `epic` / `launch-blocker`) into a repo,
+  `source:*`, and the `launch-blocker` marker) into a repo,
   and retitle GitHub's colliding stock labels (`bug`, `enhancement`,
   `documentation`) as deprecated where they already exist.
 - `labels_audit` — read-only drift report: missing canonical labels, stock

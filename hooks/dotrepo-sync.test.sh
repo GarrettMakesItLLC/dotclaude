@@ -73,6 +73,56 @@ printf '%s' "$out" | grep -q 'uncommitted' \
   || { echo "FAIL: dirty repo must not be pulled"; fail=1; }
 rm -rf "$(dirname "$c1")" "$(dirname "$c2")"
 
+# --- behind + only a LIVE path dirty: still pulls (#325) ---
+# `settings.json` is the running app's own settings file, so /model and
+# /output-style rewrite it in place. Counting that as "dirty" froze dotclaude
+# at one commit for a week while nine piled up behind it — including fixes
+# that were still being hit live because they had never deployed.
+c1="$(make_pair)"; c2="$(make_pair)"
+# Track settings.json on the remote first, so the clone is clean, not ahead.
+echo '{"model":"sonnet"}' > "$c1/settings.json"
+git -C "$c1" add settings.json
+git -C "$c1" commit --quiet -m settings
+git -C "$c1" push --quiet origin "$(git -C "$c1" rev-parse --abbrev-ref HEAD)"
+advance_remote "$c1"
+echo '{"model":"opus[1m]"}' > "$c1/settings.json"   # the app rewrites it live
+before="$(git -C "$c1" rev-parse HEAD)"
+out="$(run "$c1" "$c2")"; code=$?
+[ "$code" = 0 ] || { echo "FAIL(live-path): must exit 0, got $code"; fail=1; }
+[ "$(git -C "$c1" rev-parse HEAD)" != "$before" ] \
+  || { echo "FAIL(live-path): a dirty settings.json must not block the pull, got: $out"; fail=1; }
+grep -q 'opus' "$c1/settings.json" \
+  || { echo "FAIL(live-path): the local settings.json must be left untouched"; fail=1; }
+rm -rf "$(dirname "$c1")" "$(dirname "$c2")"
+
+# --- a live path dirty AND changed upstream: refuses, names the file (#325) ---
+# git declines rather than clobbering, and the note says which file and what
+# clears it, instead of the generic "resolve by hand".
+c1="$(make_pair)"; c2="$(make_pair)"
+echo '{"model":"sonnet"}' > "$c1/settings.json"
+git -C "$c1" add settings.json
+git -C "$c1" commit --quiet -m settings
+git -C "$c1" push --quiet origin "$(git -C "$c1" rev-parse --abbrev-ref HEAD)"
+second="$(mktemp -d)/s"
+git clone --quiet "$(git -C "$c1" remote get-url origin)" "$second"
+git -C "$second" config user.email test@example.com
+git -C "$second" config user.name test
+echo '{"model":"haiku"}' > "$second/settings.json"
+git -C "$second" commit --quiet -am upstream-settings
+git -C "$second" push --quiet origin "HEAD:$(git -C "$c1" rev-parse --abbrev-ref HEAD)"
+rm -rf "$(dirname "$second")"
+echo '{"model":"opus[1m]"}' > "$c1/settings.json"
+before="$(git -C "$c1" rev-parse HEAD)"
+out="$(run "$c1" "$c2")"; code=$?
+[ "$code" = 0 ] || { echo "FAIL(live-clash): must exit 0, got $code"; fail=1; }
+[ "$(git -C "$c1" rev-parse HEAD)" = "$before" ] \
+  || { echo "FAIL(live-clash): must not pull over a locally-edited live file"; fail=1; }
+grep -q 'opus' "$c1/settings.json" \
+  || { echo "FAIL(live-clash): local settings.json was clobbered"; fail=1; }
+printf '%s' "$out" | grep -q 'settings.json' \
+  || { echo "FAIL(live-clash): the note should name the file, got: $out"; fail=1; }
+rm -rf "$(dirname "$c1")" "$(dirname "$c2")"
+
 # --- diverged (ahead and behind): reports, does not pull ---
 c1="$(make_pair)"; c2="$(make_pair)"
 advance_remote "$c1"

@@ -31,6 +31,22 @@ Sweep for the same concept displayed in several places with divergent formatting
 
 Every list, table, and async surface has all three, in text, and the empty state says what to do next. Loading states don't reflow the layout. This overlaps `accessibility.md`'s live-region checklist — check them together.
 
+The repo picks one convention for each and applies it everywhere; the defaults, and the reason a surface deviates, belong in the design doc:
+
+- **Skeletons where the shape is known, spinners only where it isn't.** A list, table, card grid, or profile header gets a skeleton matching its real dimensions — it reserves the layout (which is also the CLS fix), says what is coming, and reads faster than the same wait behind a spinner. A spinner is for an indeterminate wait with no known shape, and for the pending state on a control the user just pressed. A full-page spinner on a route whose layout is entirely predictable is the finding.
+- **Optimistic by default on mutations that almost always succeed** — toggles, likes, checkboxes, reorders, inline renames, adding to a list — with a visible rollback on failure. Pessimistic deliberately on anything whose outcome the client can't predict (payment, destructive actions), and the deliberateness is stated. Mechanics and the mandatory failure path: `web-delivery-performance.md`.
+- **Every mutation ends in a visible success message in the product's terms**, and every failure in a specific one that says what to do next. Presence is `site-hygiene-launch-tells.md`'s check; consistency of *kind* is this file's.
+
+## Common polish surfaces
+
+Not a checklist of features to build — a checklist of *presence and consistency* wherever the product has already committed to the pattern elsewhere. Flag a surface only where its absence breaks a pattern the rest of the product establishes, not because the list below is exhaustive of what a mature product could have: skip-to-content and password-visibility toggles (also accessibility findings, see `accessibility.md`), sticky/scroll-aware headers, breadcrumbs on nested routes, print stylesheet on content meant to be printed, "back to top" on long scroll surfaces, a thank-you/confirmation step after every meaningful form submit.
+
+Three of these carry enough weight to name separately:
+
+- **Every icon-only button has a tooltip**, not merely an accessible name. `accessibility.md` requires the name so a screen reader can announce it; the tooltip is for the sighted user who cannot tell a "duplicate" glyph from an "export" one. One tooltip component, one delay, one placement rule, applied to every icon-only control in the product — and on touch, where hover doesn't exist, the control carries a visible label instead (`responsive-mobile.md`). A row of unlabelled glyphs is the most common instance of this finding by a wide margin.
+- **A custom 404**, high severity on any public product — owned by `site-hygiene-launch-tells.md`, which also carries the gate.
+- **Mobile navigation** — presence, behavior, and breakpoints are `responsive-mobile.md`'s; what belongs here is that the mobile nav offers the same destinations, in the same order, under the same names as the desktop one.
+
 ## Copy consistency
 
 No hardcoded user-facing strings outside the i18n layer; keys added for every new surface; dark-mode variants present on every new component. These are lint-gateable, and should be lint-gated rather than audited twice.

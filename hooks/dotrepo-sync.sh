@@ -16,6 +16,20 @@ DOTFILES_DIR="${DOTFILES_DIR:-$HOME/dotfiles}"
 
 notes=()
 
+# Paths the running app writes to, which are ALSO tracked in the repo.
+#
+# `settings.json` is the live Claude Code settings file, so `/model`,
+# `/output-style` and the dialog settings rewrite it in place. That left the
+# checkout permanently dirty, the dirty-tree guard below permanently refused to
+# fast-forward, and dotclaude froze at one commit for a week while nine piled up
+# behind it — including fixes that were then still being hit in live sessions
+# because they had never deployed (#325).
+#
+# Excluded from the DIRTINESS TEST only. The fast-forward itself is still git's
+# to refuse: if an incoming commit touches one of these, git declines rather
+# than clobbering local state, and that refusal is reported with the file named.
+LIVE_PATHS=("settings.json")
+
 sync_repo() {
   local dir="$1" label="$2"
   [ -d "$dir/.git" ] || return 0
@@ -38,13 +52,32 @@ sync_repo() {
     return 0
   fi
 
-  if [ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]; then
+  # Dirtiness, ignoring the files the app itself maintains.
+  local exclusions=() p
+  for p in "${LIVE_PATHS[@]}"; do exclusions+=(":(exclude)$p"); done
+  local dirty
+  dirty="$(git -C "$dir" status --porcelain -- . "${exclusions[@]}" 2>/dev/null)"
+  if [ -n "$dirty" ]; then
     notes+=("$label: $behind commit(s) behind, local changes uncommitted — resolve by hand")
     return 0
   fi
 
-  if git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
+  local err
+  err="$(git -C "$dir" pull --ff-only --quiet 2>&1)"
+  if [ $? -eq 0 ]; then
     notes+=("$label: pulled $behind new commit(s)")
+    return 0
+  fi
+
+  # Distinguish the one refusal this change makes reachable — an incoming
+  # commit touching a live path the app has since edited — from every other
+  # fast-forward failure, because the remedy is different and specific.
+  local blocker=""
+  for p in "${LIVE_PATHS[@]}"; do
+    case "$err" in *"$p"*) blocker="$p"; break ;; esac
+  done
+  if [ -n "$blocker" ]; then
+    notes+=("$label: $behind commit(s) behind — an incoming commit changes \`$blocker\`, which the app has edited locally. Nothing was overwritten. Commit or discard your \`$blocker\` and the next session pulls.")
   else
     notes+=("$label: $behind commit(s) behind, fast-forward failed — resolve by hand")
   fi

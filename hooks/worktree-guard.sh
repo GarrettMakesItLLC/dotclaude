@@ -96,8 +96,14 @@ command -v python3 >/dev/null 2>&1 || exit 0
 # classes, str.strip(), etc. all do). Input travels via an env var, not stdin —
 # the heredoc IS python3's stdin (that's how `python3 -` gets its script), so
 # piping JSON in on top of it would just be discarded.
-candidates="$(INPUT_JSON="$input" python3 - <<'PYEOF' 2>/dev/null
-import json, os, re, sys
+# The extractor's stderr is kept, not discarded. An error in it used to be
+# indistinguishable from "this command writes nothing": empty output, exit 0,
+# every write allowed. A misplaced `import` while fixing #295 silently switched
+# the whole guard off and flipped every BLOCK case in the self-test to
+# pass-as-allowed — nothing in a real session would have shown it (#319).
+guard_err="$(mktemp 2>/dev/null || echo /tmp/worktree-guard-err.$$)"
+candidates="$(INPUT_JSON="$input" python3 - <<'PYEOF' 2>"$guard_err"
+import json, os, re, shlex, sys
 
 try:
     obj = json.loads(os.environ.get("INPUT_JSON", ""))
@@ -136,7 +142,66 @@ if tool == "Bash":
             i = j + 1
         return "\n".join(lines)
 
-    blanked = blank_heredoc_bodies(cmd)
+    def quoted_spans(text):
+        """(start, end) of every single- or double-quoted run, backslash-aware.
+
+        Used only to decide whether a `>` is an operator or data. Unterminated
+        quotes yield no span rather than swallowing the rest of the line, so a
+        stray apostrophe cannot blind the scan to a real redirect after it.
+        """
+        spans = []
+        i = 0
+        n = len(text)
+        while i < n:
+            c = text[i]
+            if c == "\\":
+                i += 2
+                continue
+            if c in ("'", '"'):
+                j = i + 1
+                while j < n and text[j] != c:
+                    if c == '"' and text[j] == "\\":
+                        j += 2
+                        continue
+                    j += 1
+                if j < n:
+                    spans.append((i, j))
+                    i = j + 1
+                    continue
+                return spans
+            i += 1
+        return spans
+
+    def strip_comments(text):
+        """Blank an unquoted `# …` comment tail, preserving length.
+
+        A comment is prose, and prose contains arrows: `# curl -> stdin ->
+        Railway` yielded `stdin` and `Railway` as write targets and blocked a
+        command that touches no file (#289).
+
+        `#` only opens a comment at the start of a token — start of line, or
+        after whitespace. That is what keeps `s#a#b#` (a sed script), a URL
+        fragment and `--color=always#x` intact, since none of those has
+        whitespace before the `#`. Blanked rather than cut so every span and
+        offset computed elsewhere still lines up.
+        """
+        spans = quoted_spans(text)
+        out_chars = list(text)
+        i = 0
+        n = len(text)
+        while i < n:
+            if text[i] == "#" and not any(lo <= i < hi for lo, hi in spans):
+                if i == 0 or text[i - 1] in " \t\n":
+                    j = text.find("\n", i)
+                    j = n if j == -1 else j
+                    for k in range(i, j):
+                        out_chars[k] = " "
+                    i = j
+                    continue
+            i += 1
+        return "".join(out_chars)
+
+    blanked = strip_comments(blank_heredoc_bodies(cmd))
 
     # Track a leading `cd <dir>` chain (`cd a && cd b && write relfile`) so a
     # RELATIVE write-target is resolved against the directory the shell would
@@ -158,7 +223,34 @@ if tool == "Bash":
             return None
         return base.rstrip("/") + "/" + target if base else "/" + target
 
-    segs_ordered = [s for s in re.split(r"(&&|\|\||\||;|\n)", blanked) if s not in ("&&", "||", "|", ";", "\n")]
+    # Split on shell separators, but only where they are NOT inside quotes. A
+    # `|`, `;` or `&&` inside a quoted argument is data — a jq filter
+    # (`.[]|select(...)`), an awk program, a sed script — and cutting there
+    # split a quoted run in half, which broke the quote pairing the redirect
+    # scan below depends on and turned a quoted `>` into a phantom redirect.
+    def split_unquoted(text):
+        spans = quoted_spans(text)
+        inside = lambda k: any(lo <= k < hi for lo, hi in spans)
+        parts, buf, i, n = [], [], 0, len(text)
+        while i < n:
+            if not inside(i):
+                two = text[i : i + 2]
+                if two in ("&&", "||"):
+                    parts.append("".join(buf))
+                    buf = []
+                    i += 2
+                    continue
+                if text[i] in ("|", ";", "\n"):
+                    parts.append("".join(buf))
+                    buf = []
+                    i += 1
+                    continue
+            buf.append(text[i])
+            i += 1
+        parts.append("".join(buf))
+        return [p for p in parts if p.strip()]
+
+    segs_ordered = split_unquoted(blanked)
     per_seg = []  # (base_or_None, segment_text)
     for seg in segs_ordered:
         toks = seg.split()
@@ -179,18 +271,84 @@ if tool == "Bash":
         # `[ a > b ]` test operator (single `>` inside `[ ... ]` is a string
         # comparison, not a redirect — excluded by requiring the target look
         # like a path, not `]`).
-        for m in re.finditer(r"(?<![&\d])>>?\s*([^\s|&;><)]+)", seg):
+        quoted = quoted_spans(seg)
+        # `->`, `=>` and `<>` are arrows and an operator, not redirections.
+        # A `-` or `=` before the `>` never begins one, and `<>` is SQL's
+        # not-equals (#271, #289, #258). Excluded here as well as by the
+        # quoted-span test, because an arrow also turns up unquoted — in a
+        # comment, or in `env -u X railway … --stdin`-style prose.
+        for m in re.finditer(r"(?<![&\d=\-<])>>?\s*([^\s|&;><)]+)", seg):
+            # A `>` INSIDE a quoted argument is data, not an operator: a jq
+            # filter (`select(.date > "2026-01-01")`), an awk program, a commit
+            # message. The operator itself is never quoted — only its target
+            # may be — so testing the `>` position leaves `> "file"` detected.
+            if any(lo <= m.start() < hi for lo, hi in quoted):
+                continue
             tgt = m.group(1).strip(QUOTES)
             if tgt and tgt not in ("/dev/null", "&1", "&2") and not tgt.startswith("&"):
                 out.append(f"{base}\t{tgt}" if base else tgt)
 
-        # sed -i / --in-place: grab all non-flag trailing tokens on that
-        # pipeline segment as candidate targets (sed accepts multiple files).
-        if re.search(r"\bsed\b.*(-i\b|--in-place\b)", seg):
-            for tok in seg.split():
-                if not tok.startswith("-") and tok != "sed" and "sed" not in tok:
-                    tgt = tok.strip(QUOTES)
-                    out.append(f"{base}\t{tgt}" if base else tgt)
+        # sed -i / --in-place: the FILES it edits, which means skipping the
+        # script.
+        #
+        # This used to take every non-flag token on the segment, so `sed -i
+        # 's/a/b/' file` reported the script as a write target — and the
+        # suggested fix, prefixing it with an absolute directory, was nonsense
+        # because the flagged token is a program (#295, #313).
+        #
+        # It also used to find `sed` with `\bsed\b` anywhere in the segment.
+        # A hyphen is a word boundary, so the branch name
+        # `issue-295-worktree-guard-blocks-sed-i-by-reading-t` matched, and
+        # `git worktree add <dir> <that-branch>` was parsed as a sed
+        # invocation whose "files" were `git`, `worktree` and `add`. The guard
+        # blocked its own prescribed remedy. `sed` is now looked for as an
+        # actual command token.
+        # Shell-aware, because a sed script routinely contains spaces:
+        # `sed -i "s/module: 'a',/module: 'b',/" file` splits into four
+        # whitespace tokens and three of them look like paths (#313). Falls
+        # back to a plain split if the segment will not tokenise — a partial
+        # read is better than dropping the check entirely.
+        try:
+            toks_seg = shlex.split(seg)
+        except ValueError:
+            toks_seg = seg.split()
+        sed_at = next(
+            (
+                i
+                for i, t in enumerate(toks_seg)
+                if t.strip(QUOTES) == "sed" or t.strip(QUOTES).endswith("/sed")
+            ),
+            None,
+        )
+        if sed_at is not None and any(
+            t == "-i" or t.startswith("-i") or t == "--in-place" or t.startswith("--in-place=")
+            for t in toks_seg[sed_at + 1 :]
+        ):
+            # Positional parse, the way sed reads its own argv: `-e`/`-f` take
+            # the next token, `--expression=`/`--file=` carry theirs, and the
+            # first bare token is the script UNLESS a flag already supplied
+            # one. Everything after that is a file.
+            script_from_flag = False
+            expect_flag_arg = False
+            script_seen = False
+            for tok in toks_seg[sed_at + 1 :]:
+                if expect_flag_arg:
+                    expect_flag_arg = False
+                    continue
+                if tok in ("-e", "-f", "--expression", "--file"):
+                    script_from_flag = True
+                    expect_flag_arg = True
+                    continue
+                if tok.startswith("--expression=") or tok.startswith("--file="):
+                    script_from_flag = True
+                    continue
+                if tok.startswith("-"):
+                    continue
+                if not script_seen and not script_from_flag:
+                    script_seen = True
+                    continue
+                tgt = tok.strip(QUOTES)
+                out.append(f"{base}\t{tgt}" if base else tgt)
 
         # cp/mv/install/tee: last non-flag token is the destination. `tee
         # FILE`'s one argument is both its first and last non-flag token, so
@@ -218,6 +376,35 @@ else:
 sys.stdout.write("\n".join(o for o in out if "\n" not in o))
 PYEOF
 )"
+extract_status=$?
+
+# "No interpreter" and "the extractor crashed" are different states, and the
+# difference is what makes failing closed safe here.
+#
+# No python3 at all: the guard cannot run, and blocking every Bash write on the
+# machine would be worse than the drift it prevents. Stay open, as before.
+#
+# python3 present and the script failed: that is a bug in this guard, not a
+# clean bill of health for the command. Block, and print what broke — a guard
+# that quietly stops guarding is worse than no guard, because the protection is
+# assumed.
+if [ "$extract_status" -ne 0 ] && command -v python3 >/dev/null 2>&1; then
+  echo "⛔ dotclaude worktree-guard could not inspect this command, so it is refusing it." >&2
+  echo "Reason: the write-target extractor exited $extract_status. That is a bug in the" >&2
+  echo "  guard, not a verdict on your command — but it cannot tell a safe write from an" >&2
+  echo "  unsafe one while it is broken, so it fails closed rather than waving everything" >&2
+  echo "  through (#319)." >&2
+  if [ -s "$guard_err" ]; then
+    echo "Extractor error:" >&2
+    sed 's/^/    /' "$guard_err" >&2
+  fi
+  echo "Fix: repair hooks/worktree-guard.sh. To get unblocked meanwhile, re-run with" >&2
+  echo "  WORKTREE_GUARD_OFF=1 set — and please file the error above, because every" >&2
+  echo "  session on this machine is hitting it." >&2
+  rm -f "$guard_err"
+  exit 2
+fi
+rm -f "$guard_err"
 
 [ -z "$candidates" ] && exit 0
 
@@ -275,15 +462,38 @@ check_one() {
       esac
       if [ "$cwd_untrusted" = 1 ]; then
         echo "⛔ dotclaude worktree-guard blocked this write." >&2
-        echo "Reason: '$file_path' is relative, so it lands in whatever directory this" >&2
-        echo "  tool call happens to be in — and that cwd is a linked worktree this" >&2
-        echo "  command never entered. An agent's Bash cwd resets between calls and can" >&2
-        echo "  point into a SIBLING agent's worktree, so a relative write is not" >&2
-        echo "  attributable to any tree (see #166)." >&2
-        echo "Fix: name the tree explicitly — either an absolute write-target:" >&2
-        echo "    echo x > /abs/path/to/your/worktree/$file_path" >&2
-        echo "  or lead the command with a cd into it:" >&2
-        echo "    cd /abs/path/to/your/worktree && echo x > $file_path" >&2
+        # A `cd` the guard could not resolve — `cd $VAR`, `cd -`, `cd` bare —
+        # is a different situation from no `cd` at all, and the generic advice
+        # is unfollowable there: "use an absolute path" cannot be done when the
+        # directory legitimately comes from a variable, so the operator is told
+        # to do something impossible and reads the guard as broken (#320).
+        #
+        # It still BLOCKS. The destination is unknowable, and unknowable is the
+        # risk — `$VAR` can expand into a sibling agent's worktree. What changes
+        # is that the message says which of the two it is and what would
+        # actually clear it.
+        # Matched against the raw payload, so the anchor allows any non-word
+        # character before `cd` — the command sits inside JSON, where it is
+        # preceded by a quote rather than by start-of-line.
+        if printf '%s' "$input" | grep -qE '(^|[^a-zA-Z0-9_/.-])cd +("?\$|`|-([ "\\]|$))'; then
+          echo "Reason: '$file_path' is relative, and the \`cd\` before it is one this guard" >&2
+          echo "  cannot resolve — a variable, \`cd -\`, or a bare \`cd\`. So the directory" >&2
+          echo "  this write lands in is not knowable from the command text, and unknowable" >&2
+          echo "  is the risk: a variable can expand into a SIBLING agent's worktree." >&2
+          echo "Fix: expand it yourself, so the tree is named in the command:" >&2
+          echo "    cd \"\$THE_VAR\" && …    ->    cd /abs/path/to/your/worktree && …" >&2
+          echo "  or give the write an absolute target and drop the cd entirely." >&2
+        else
+          echo "Reason: '$file_path' is relative, so it lands in whatever directory this" >&2
+          echo "  tool call happens to be in — and that cwd is a linked worktree this" >&2
+          echo "  command never entered. An agent's Bash cwd resets between calls and can" >&2
+          echo "  point into a SIBLING agent's worktree, so a relative write is not" >&2
+          echo "  attributable to any tree (see #166)." >&2
+          echo "Fix: name the tree explicitly — either an absolute write-target:" >&2
+          echo "    echo x > /abs/path/to/your/worktree/$file_path" >&2
+          echo "  or lead the command with a cd into it:" >&2
+          echo "    cd /abs/path/to/your/worktree && echo x > $file_path" >&2
+        fi
         echo "Policy: ~/dotclaude/CLAUDE.md (Worktree-first). Deliberate?" >&2
         echo "  Re-run with WORKTREE_GUARD_OFF=1 set, or ask the user to run it via ! prefix." >&2
         return 2
@@ -344,8 +554,15 @@ while IFS=$'\t' read -r a b; do
   # A tracked cd-base arrives as "base<TAB>relative-path"; no base is just
   # "path" (b empty) — read splits on the FIRST tab only via IFS, so a path
   # containing no tab lands entirely in $a.
+  #
+  # An ABSOLUTE target ignores the base. `cd /repo && cat > /tmp/x` writes to
+  # /tmp, and joining produced `/repo//tmp/x`, which climbed to /repo and
+  # blocked a legitimate scratchpad write from a main-tree cwd (#267).
   if [ -n "$b" ]; then
-    path="$a/$b"
+    case "$b" in
+      /*) path="$b" ;;
+      *)  path="$a/$b" ;;
+    esac
   else
     path="$a"
   fi
