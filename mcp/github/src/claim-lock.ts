@@ -329,6 +329,40 @@ export async function claimHolder(
 }
 
 /**
+ * When the issue was last reopened, or null.
+ *
+ * The one thing that distinguishes a lock left over from an issue's PREVIOUS
+ * life from a live claim on its current one. Asked of the timeline rather than
+ * inferred from the branch, because nothing about the branch can tell them
+ * apart: both may carry zero commits, and both may be quiet.
+ *
+ * Null on any failure, which reads as "no reopen" and leaves the lock treated
+ * as live. Failing that way round matters: the cost of a missed leftover is an
+ * issue somebody has to unstick by hand, and the cost of a false leftover is a
+ * live claim getting stolen.
+ */
+async function lastReopenedAt(
+  owner: string,
+  name: string,
+  issueNumber: number,
+): Promise<string | null> {
+  try {
+    const events = await ghRequest<{ event?: string; created_at?: string }[]>(
+      `/repos/${owner}/${name}/issues/${issueNumber}/timeline`,
+      { query: { per_page: 100 } },
+    );
+    let latest: string | null = null;
+    for (const e of events) {
+      if (e.event !== "reopened" || !e.created_at) continue;
+      if (!latest || e.created_at > latest) latest = e.created_at;
+    }
+    return latest;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Acquire the distributed lock for an issue by creating its branch ref at the
  * current default-branch head. `POST /git/refs` is atomic and server-side: a
  * 422 means the ref already exists, i.e. another machine holds the claim.
@@ -350,6 +384,33 @@ export async function acquireClaimLock(
   } catch (err) {
     if (err instanceof GhHttpError && err.status === 422) {
       const holder = await claimHolder(owner, name, branch);
+
+      // A lock outlives its issue: GitHub deletes a branch when ITS OWN PR
+      // merges, and one PR commonly closes several issues, so every lock but
+      // the PR head survives (#300). `issue_claim` already refuses a CLOSED
+      // issue before it reaches this point, so the case that actually reaches
+      // here is a REOPENED one — its state is `open` again while a lock from
+      // its previous life is still sitting on the remote, reporting a holder
+      // who finished months ago. The protocol then correctly says "pick
+      // different work", and the issue is unclaimable forever.
+      //
+      // A stamp older than the last reopen is the only sound way to tell that
+      // from a live claim. Not the branch's age: a holder's commits can sit
+      // unpushed where the remote cannot see them, so a quiet branch may be
+      // somebody's live work.
+      const reopenedAt = holder.claimed_at
+        ? await lastReopenedAt(owner, name, issueNumber)
+        : null;
+      if (reopenedAt && holder.claimed_at && holder.claimed_at < reopenedAt) {
+        throw new ClaimConflictError(
+          `Issue #${issueNumber} was REOPENED at ${reopenedAt}, and the lock branch "${branch}" ` +
+            `was stamped before that (${holder.claimed_at}) — it is a leftover from the issue's ` +
+            "previous life, not a live claim, and nobody is working this. Drop it with " +
+            "claim_release and claim again.",
+          holder,
+        );
+      }
+
       const whoWhen = holder.claimed_by
         ? `Claimed by \`${holder.claimed_by}\` at ${holder.claimed_at}. `
         : "No claim stamp found (an older claim, predating stamping, or the stamp post failed) — " +
@@ -363,7 +424,9 @@ export async function acquireClaimLock(
               "PR status, `claim_release` to drop it if abandoned."
             : "Default to: pick different work. Only resume this branch if you have independent " +
               "confirmation (outside this tool) that the holder above is not actively working it — " +
-              "the mismatch alone is not evidence of abandonment."),
+              "the mismatch alone is NOT evidence of abandonment, and neither is a quiet " +
+              "`last_commit_at`: the holder's commits may be unpushed where nothing here can see " +
+              "them."),
         holder,
       );
     }

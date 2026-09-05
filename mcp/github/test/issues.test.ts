@@ -772,6 +772,7 @@ describe("issue_claim", () => {
     branchBody?: unknown;
     prsBody?: unknown;
     commentsBody?: unknown;
+    issueState?: string;
   }) {
     return async (url: string, init: { method?: string; body?: string }) => {
       const method = init.method ?? "GET";
@@ -805,11 +806,13 @@ describe("issue_claim", () => {
         return makeResponse({ status: 201, body: { body: JSON.parse(init.body as string).body } });
       }
       if (method === "GET" && url.endsWith("/issues/8")) {
+        if (opts.issueState === "unreadable") return makeResponse({ status: 500 });
         return makeResponse({
           status: 200,
           body: {
             number: 8,
             title: "Fix the thing!",
+            state: opts.issueState ?? "open",
             labels: [{ name: "status:ready" }, { name: "type:bug" }],
           },
         });
@@ -875,6 +878,90 @@ describe("issue_claim", () => {
     expect(typeof stamp.holder).toBe("string");
     expect(stamp.holder.length).toBeGreaterThan(0);
     expect(new Date(stamp.claimed_at).toString()).not.toBe("Invalid Date");
+  });
+
+  /**
+   * A lock outlives its issue (#300): GitHub deletes a branch when ITS OWN PR
+   * merges, and one PR commonly closes several issues, so every lock but the
+   * PR head survives.
+   *
+   * `issue_claim` already refuses a CLOSED issue before it reaches the ref
+   * POST, so the case that actually reaches the conflict path is a REOPENED
+   * one — open again, with a lock from its previous life still on the remote
+   * naming a holder who finished long ago. The protocol then says "pick
+   * different work" and the issue is unclaimable forever.
+   */
+  describe("a lock left over from the issue's previous life", () => {
+    const reopenedAt = "2026-08-01T00:00:00Z";
+    const timeline = (events: { event: string; created_at: string }[]) =>
+      async (url: string, init: { method?: string; body?: string }) => {
+        if ((init.method ?? "GET") === "GET" && url.includes("/timeline")) {
+          return makeResponse({ status: 200, body: events });
+        }
+        return mockClaim({ refStatus: 422, calls: [], commentsBody: [stampComment] })(url, init);
+      };
+    const stampComment = {
+      body:
+        "🔒 Claimed by `OLD-BOX` at 2026-07-01T00:00:00.000Z (branch `issue-8-fix-the-thing`)\n" +
+        '<!-- claim-lock: {"branch":"issue-8-fix-the-thing","holder":"OLD-BOX","claimed_at":"2026-07-01T00:00:00.000Z"} -->',
+    };
+
+    it("names it a leftover when the stamp predates the reopen", async () => {
+      fetchMock.mockImplementation(timeline([{ event: "reopened", created_at: reopenedAt }]));
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+
+      const text = res.content[0].text;
+      expect(res.isError).toBe(true);
+      expect(text).toContain("REOPENED");
+      expect(text).toContain("leftover");
+      expect(text).toContain("claim_release");
+      // Must NOT send the agent away — that advice is what makes the issue
+      // permanently unclaimable.
+      expect(text).not.toContain("pick different work");
+    });
+
+    it("leaves a claim made AFTER the reopen alone", async () => {
+      fetchMock.mockImplementation(
+        timeline([{ event: "reopened", created_at: "2026-06-01T00:00:00Z" }]),
+      );
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+
+      const text = res.content[0].text;
+      expect(text).toContain("already claimed");
+      expect(text).not.toContain("leftover");
+    });
+
+    it("leaves a never-reopened issue alone", async () => {
+      fetchMock.mockImplementation(timeline([{ event: "labeled", created_at: reopenedAt }]));
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+      expect(res.content[0].text).not.toContain("leftover");
+    });
+
+    it("treats an unreadable timeline as a live claim, never as a leftover", async () => {
+      // Fails safe. The cost of a missed leftover is an issue unstuck by hand;
+      // the cost of a false one is a live claim getting stolen.
+      fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+        if ((init.method ?? "GET") === "GET" && url.includes("/timeline")) {
+          return makeResponse({ status: 500 });
+        }
+        return mockClaim({ refStatus: 422, calls: [], commentsBody: [stampComment] })(url, init);
+      });
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+      expect(res.content[0].text).not.toContain("leftover");
+    });
+
+    it("warns that a quiet branch is not an abandoned one", async () => {
+      fetchMock.mockImplementation(
+        timeline([{ event: "reopened", created_at: "2026-06-01T00:00:00Z" }]),
+      );
+      const handler = await getIssueHandler("issue_claim");
+      const res = await handler({ repo: "octo/repo", number: 8 });
+      expect(res.content[0].text).toMatch(/last_commit_at/);
+    });
   });
 
   it("returns a structured already-claimed failure on a 422 from the ref POST, and never assigns", async () => {
