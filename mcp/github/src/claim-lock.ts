@@ -8,11 +8,58 @@ interface ClaimStamp {
   branch: string;
   holder: string;
   claimed_at: string;
+  /**
+   * The session holding the lock, when the runtime exposes one. Optional
+   * because a stamp written before this existed has none, and those must keep
+   * resolving rather than becoming unreadable.
+   */
+  session?: string;
 }
 
 /** This machine's identity for claim stamps. Overridable for environments where `hostname()` isn't meaningful (e.g. ephemeral containers). */
 function machineIdentity(): string {
   return process.env.CLAIM_MACHINE_ID ?? hostname();
+}
+
+/**
+ * The SESSION holding a claim, which is what a hostname could never be.
+ *
+ * Several sessions per machine is the normal case with agent teams, so a
+ * hostname identifies a box and not a holder — and three separate failures
+ * followed from that in one night (#308): a sibling session could not tell a
+ * claim from its own and force-pushed over it, an outside session could not
+ * address the holder to hand work back, and `author` is the same GitHub user
+ * everywhere so there was no second signal to fall back on.
+ *
+ * Undefined when the runtime exposes nothing, which keeps this additive: the
+ * ref is still the lock, the hostname is still recorded, and a stamp without a
+ * session degrades to exactly the old behaviour.
+ */
+function sessionIdentity(): string | undefined {
+  const id = process.env.CLAIM_SESSION_ID ?? process.env.CLAUDE_CODE_SESSION_ID;
+  return id && id.length > 0 ? id : undefined;
+}
+
+/** Short form for a human-readable line; the full id stays in the JSON. */
+function shortSession(id: string): string {
+  return id.length > 12 ? id.slice(0, 12) : id;
+}
+
+/**
+ * How a lock relates to the caller: the caller's own, a sibling session on this
+ * machine, or elsewhere. `same-machine` is deliberately NOT "yours" — treating
+ * it as yours is what let one session force-push over another's branch.
+ */
+export type ClaimRelation = "self" | "same-machine" | "elsewhere";
+
+export function claimRelation(stamp: {
+  holder: string | null;
+  session?: string | null;
+}): ClaimRelation {
+  const mySession = sessionIdentity();
+  if (mySession && stamp.session && stamp.session === mySession) return "self";
+  if (stamp.holder && stamp.holder === machineIdentity()) return "same-machine";
+  return "elsewhere";
 }
 
 /** Prefix every claim branch carries, so a lock ref is identifiable by name alone. */
@@ -128,6 +175,10 @@ export interface ClaimHolder {
   pull_request: PullSummary | null;
   claimed_by: string | null;
   claimed_at: string | null;
+  /** The holding session, when its stamp carried one (#308). */
+  claimed_by_session?: string | null;
+  /** Whether that is this very session, a sibling on this machine, or elsewhere. */
+  relation?: ClaimRelation;
 }
 
 /**
@@ -237,16 +288,20 @@ export async function stampClaim(
   issueNumber: number,
   branch: string,
 ): Promise<void> {
+  const session = sessionIdentity();
   const stamp: ClaimStamp = {
     branch,
     holder: machineIdentity(),
     claimed_at: new Date().toISOString(),
+    ...(session ? { session } : {}),
   };
   await ghRequest(`/repos/${owner}/${name}/issues/${issueNumber}/comments`, {
     method: "POST",
     body: {
       body:
-        `🔒 Claimed by \`${stamp.holder}\` at ${stamp.claimed_at} (branch \`${branch}\`)\n` +
+        `🔒 Claimed by \`${stamp.holder}\`` +
+        (session ? ` (session \`${shortSession(session)}\`)` : "") +
+        ` at ${stamp.claimed_at} (branch \`${branch}\`)\n` +
         `<!-- claim-lock: ${JSON.stringify(stamp)} -->`,
     },
   });
@@ -325,6 +380,11 @@ export async function claimHolder(
       : null,
     claimed_by: stamp?.holder ?? null,
     claimed_at: stamp?.claimed_at ?? null,
+    claimed_by_session: stamp?.session ?? null,
+    relation: claimRelation({
+      holder: stamp?.holder ?? null,
+      session: stamp?.session ?? null,
+    }),
   };
 }
 
@@ -412,16 +472,32 @@ export async function acquireClaimLock(
       }
 
       const whoWhen = holder.claimed_by
-        ? `Claimed by \`${holder.claimed_by}\` at ${holder.claimed_at}. `
+        ? `Claimed by \`${holder.claimed_by}\`` +
+          (holder.claimed_by_session
+            ? ` (session \`${shortSession(holder.claimed_by_session)}\`)`
+            : "") +
+          ` at ${holder.claimed_at}. `
         : "No claim stamp found (an older claim, predating stamping, or the stamp post failed) — " +
           "treat as held by an unknown machine. ";
-      const sameMachine = holder.claimed_by === machineIdentity();
+
+      // Three states, not two. "Same machine" was being read as "probably mine",
+      // and acting on that is how one session force-pushed over another's branch
+      // and dropped four reviewed files (#308). Only a matching SESSION is yours.
+      if (holder.relation === "self") {
+        throw new ClaimConflictError(
+          `Issue #${issueNumber} is already claimed BY THIS SESSION: the lock branch "${branch}" ` +
+            `is yours and already exists. ${whoWhen}Nothing to do — check out the branch and carry on.`,
+          holder,
+        );
+      }
+      const sameMachine = holder.relation === "same-machine";
       throw new ClaimConflictError(
         `Issue #${issueNumber} is already claimed: the lock branch "${branch}" exists on the remote. ${whoWhen}` +
           (sameMachine
-            ? "That's THIS machine — most likely your own earlier session that died or finished " +
-              "without a PR. Safe to investigate resuming: `work_in_flight` for its last commit and " +
-              "PR status, `claim_release` to drop it if abandoned."
+            ? "That's this machine but ANOTHER session — a sibling agent, or an earlier one of " +
+              "yours that died. It is not yours to resume on that basis alone: a sibling may be " +
+              "working it right now with commits you cannot see. Message the session named above, " +
+              "or check `work_in_flight`; `claim_release` only once you know it is abandoned."
             : "Default to: pick different work. Only resume this branch if you have independent " +
               "confirmation (outside this tool) that the holder above is not actively working it — " +
               "the mismatch alone is NOT evidence of abandonment, and neither is a quiet " +
