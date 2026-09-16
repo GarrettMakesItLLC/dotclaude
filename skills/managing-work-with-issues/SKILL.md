@@ -18,7 +18,7 @@ Garrett runs agents on **two machines against the same repos**. Both authenticat
 
 **3. A failed claim means pick different work.** Never proceed past a failed claim — not "the other session probably died", not "I'll just work locally and sort it out later". Failure is the mechanism working.
 
-**4. Use the branch the claim returns.** `issue_claim` returns the branch name; `git fetch && git checkout <branch>`. Do not invent your own name — the ref you check out and the ref that holds the lock must be the same one.
+**4. Use the branch the claim returns.** `issue_claim` returns the branch name. Do not invent your own name — the ref you check out and the ref that holds the lock must be the same one. The `git checkout` line it prints is the plain-checkout form; in a worktree-first repo (any repo with `.worktrees/`) the sequence is instead `git fetch origin <branch>` then `git worktree add .worktrees/<short> <branch>`, and the first edit goes in a **separate** tool call — `worktree-guard.sh` evaluates the edit path before a compound command has created the worktree, and blocks it as a main-tree write. Claim and create the worktree in the same step, never claim and stop: a claim with no worktree behind it is a lock the next session has to reverse-engineer.
 
 **5. Release only when abandoning without a PR.** `claim_release` deletes the lock ref. It refuses to drop a branch holding unmerged commits unless the commits landed in a merged PR or you pass `force` — so an abandoned-but-not-empty branch needs a deliberate decision, not a reflex.
 
@@ -56,6 +56,8 @@ Work that is scoped and startable but not yet prioritised has no status of its o
 
 Before applying `blocked`, try to resolve it. A missing env var you can fetch from Railway/Vercel, a fact you can grep for, a bug you can reproduce — those are work, not blockers. Only what genuinely requires Garrett's hands or judgement earns the label.
 
+**`blocked` is a claim with an expiry, not a terminal state.** The event that clears a blocker almost never touches the tracker that recorded it — the secret gets minted, the install hook that caused the failure gets deleted, the dependency ships — so a `blocked` issue decays into "never looked at again". Before any backlog pass treats a blocked issue as parked, re-test the specific condition its `⛔` section names: does the secret exist now (`vercel env ls`, Railway variables), does the file still contain the pattern, has the external thing shipped. Blocker verifiably gone ⇒ close it with the evidence, or move it to `ready`. This is the same check as the answered-issue scan below, pointed at the world instead of the comments.
+
 ### A blocked issue may already be answered
 
 **Garrett answers in a comment and by ticking a box. He does not usually change the label.** So an issue can carry a complete answer and still read as blocked to every session after it.
@@ -85,6 +87,8 @@ An issue with a milestone and no parent is orphaned work; an issue with a parent
 Close an epic when its children are closed — an **exhausted epic** left open reads as live work, and the next session re-derives its contents. Never file a child under a closed parent.
 
 Audit findings land on exactly this shape: the audit epic is the findings index, one child per finding, all on the dated milestone — see **running-an-audit**.
+
+**An epic being filled is not a fixed input.** An audit files in batches, so a child listing taken while it is still running misses everything filed after — one epic went from 45 to 98 children after the sweep had snapshotted it, and nothing re-surfaced the difference. Re-list an epic's children on every sweep cycle (the `sub_issues` counter on the epic is the cheap tell that it moved), and key off the audit's final `filing complete: N children` comment rather than the first listing.
 
 Where a repo carries an issue-audit script (MuscleBuddy's `npm run issues:audit`), **it is the arbiter, not this document** — it reads the live tracker and exits non-zero on any violation. Its rule names are the checklist: `missing-parent`, `missing-milestone`, `missing-status`, `missing-type`, `closed-parent`, `unlabelled-epic`, `stale-in-progress`, `blocked-without-owner-action`, `waiting-without-dependency`, `exhausted-epic`, `deprecated-label`. Run it before handing off in any repo that has it.
 

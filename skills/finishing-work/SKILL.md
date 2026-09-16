@@ -26,6 +26,10 @@ Verification itself is covered by CLAUDE.md and `verify-reminder.sh`. What this 
 
 Any box you can't check goes in the summary explicitly. Never present unverified work as done, and never describe a feature as complete while a layer is outstanding — say which layer is missing and why.
 
+**A local gate that can skip itself is not a gate.** Some pre-commit hooks degrade silently under load — RedThread's ESLint wrapper gates on free memory and skips when the machine is contended, which is exactly the state parallel agents put it in. Every agent then reports "committed, hooks passed" truthfully and every PR goes red on lint in CI. Before the push, name each local gate the repo runs and whether it can self-skip; for any that can, run it explicitly in the foreground on the changed files (`npx eslint <files>`) and read its exit code. "Run typecheck, CI runs the rest" assumes the hook ran.
+
+**Before every push, read `git diff --stat origin/<base>...HEAD` — it must list only your files.** Under parallel merging the base branch moves while you work, and two habits silently undo other people's landed work: squashing with `git reset --soft origin/<base>` (which folds every sibling merge since you branched into a commit that deletes it — 108 files, once) and pushing a rebase without looking. Squash against the merge base only: `git reset --soft $(git merge-base origin/<base> HEAD)`. And after any rebase that touched `package.json` or the lockfile, reinstall before trusting lint or typecheck — a dependency bump you just pulled in shows up as bogus `no-unsafe-*` errors on lines you never touched.
+
 ### Regression checklist
 
 The mechanically-checkable subset of `running-an-audit`'s realms, run against this diff — not a dispatch, not a full audit. Under a minute:
@@ -72,3 +76,7 @@ Canonical shapes live in `~/dotclaude/templates/` — roll them into each repo's
 4. Confirm: `git status` clean, `git worktree list` shows no leftovers.
 
 If the branch was an `issue-<N>-*` claim abandoned without a PR, `claim_release` it so the other machine can pick the issue up. `commit-commands:clean_gone` sweeps branches whose remotes are already deleted.
+
+## 5. The one come-back after arming auto-merge
+
+Arming (`pr_auto_merge`) is a request the remote can later revoke: a PR can drop out of auto-merge with every check green, `mergeStateStatus: CLEAN`, and no event explaining it (CLAUDE.md, *Verify before a handoff*). The single generous wakeup you schedule after arming is the one cheap confirmation — so it does more than look for red checks. For every PR still open when it fires, read the arming back (`pr_auto_merge` returns `armed`, `in_merge_queue`, `auto_merge_request`; `pr_view` shows the same) and re-arm any that is clean, green, not in the queue, and no longer armed. Only then treat a still-open PR as needing a real fix.
