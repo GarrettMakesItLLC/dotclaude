@@ -17,6 +17,15 @@ The reusable posture. Per-repo specifics — URLs, env, domain playbooks — liv
 - **Data-caused, not code-caused:** a rollback won't fix it but still buys time. Pair it with an ops kill switch (`rules/data-api.md`) to disable the affected subsystem without a redeploy.
 - Forward-fix in place only when rollback is impossible (e.g. an already-run irreversible migration) — then expand-then-contract so the *next* rollback is safe.
 
+## Constraint-adding migrations meet real data
+
+CI proves a migration applies to an empty database. A migration that adds a `UNIQUE` index, a `NOT NULL` column without a default, or a foreign key is applied in production to whatever rows already exist — and when the constraint exists to fix a data-integrity bug, the more that bug fired, the more certainly the fix's own migration fails on deploy. The pipeline that validates it is structurally incapable of catching the case that breaks it.
+
+So a constraint-adding migration ships in one of two shapes, never bare:
+
+- **Remediation in the same migration** — the rows that would violate it are merged, deleted, or back-filled first, in the migration, justified by an explicit statement of what references those rows.
+- **A pre-deploy data check against production** — `railway run … psql` (or the repo's equivalent) counts the violating rows before the PR is promoted, and the result is in the PR body. Zero is evidence; "the table should be clean" is not.
+
 ## RUNBOOK.md — a standard artifact
 
 Every production repo carries `docs/RUNBOOK.md` with:

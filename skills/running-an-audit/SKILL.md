@@ -90,13 +90,22 @@ State the scope in the epic body. Half the re-scoping cost is that nobody could 
 |---|---|---|
 | **sweep** | One realm, one pass, inline. Answers "is this broadly OK?" | Findings in the reply; an issue for each that survives verification. No epic, no milestone. |
 | **realm** | One realm, exhaustive: enumerate the entire surface (every route, every form, every outbound call), then check each. Dispatch one auditor per sub-surface when the surface is wide. | Epic as index + issue per finding. Milestone if the findings are a batch of work. |
-| **launch-readiness** | Every realm in scope, one dispatched auditor per realm, in parallel. Reproduce what can be reproduced. Adversarial self-check on every finding. | Dated milestone (`Pre-Launch Audit (YYYY-MM-DD)`), epic index with severity buckets, one issue per finding. |
+| **launch-readiness** | Every user-facing and compliance realm, one dispatched auditor per realm, in parallel. Reproduce what can be reproduced. Adversarial self-check on every finding. | Dated milestone (`Pre-Launch Audit (YYYY-MM-DD)`), epic index with severity buckets, one issue per finding. |
+| **full-spectrum** | Every realm in the index, engineering-health realms included (architecture, test/CI gate integrity, database & migrations, API contracts, DX & agent tooling, observability, i18n/PWA/realtime). Same dispatch shape as launch-readiness. | Dated milestone (`Full-Spectrum Audit (YYYY-MM-DD)`), same epic contract. |
+
+Depth rungs are named by coverage, not by business milestone — "launch-readiness" reads as a scope to the person asking for "deep and wide, every area", and it is narrower than that.
 
 Escalate depth for anything gating a launch, a legal position, or a claim made to users. Default to **sweep** when the question is "did I break something" — that's a review, and `/code-review` is cheaper.
 
 ## Dispatching auditors
 
-For **realm** and **launch-readiness** depth, fan out with the `domain-auditor` agent — one per realm or sub-surface, in a single batch. Its standing instructions cover evidence, adversarial self-check, and returning findings rather than fixes. Give each auditor: the target ref, its realm's reference file, the scope boundary, and the dedupe list (below). Never let two auditors share a surface — overlapping findings cost more to reconcile than they cost to find.
+For **realm**, **launch-readiness** and **full-spectrum** depth, fan out with the `domain-auditor` agent — one per realm or sub-surface, in a single batch. Its standing instructions cover evidence, adversarial self-check, and returning findings rather than fixes. Give each auditor: the target ref, its realm's reference file, the scope boundary, and the dedupe source (below). Never let two auditors share a surface — overlapping findings cost more to reconcile than they cost to find.
+
+**File the epic shell before dispatching, and hand every auditor its number.** The epic body is the live dedupe list — auditors that read it deduped; auditors handed a skip-list in a scratchpad file re-found wave-1 findings anyway. On a second wave, the brief says `skip #A–#B` and points at the epic again.
+
+**Long reports do not survive the return channel.** A final result over a few thousand characters comes back as `[result truncated — ask the agent for the rest via SendMessage]`. The brief mandates delivery: write the full report to a named file in the lead's scratchpad (or the repo's audit directory) and message the path, or send it via `SendMessage` in numbered parts of ≤6,000 characters — and return a one-paragraph summary only.
+
+**A fan-out is resumable or it is re-run from scratch.** Auditors share one failure domain (the account limit, a harness restart), and they all stop in the same minute. Persist each report to durable storage as it arrives, and keep one `STATE.md` per audit with a row per realm — `complete` / `partial` / `missing`, plus merge decisions — so an interruption costs a re-dispatch of the missing rows with the skip range, not the whole batch. A second independent pass over a realm often finds the deeper class of defect; both blockers in one audit came from wave two.
 
 ## Dedupe before filing
 
@@ -120,6 +129,7 @@ Confidence: high | medium — and what would raise it
 ```
 
 - **Evidence is a `file:line`, a reproduction, or a cited clause. Otherwise it isn't a finding**, it's a suspicion — either verify it or report it as an open question.
+- **Truncated output proves presence, never absence.** A listing cut by `head`, `tail`, or a result limit can confirm the thing you saw is there; it cannot establish that anything is missing — `git ls-tree … | head -40` once "proved" a whole package had not shipped because `packages/` sorted after the cut. Negative findings are the ones acted on destructively (closed, deleted, re-scoped), so they need a command whose completeness is guaranteed: `wc -l` first, `grep -c`, `test -e`, `ls-tree <specific path>` — not a capped list read as exhaustive.
 - **Reproduce before filing** anything you can run. A finding that survives contact with the actual engine is worth ten that were reasoned about.
 - **Every cited figure traces to published text**, read not recalled. A number in a compliance finding that can't be traced to its source is a bug, not a default.
 - **Undecidable from available data ⇒ report it as undecidable, naming the criterion's own exception clause.** Do not apply the conservative figure and flag it anyway: over-flagging teaches the owner to ignore the rule, which costs more than the miss.
@@ -138,6 +148,6 @@ The epic is the index, and it carries four sections an audit is not finished wit
 
 ## Generated audit artifacts
 
-A compliance record, evidence file, or coverage report that is generated must be regenerated by CI and drift-checked — otherwise it silently goes stale, and then blocks unrelated work the day someone notices. Pair it with the inverse check too: an entry in the register that the published policy no longer discloses is as much a finding as one the policy discloses and the register omits.
+A compliance record, evidence file, or coverage report that is generated must be regenerated by CI and drift-checked — otherwise it silently goes stale, and then blocks unrelated work the day someone notices. **But shape the artifact for parallel change**: one whole-repo file that every PR regenerates (a single OpenAPI document, a sitemap, a numbered spec section) becomes a global lock under N concurrent PRs — each merge invalidates every other PR's copy, no merge ref means no CI, no CI means no auto-merge, and the orchestrator ends up serially rebasing a chain at ten minutes a landing. Prefer one snapshot file per unit (per route, per model) so disjoint changes touch disjoint files, or a regenerate-on-merge job; and when a sweep dispatches many PRs that all touch a shared artifact, name it in the brief and stagger the merges on purpose. Pair it with the inverse check too: an entry in the register that the published policy no longer discloses is as much a finding as one the policy discloses and the register omits.
 
 And **evidence expires.** A control passing on a pull request proves something about that pull request — not that the system was compliant on any date. Where a date matters (legal, certification), the evidence lane is scheduled, writes one dated artifact per run to a durable location, and **records red days rather than skipping them**: a failed run is the finding.
