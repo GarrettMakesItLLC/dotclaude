@@ -112,6 +112,19 @@ check 2 Bash command "python3 - <<'PYEOF'
 open('$CONV/src/via-python.ts', 'w').write('x')
 PYEOF"
 
+# Should BLOCK — same, with a leading cd resolving a RELATIVE open() target
+# against the segment's own directory, not the hook's cwd (#7995).
+check 2 Bash command "cd $CONV/src && python3 <<'PYEOF'
+open('via-relative.ts', 'w').write('x')
+PYEOF"
+
+# Should ALLOW — a command that merely QUOTES the open(path,"w") pattern
+# without ever invoking python writes nothing (#7995). The scan used to match
+# `open(...)` text anywhere in the command, including inside an echo/printf
+# argument.
+check 0 Bash command "echo 'open(\"$CONV/src/x.py\", \"w\")'"
+check 0 Bash command "printf '%s\n' 'import os' 'open(\"$CONV/src/x.py\", \"w\")' > /tmp/notes.txt"
+
 # Should BLOCK — plain shell redirection into the main tree.
 check 2 Bash command "echo hi > $CONV/src/redirected.ts"
 check 2 Bash command "printf x >> $CONV/src/appended.ts"
