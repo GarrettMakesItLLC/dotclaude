@@ -30,6 +30,16 @@ Claim → work it → open the PR (`status:in-review`, `Closes #N` in the body) 
 
 GitHub's auto-close needs the keyword before **each** number: `Closes #1, closes #2` (a bare `Closes #1, #2` closes only #1).
 
+### Batching several issues into one PR
+
+Batching is the default (global `CLAUDE.md` § Batch PRs): each PR buys a full CI suite, so related issues ship together. The lock stays per-issue, so a batch works like this:
+
+1. **Pick the batch first.** From `work_in_flight` and the backlog, choose related, unclaimed issues: same subsystem, epic, audit realm or files, 3–8 of them, and small enough to review as one diff.
+2. **Claim each one** with `issue_claim`. Each claim makes its own lock branch. If a claim fails, drop that issue from the batch and keep the rest.
+3. **Work on the first claim's branch.** The other lock branches stay empty at the base: they are locks, not work. Comment on each of those issues naming the branch the work is on, so the lock-holder is traceable.
+4. **One PR, one keyword per issue:** `Closes #A` / `Closes #B` / … each on its own line. Set every issue in the batch to `status:in-review`.
+5. **After merge, delete the empty lock branches** with `claim_release` (they carry no commits, so no `force` is needed). If an issue turns out not to fit mid-way, `claim_release` it back to `ready` rather than dragging it into an unrelated diff.
+
 ## Taxonomy
 
 - **status:** `ready` → `in-progress` → `in-review`; `blocked` or `waiting` from any state. Exactly one at a time. There is no `backlog` status — an issue with no milestone is the backlog.
