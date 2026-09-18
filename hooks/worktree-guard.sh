@@ -37,14 +37,23 @@
 #
 # BASH COVERAGE (#92): a `Bash` command is scanned for write patterns —
 # redirection (`>`, `>>`), `sed -i`/`--in-place`, `cp`/`mv`/`install`/`tee`
-# destinations, and a Python `open(path, "w"/"a"/...)` call anywhere in the
-# command (the heredoc-to-python3 workaround that motivated this). Every
-# candidate path found is checked against the same main-tree/worktree logic as
-# Edit/Write. This is deliberately best-effort, NOT exhaustive — a write
-# buried in a script it invokes, or spelled in a way the regexes below don't
-# recognize, still gets through. It closes the common escape hatch (an agent
-# reaching for `python3 - <<EOF ... open(path, "w") ... EOF` when Edit/Write
-# was blocked), not every possible one.
+# destinations, and a Python `open(path, "w"/"a"/...)` call inside a heredoc
+# whose OWN command word is `python`/`python3` (the heredoc-to-python3
+# workaround that motivated this). Every candidate path found is checked
+# against the same main-tree/worktree logic as Edit/Write. This is
+# deliberately best-effort, NOT exhaustive — a write buried in a script it
+# invokes, or spelled in a way the regexes below don't recognize, still gets
+# through. It closes the common escape hatch (an agent reaching for `python3 -
+# <<EOF ... open(path, "w") ... EOF` when Edit/Write was blocked), not every
+# possible one.
+#
+# The `open()` scan is scoped to a python-headed heredoc, not the whole
+# command text (#7995): a command that merely QUOTES the pattern —
+# `echo 'open("docs/x.py", "w")'`, a printf assembling a script string — never
+# invokes python and writes nothing, so scanning the whole command reported a
+# false positive on prose. A relative target is resolved against the nearest
+# leading `cd <dir> &&`/`cd <dir>;` on the SAME line as the heredoc's own
+# invocation, not the hook's own cwd or the repo root.
 #
 # KNOWN GAPS (by design — backstop, not a sandbox):
 #   - Cannot distinguish a subagent from the main session (no such flag in hook
@@ -468,10 +477,64 @@ if tool == "Bash":
                     out.append(f"{base}\t{tgt}" if base else tgt)
 
     # Python `open(path, "w"...)`/`"a"...` embedded in a heredoc — the pattern
-    # this rule exists for. Deliberately scans the ORIGINAL (unblanked) command
-    # since this is the one pattern meant to be found inside a heredoc body.
-    for m in re.finditer(r"open\(\s*[\"']([^\"']+)[\"']\s*,\s*[\"'][wax]", cmd):
-        out.append(m.group(1))
+    # this rule exists for (#92). Scoped to a heredoc whose OWN command word is
+    # `python`/`python3` (#7995): the whole-command scan this replaced matched
+    # `open(...)` text anywhere, including inside a quoted `echo`/`printf`
+    # argument that writes nothing. Deliberately reads the ORIGINAL (unblanked)
+    # heredoc body — that is the one span this extractor is meant to see
+    # inside, since `blank_heredoc_bodies` above erases it for every other
+    # pattern.
+    heredoc_start_re = re.compile(r"<<-?\s*([\"']?)(\w+)\1")
+    py_cmd_re = re.compile(r"^python3?(\.\d+)?$")
+
+    def joined_walk(base, target, have):
+        if target.startswith("/"):
+            return target
+        if not have:
+            return None
+        return base.rstrip("/") + "/" + target if base else "/" + target
+
+    raw_lines = cmd.split("\n")
+    walk_effective, walk_have_base = "", False
+    li = 0
+    while li < len(raw_lines):
+        line = raw_lines[li]
+        # Track a leading `cd <dir> &&`/`cd <dir>;` at the start of this line —
+        # line-granular, best-effort, the same rule the segment loop above
+        # applies per shell-separated segment.
+        cd_m = re.match(r"\s*cd\s+(\S+)\s*(?:&&|;)", line)
+        if cd_m and not cd_m.group(1).startswith("$") and cd_m.group(1) != "-":
+            resolved = joined_walk(walk_effective, cd_m.group(1).strip(QUOTES), walk_have_base)
+            if resolved is not None:
+                walk_effective, walk_have_base = resolved, True
+            else:
+                walk_have_base = False
+        hd_m = heredoc_start_re.search(line)
+        if not hd_m:
+            li += 1
+            continue
+        delim = hd_m.group(2)
+        head_toks = line[: hd_m.start()].split()
+        cmd_word = ""
+        for t in reversed(head_toks):
+            cand = t.rsplit("/", 1)[-1].strip(QUOTES)
+            # `python3 - <<EOF` (stdin) and any other bare flag are not the
+            # command word — skip past them to the actual program name.
+            if cand and cand != "-" and not cand.startswith("-"):
+                cmd_word = cand
+                break
+        j = li + 1
+        body_lines = []
+        while j < len(raw_lines) and raw_lines[j].strip() != delim:
+            body_lines.append(raw_lines[j])
+            j += 1
+        if py_cmd_re.match(cmd_word):
+            body = "\n".join(body_lines)
+            base = walk_effective if walk_have_base else None
+            for m in re.finditer(r"open\(\s*[\"']([^\"']+)[\"']\s*,\s*[\"'][wax]", body):
+                tgt = m.group(1)
+                out.append(f"{base}\t{tgt}" if base else tgt)
+        li = j + 1
 else:
     p = ti.get("file_path") or ti.get("notebook_path") or ""
     if p:
