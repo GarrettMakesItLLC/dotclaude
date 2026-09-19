@@ -57,6 +57,19 @@ jobs:
             bash "$f"
           done
 
+      - name: Run bin/ tool self-tests
+        # bin/ holds fleet tooling that runs against real repos and the GitHub
+        # API. Globbed for the same reason as the hooks: a new tool's tests can
+        # never be forgotten. Not required-per-script — a script whose only
+        # useful test is a live API call is better left untested than faked.
+        run: |
+          shopt -s nullglob
+          tests=(bin/*.test.sh)
+          for f in "${tests[@]}"; do
+            echo "→ $f"
+            bash "$f"
+          done
+
   config-drift:
     # The repo's own rule: never hand-maintain a second copy of a machine-checkable
     # fact. These are the couplings that have silently rotted before.
