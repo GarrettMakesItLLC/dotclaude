@@ -138,24 +138,38 @@ async function spawnEnv(): Promise<NodeJS.ProcessEnv> {
 }
 
 /**
- * Process-lifetime memo for single-object reads (`issue_view`, `pr_view`,
- * `repo_get`) — same lifetime as `cachedToken`/`cachedRepo` above. Every write
- * tool that touches the object a key names must call `invalidate` for that
- * key after a successful write, before returning, or a later read in the same
- * session goes stale.
+ * Bounded memo for single-object reads (`issue_view`, `pr_view`, `repo_get`).
+ * Every write tool that touches the object a key names calls `invalidate`
+ * for that key after a successful write, before returning — but that only
+ * covers writes made THROUGH this MCP server. A force-push, a merge from
+ * another session, or any change made via plain `git`/`gh` outside this
+ * process has no way to reach `invalidate`, and a process-lifetime cache
+ * with no TTL then serves the pre-push state indefinitely: `pr_view`
+ * returning a stale `head.sha` after a force-push, with nothing in the
+ * response revealing the staleness (dotclaude#350). A short TTL bounds how
+ * long that external-write blind spot can last without giving up the
+ * within-one-operation reuse the cache exists for.
  */
-const objectCache = new Map<string, unknown>();
+const OBJECT_CACHE_TTL_MS = 20_000;
+
+interface ObjectCacheEntry<T> {
+  value: T;
+  cachedAt: number;
+}
+
+const objectCache = new Map<string, ObjectCacheEntry<unknown>>();
 
 /** Build the cache key for a single-object read: `kind:owner/name#id`. */
 export function cacheKey(kind: string, repo: string, id: number | string): string {
   return `${kind}:${repo}#${id}`;
 }
 
-/** Return the cached value for `key`, or fetch it once and cache it. */
+/** Return the cached value for `key` if it's still fresh, or fetch it and cache it. */
 export async function cachedGet<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
-  if (objectCache.has(key)) return objectCache.get(key) as T;
+  const hit = objectCache.get(key);
+  if (hit && Date.now() - hit.cachedAt < OBJECT_CACHE_TTL_MS) return hit.value as T;
   const value = await fetcher();
-  objectCache.set(key, value);
+  objectCache.set(key, { value, cachedAt: Date.now() });
   return value;
 }
 
