@@ -1,0 +1,13 @@
+  # local — open-weight, on this box, metered in electricity. Same work as
+  # `cheap`, preferred when the input is large or private enough that not
+  # sending it anywhere is worth the quality drop.
+  #
+  # Needs an Ollama server on 11434 and the model pulled; see
+  # docs/agent-gateway.md → Local class. Absent, the class fails preflight and
+  # the proxy refuses to start until `--allow-missing local` says so out loud.
+  - model_name: local
+    litellm_params:
+      model: ollama_chat/qwen2.5-coder:7b
+      api_base: http://127.0.0.1:11434
+    model_info:
+      mode: chat

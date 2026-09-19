@@ -1,0 +1,21 @@
+# The task classes the gateway exposes. One row per class; `|`-delimited.
+#
+#   name | required env keys (space-separated) | fallback classes (comma-separated) | probe URL
+#
+# A class is LIVE when every required key is set and its probe (if any)
+# answers. Anything else is a hard stop at start time unless the operator
+# names the class in `--allow-missing`.
+#
+# Fallbacks never cross DOWN into a cheaper class. `frontier` degrades to
+# `frontier-light` — still Anthropic, still frontier-grade judgment — and
+# never to `cheap`, because a silent downgrade of a code review or a migration
+# to a flash model is indistinguishable from a correct answer until it is not.
+# `cheap` and `local` degrade into each other freely: same trust tier, and an
+# outage there should not stall a label census.
+#
+# Which work goes to which class is the routing policy table in
+# docs/agent-gateway.md. Keep the two in step.
+frontier|ANTHROPIC_API_KEY|frontier-light|
+frontier-light|ANTHROPIC_API_KEY||
+cheap|GEMINI_API_KEY|local|
+local||cheap|http://127.0.0.1:11434/api/tags

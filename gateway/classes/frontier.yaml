@@ -1,0 +1,9 @@
+  # frontier — the default for anything where a wrong answer costs more than
+  # the tokens: code changes, reviews, integrations, and anything touching
+  # money, auth, health data or migrations.
+  - model_name: frontier
+    litellm_params:
+      model: anthropic/claude-opus-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      mode: chat
