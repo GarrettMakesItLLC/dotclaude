@@ -48,7 +48,7 @@ expect warn "$base/wt" "unprimed worktree"
 # The message must name both trees and the remedy, or it is not actionable.
 out="$(run_in "$base/wt")"
 for needle in "$base/wt" "$base/main" "setup-worktree.sh" "resolve"; do
-  printf '%s' "$out" | grep -q -- "$needle" \
+  grep -q -- "$needle" <<<"$out" \
     || { echo "FAIL(message): should mention '$needle', got: $out"; fail=1; }
 done
 rm -rf "$base"

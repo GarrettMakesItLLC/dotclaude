@@ -57,14 +57,14 @@ skill="$(basename "$(find "$REPO/skills" -mindepth 1 -maxdepth 1 -type d | head 
 h="$(make_home "$skill")"
 out="$(run "$h")"; code=$?
 [ "$code" = 0 ] || { echo "FAIL: must exit 0 on drift, got $code"; fail=1; }
-printf '%s' "$out" | grep -q "skills/$skill" \
+grep -q "skills/$skill" <<<"$out" \
   || { echo "FAIL: drift report should name skills/$skill, got: $out"; fail=1; }
-printf '%s' "$out" | grep -q 'bootstrap.sh' \
+grep -q 'bootstrap.sh' <<<"$out" \
   || { echo "FAIL: drift report should carry the fix command"; fail=1; }
-printf '%s' "$out" | grep -q '"hookEventName": "SessionStart"' \
+grep -q '"hookEventName": "SessionStart"' <<<"$out" \
   || { echo "FAIL: output should be a SessionStart hook payload"; fail=1; }
 # The ✓ lines are noise and must not be forwarded.
-printf '%s' "$out" | grep -q '✓' \
+grep -q '✓' <<<"$out" \
   && { echo "FAIL: healthy links should not appear in the drift report"; fail=1; }
 rm -rf "$h"
 

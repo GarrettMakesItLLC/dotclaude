@@ -28,7 +28,7 @@ print(json.dumps({
     fail=1
     return
   fi
-  if printf '%s' "$out" | grep -q '"decision": "block"'; then
+  if grep -q '"decision": "block"' <<<"$out"; then
     [ "$want" = block ] || { echo "FAIL: unexpected block for: $report"; fail=1; }
   else
     [ "$want" = pass ] || { echo "FAIL: expected a block for: $report"; fail=1; }
@@ -74,9 +74,9 @@ blocked="$(printf '%s' 'Implemented the feature. Done.' | python3 -c '
 import json, sys
 print(json.dumps({"hook_event_name":"SubagentStop","stop_hook_active":False,
                   "agent_type":"general-purpose","last_assistant_message":sys.stdin.read()}))' | "$HOOK")"
-printf '%s' "$blocked" | grep -q 'do not fabricate' \
+grep -q 'do not fabricate' <<<"$blocked" \
   || { echo "FAIL: block reason must forbid fabricating output"; fail=1; }
-printf '%s' "$blocked" | grep -q 'nothing to run' \
+grep -q 'nothing to run' <<<"$blocked" \
   || { echo "FAIL: block reason must offer the legitimate no-checks escape"; fail=1; }
 
 # --- Other events and malformed input pass through silently ---

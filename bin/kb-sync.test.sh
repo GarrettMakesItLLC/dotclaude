@@ -109,7 +109,7 @@ code3=$?
 [ "$code3" = 0 ] || { echo "FAIL: --dry-run exit $code3"; fail=1; }
 [ -e "$DRY_VAULT" ] \
   && { echo "FAIL: --dry-run must not create the vault dir"; fail=1; }
-printf '%s' "$out3" | grep -qi 'dry run' \
+grep -qi 'dry run' <<<"$out3" \
   || { echo "FAIL: --dry-run output should say so, got: $out3"; fail=1; }
 
 if [ "$fail" = 0 ]; then

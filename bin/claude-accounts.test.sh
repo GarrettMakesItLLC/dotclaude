@@ -96,14 +96,14 @@ check "report, all limited" "Every account is limited" "$("$CLI" report)"
 "$CLI" clear work-b >/dev/null
 "$CLI" limit work-b --window 5h --until "-1 hour" >/dev/null
 out="$("$CLI" list)"
-echo "$out" | grep -q '^work-b .*clear' || { echo "FAIL (expired window): work-b should read clear:"; echo "$out"; fail=1; }
+grep -q '^work-b .*clear' <<<"$out" || { echo "FAIL (expired window): work-b should read clear:"; echo "$out"; fail=1; }
 check "suggest ignores an expired window" "work-b" "$("$CLI" suggest)"
 
 # --- clear and release. ---
 "$CLI" clear work-a >/dev/null
 "$CLI" release work-a >/dev/null
 out="$("$CLI" list)"
-echo "$out" | grep -q '^work-a .*clear .*-' || { echo "FAIL (clear/release):"; echo "$out"; fail=1; }
+grep -q '^work-a .*clear .*-' <<<"$out" || { echo "FAIL (clear/release):"; echo "$out"; fail=1; }
 
 # --- The ledger is 0600: it names accounts and which box is on which. ---
 mode="$(stat -c %a "$CLAUDE_ACCOUNTS_FILE" 2>/dev/null || stat -f %Lp "$CLAUDE_ACCOUNTS_FILE")"
