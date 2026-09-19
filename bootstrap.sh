@@ -125,12 +125,36 @@ doctor() {
       } ;;
     esac
   done
+  # mcp/github's dist/ is a LOCAL, gitignored build artifact. A source fix
+  # lands on every machine that pulls, but the running github-rest MCP server
+  # keeps serving the OLD dist/ until something rebuilds it — `--check` used
+  # to verify only symlinks, so this silently made agents "rediscover"
+  # already-fixed MCP bugs days after the fix landed on main (dotclaude#357,
+  # #349 both reproduced against a dist/ that predated their own fix).
+  #
+  # A MISSING dist is not flagged: that's the normal state for a machine that
+  # hasn't run full bootstrap yet (already reported via the symlink checks
+  # above) and for a fresh CI checkout, which never builds mcp/github at all
+  # outside its own dedicated job — flagging it there reads as drift on every
+  # PR. Only STALE (src newer than the last build) is actionable here.
+  local github_mcp_dir="$REPO_DIR/mcp/github" newest_src
+  if [ -d "$github_mcp_dir/src" ] && [ -f "$github_mcp_dir/dist/index.js" ]; then
+    newest_src="$(find "$github_mcp_dir/src" -name '*.ts' -newer "$github_mcp_dir/dist/index.js" 2>/dev/null | head -1)"
+    if [ -n "$newest_src" ]; then
+      echo "  ✗ mcp/github/dist — STALE: $newest_src changed after the last build."
+      echo "    The running github-rest MCP server is serving old code. Fix: (cd $github_mcp_dir && npm run build)"
+      problems=$((problems + 1))
+    else
+      echo "  ✓ mcp/github/dist (up to date)"
+    fi
+  fi
   if [ "$problems" -eq 0 ]; then
     echo "✓ All symlinks healthy."
     return 0
   fi
   echo
-  echo "✗ $problems issue(s) found. Fix with: bash $REPO_DIR/bootstrap.sh"
+  echo "✗ $problems issue(s) found. Fix with: bash $REPO_DIR/bootstrap.sh (or, for a stale"
+  echo "  mcp/github/dist alone, cd $github_mcp_dir && npm run build)"
   return 1
 }
 
