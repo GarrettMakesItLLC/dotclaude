@@ -303,6 +303,31 @@ describe("cachedGet / invalidate", () => {
   it("invalidating a key that was never cached is a no-op", () => {
     expect(() => mod.invalidate("issue:octo/repo#999")).not.toThrow();
   });
+
+  it("refetches once the entry is older than the TTL — a write made outside this process (a force-push) must eventually become visible", async () => {
+    const nowSpy = vi.spyOn(Date, "now");
+    try {
+      nowSpy.mockReturnValue(1_000_000);
+      const fetcher = vi.fn().mockResolvedValueOnce({ sha: "old" }).mockResolvedValueOnce({ sha: "new" });
+      const first = await mod.cachedGet("pr:octo/repo#1", fetcher);
+      expect(first).toEqual({ sha: "old" });
+
+      // Still within the TTL — served from cache, no refetch.
+      nowSpy.mockReturnValue(1_010_000);
+      const stillCached = await mod.cachedGet("pr:octo/repo#1", fetcher);
+      expect(stillCached).toEqual({ sha: "old" });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+
+      // Past the TTL — a force-push that happened outside this process is
+      // now visible on the next read, with no explicit invalidate needed.
+      nowSpy.mockReturnValue(1_100_000);
+      const refetched = await mod.cachedGet("pr:octo/repo#1", fetcher);
+      expect(refetched).toEqual({ sha: "new" });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
 });
 
 describe("cacheKey", () => {

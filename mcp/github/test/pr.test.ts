@@ -65,7 +65,7 @@ beforeEach(() => {
 });
 
 describe("pr_view caching", () => {
-  it("caches a single PR for the process lifetime — a second view does not re-fetch", async () => {
+  it("caches a single PR for a bounded window — a second view within it does not re-fetch", async () => {
     fetchMock.mockResolvedValueOnce(
       makeResponse({ status: 200, body: { number: 42, title: "Cached PR" } }),
     );

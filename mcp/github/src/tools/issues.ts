@@ -423,8 +423,8 @@ export function registerIssueTools(server: McpServer): void {
     {
       description:
         "Set an issue's Effort field on the shared GarrettMakesItLLC — Work project " +
-        "(trivial/standard/complex) — the model-tier signal for subagent dispatch. The issue must " +
-        "already be a project item.",
+        "(trivial/standard/complex) — the model-tier signal for subagent dispatch. Adds the issue " +
+        "to the project first if it isn't already a member (idempotent either way).",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number."),
@@ -447,7 +447,8 @@ export function registerIssueTools(server: McpServer): void {
     {
       description:
         "Set an issue's Priority field on the shared GarrettMakesItLLC — Work project " +
-        "(urgent/high/medium/low). The issue must already be a project item.",
+        "(urgent/high/medium/low). Adds the issue to the project first if it isn't already a " +
+        "member (idempotent either way).",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number."),

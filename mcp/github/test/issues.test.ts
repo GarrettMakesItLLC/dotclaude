@@ -143,7 +143,7 @@ async function expectIssueViewRefetchesAfterWrite(
 }
 
 describe("issue_view caching", () => {
-  it("caches a single issue for the process lifetime — a second view does not re-fetch", async () => {
+  it("caches a single issue for a bounded window — a second view within it does not re-fetch", async () => {
     fetchMock.mockResolvedValueOnce(
       makeResponse({ status: 200, body: { number: 9, title: "Cached issue" } }),
     );

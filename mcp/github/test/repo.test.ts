@@ -58,7 +58,7 @@ beforeEach(() => {
 });
 
 describe("repo_get caching", () => {
-  it("caches a repo's metadata for the process lifetime — a second call does not re-fetch", async () => {
+  it("caches a repo's metadata for a bounded window — a second call within it does not re-fetch", async () => {
     fetchMock.mockResolvedValueOnce(
       makeResponse({
         status: 200,
