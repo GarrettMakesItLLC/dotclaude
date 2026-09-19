@@ -43,6 +43,7 @@ SHARED_DIRS=(
   "hooks"      # PreToolUse git-guard etc. — enforce CLAUDE.md rules deterministically
   "commands"   # personal slash commands (e.g. /dotclaude-sync)
   "agents"     # subagent definitions for dispatched roles (e.g. domain-auditor)
+  "bin"        # fleet tooling callable from any repo (lease, reconcile, CI replica)
 )
 # Skills are linked individually into ~/.claude/skills/<name> (NOT a whole-dir
 # link) so they coexist with skills sourced elsewhere (e.g. ~/.agents).
@@ -57,6 +58,7 @@ SHARED_SKILLS=(
   "content-drafting"            # brief -> validated MDX draft for the four product repos' content pillars
   "avoiding-ai-slop"            # strip AI writing tells from prose (docs, PRs, comments, drafted content)
   "task-observer"               # meta-skill: watches sessions for skill-improvement opportunities, logs them
+  "operating-a-fleet"           # multi-machine roles, the integrator lease, batching, degraded-mode CI replica
 )
 # Third-party skills that ship as a plain repo with no plugin marketplace, so
 # they can't go in settings.json's enabledPlugins. `<dir-name>=<owner/repo>`.

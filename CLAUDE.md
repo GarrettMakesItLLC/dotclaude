@@ -85,6 +85,7 @@ A feature is one cohesive deliverable, not a v1 with pieces bolted on afterward.
 - **One issue alone is the exception:** a production fix that can't wait, a feature that is already a whole deliverable (**Ship whole features**), or nothing related in the backlog.
 - **Mechanics** are in **`managing-work-with-issues`**: claim every issue in the batch, work on one branch, and write one `Closes #N` per issue.
 - **Dispatching over a backlog:** one agent per *batch*, and the orchestrator does the grouping before dispatch, not after.
+- **More than one machine, or CI unavailable as the gate:** roles as leases, the single fleet-wide integrator lease, the standing coordination issue, and the degraded-mode wave procedure are in **`operating-a-fleet`** (`bin/fleet-lease.sh`, `bin/fleet-reconcile.sh`, `bin/ci-replica.sh`). Batching does not change between modes; who decides the batches does.
 - **Push when a unit is verified, not after every commit.** Commit as often as you like, because commits are local save points. Each push to an open PR buys a CI run, and a run that a later push cancels still bills the minutes it used.
 
 ## Verify before a handoff
@@ -141,6 +142,10 @@ Don't hand-maintain a second copy of what code already defines — generate deri
 TypeScript strict, Next.js App Router / Vite, Prisma, Zod, Supabase Auth, Vercel/Railway, pnpm/npm workspaces, Vitest + Playwright, Tailwind. Conventions live in `~/.claude/rules/*.md`, path-scoped. A rule that repeats across 3+ repos gets hoisted into a rule file.
 
 Prefer configured MCPs over WebFetch/WebSearch/shell: Supabase (`list_tables` before schema changes, `get_logs` + `get_advisors` before debugging), Prisma, Playwright, Vercel, Railway, Sentry, `github-rest` (every GitHub write), Notion, Gmail/Calendar/Drive, PubMed, Spotify. Roster and per-machine auth: `integrations.md`. Never put service-role or secret keys in client-bundled code.
+
+Durable cross-repo knowledge — what was decided, what was learned, what is load-bearing — goes in the knowledge base, not in a session's head: `docs/knowledge-base.md`, synced with `bin/kb-sync.sh`.
+
+Reaching a session on another machine, and which account a machine is running as, go through the agent gateway: `docs/agent-gateway.md`.
 
 ## Communication
 

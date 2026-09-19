@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "logDir": ".ci-replica",
+  "env": {
+    "CI": "true",
+    "NODE_OPTIONS": "--max-old-space-size=4096"
+  },
+  "unset": ["BASH_ENV", "DATABASE_URL"],
+  "jobs": [
+    {
+      "name": "lint",
+      "budgetSeconds": 300,
+      "commands": [
+        "npm run typecheck",
+        "npm run lint",
+        "npm run knip"
+      ]
+    },
+    {
+      "name": "test-unit",
+      "budgetSeconds": 900,
+      "env": { "VITEST_MAX_THREADS": "2" },
+      "commands": [
+        "npm run test:unit",
+        "npm run test:root"
+      ]
+    },
+    {
+      "name": "e2e",
+      "needsDataPlane": true,
+      "dataPlaneReason": "truncates the shared agent-sandbox-testing branch; mint with bin/e2e-env.sh first",
+      "budgetSeconds": 2400,
+      "unset": ["BASH_ENV"],
+      "commands": [
+        "npm run test:e2e"
+      ]
+    },
+    {
+      "name": "build",
+      "budgetSeconds": 600,
+      "commands": [
+        "npm run build",
+        "npm run postbuild:checks"
+      ]
+    },
+    {
+      "name": "ios-simulator",
+      "local": false,
+      "localReason": "macOS runner and CocoaPods only; verify via Actions -> iOS simulator build",
+      "commands": []
+    },
+    {
+      "name": "codeql",
+      "local": false,
+      "localReason": "GitHub-hosted CodeQL analysis has no local equivalent",
+      "commands": []
+    }
+  ]
+}
