@@ -127,12 +127,37 @@ doctor() {
       } ;;
     esac
   done
+  # The github MCP runs from a gitignored dist/, so a `git pull` that updates
+  # its sources leaves the thing actually executed untouched (#325) — a stale
+  # build is a working build, so nothing else notices. Checked here too (not
+  # only in the SessionStart hook's post-pull rebuild) because a machine can
+  # arrive at a stale dist by any path: a manual `git pull`, a rebase, a
+  # checkout of an old commit. `bash bootstrap.sh` (no args) already rebuilds
+  # unconditionally, so the existing fix line below covers this too.
+  local mcp_dir="$REPO_DIR/mcp/github"
+  # Gated on node_modules existing, same as the hook's own rebuild_artifacts:
+  # a machine that has simply never run bootstrap.sh yet (a fresh checkout —
+  # CI's, in particular) has no node_modules and no dist, which is "never
+  # installed", not "drifted". Flagging that as a problem would make --check
+  # fail on every fresh clone, indistinguishable from the real case (a
+  # machine that WAS set up and has since gone stale).
+  if [ -f "$mcp_dir/package.json" ] && [ -d "$mcp_dir/node_modules" ]; then
+    if [ ! -f "$mcp_dir/dist/index.js" ]; then
+      echo "  ✗ mcp/github/dist — not built. Fix: (cd $mcp_dir && npm run build)"
+      problems=$((problems + 1))
+    elif [ -n "$(find "$mcp_dir/src" -newer "$mcp_dir/dist/index.js" -type f 2>/dev/null)" ]; then
+      echo "  ✗ mcp/github/dist — stale (src changed since last build). Fix: (cd $mcp_dir && npm run build)"
+      problems=$((problems + 1))
+    else
+      echo "  ✓ mcp/github/dist"
+    fi
+  fi
   if [ "$problems" -eq 0 ]; then
     echo "✓ All symlinks healthy."
     return 0
   fi
   echo
-  echo "✗ $problems issue(s) found. Fix with: bash $REPO_DIR/bootstrap.sh"
+  echo "✗ $problems issue(s) found. Fix with: bash $REPO_DIR/bootstrap.sh (rebuilds mcp/github too)"
   return 1
 }
 
