@@ -153,17 +153,17 @@ echo "fleet-reconcile: dry run"
 run --pr 7
 [ "$RC" = 0 ] && ok "dry run exits 0" || bad "rc=$RC: $OUT"
 [ ! -s "$WRITES" ] && ok "dry run performs no writes at all" || bad "dry run wrote: $(cat "$WRITES")"
-printf '%s' "$OUT" | grep -q 'WOULD close #101' && ok "names the shipped-but-open issue" || bad "no #101 line: $OUT"
-printf '%s' "$OUT" | grep -q 'dry run' && ok "says it is a dry run" || bad "no dry-run notice"
+grep -q 'WOULD close #101' <<<"$OUT" && ok "names the shipped-but-open issue" || bad "no #101 line: $OUT"
+grep -q 'dry run' <<<"$OUT" && ok "says it is a dry run" || bad "no dry-run notice"
 
 echo "fleet-reconcile: closing keywords are read the way GitHub reads them"
-printf '%s' "$OUT" | grep -q '#103' && ok "a repeated keyword (Fixes #103) is a reference" || bad "missed #103"
-printf '%s' "$OUT" | grep -q '#104' && ok "Resolves #104 is a reference" || bad "missed #104"
-printf '%s' "$OUT" | grep -q '#105' && bad "a bare '#105' with no keyword must NOT be treated as closing" \
+grep -q '#103' <<<"$OUT" && ok "a repeated keyword (Fixes #103) is a reference" || bad "missed #103"
+grep -q '#104' <<<"$OUT" && ok "Resolves #104 is a reference" || bad "missed #104"
+grep -q '#105' <<<"$OUT" && bad "a bare '#105' with no keyword must NOT be treated as closing" \
   || ok "a bare mention is not a closing reference"
 # #102 is the trap: `Closes #101, #102` closes only #101 on GitHub, so #102 is a
 # bare mention and must not be auto-closed by this script either.
-printf '%s' "$OUT" | grep -q 'close #102' && bad "#102 after a comma is not a GitHub closing reference" \
+grep -q 'close #102' <<<"$OUT" && bad "#102 after a comma is not a GitHub closing reference" \
   || ok "the 'Closes #A, #B' trap is not papered over"
 
 echo "fleet-reconcile: --apply"
@@ -207,7 +207,7 @@ JSON
 : > "$WRITES"
 run --pr 8 --apply
 [ ! -s "$WRITES" ] && ok "an unmerged PR produces no writes" || bad "wrote for an unmerged PR: $(cat "$WRITES")"
-printf '%s' "$OUT" | grep -q 'not merged' && ok "and says so" || bad "silent skip: $OUT"
+grep -q 'not merged' <<<"$OUT" && ok "and says so" || bad "silent skip: $OUT"
 
 echo "fleet-reconcile: a clean tracker reports clean"
 mk_issue 101 closed; mk_labels 101 '[{"name":"type:bug"}]'
@@ -218,7 +218,7 @@ cat > "$FIX/repos_acme_widget_pulls_9.json" <<JSON
 JSON
 : > "$WRITES"
 run --pr 9
-printf '%s' "$OUT" | grep -q 'already closed' && ok "reports an already-closed issue as such" || bad "$OUT"
+grep -q 'already closed' <<<"$OUT" && ok "reports an already-closed issue as such" || bad "$OUT"
 
 echo "fleet-reconcile: usage"
 run --pr notanumber; [ "$RC" != 0 ] && ok "a non-numeric --pr is rejected" || bad "accepted a bad --pr"

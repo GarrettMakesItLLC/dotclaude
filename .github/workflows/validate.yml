@@ -46,12 +46,13 @@ jobs:
             shellcheck -S warning "$f"
           done
 
-      - name: Run hook self-tests
-        # Globbed, not enumerated, so a new hook's tests can never be forgotten.
+      - name: Run self-tests
+        # Globbed, not enumerated, so a new hook's or script's tests can never
+        # be forgotten.
         run: |
           shopt -s nullglob
-          tests=(hooks/*.test.sh)
-          [ ${#tests[@]} -gt 0 ] || { echo "no hook self-tests found"; exit 1; }
+          tests=(hooks/*.test.sh bin/*.test.sh)
+          [ ${#tests[@]} -gt 0 ] || { echo "no self-tests found"; exit 1; }
           for f in "${tests[@]}"; do
             echo "→ $f"
             bash "$f"

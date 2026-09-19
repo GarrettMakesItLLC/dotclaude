@@ -1,0 +1,50 @@
+# LiteLLM proxy — base settings for the fleet's API-key traffic.
+#
+# THIS FILE IS NOT THE FILE THE PROXY READS. `bin/gateway-up.sh` composes the
+# runtime config from this base plus the class fragments in `classes/` that
+# passed preflight, and writes it to $CLAUDE_GATEWAY_HOME/runtime-config.yaml.
+# That indirection is what makes a missing credential loud: a class whose key
+# is absent is never quietly dropped, and never silently served by a cheaper
+# class — the proxy refuses to start until someone says `--allow-missing` for
+# it by name.
+#
+# `model_list` and `router_settings` are deliberately absent here: both are
+# composed per-start from the live class set. Declaring them twice would give
+# the generated document duplicate top-level keys, where the last one silently
+# wins.
+#
+# Scope: the Anthropic API, hosted cheap models, and local open-weight models.
+# NOT Claude Code sessions — those authenticate against a subscription, which
+# cannot be pooled behind a proxy. See docs/agent-gateway.md.
+
+general_settings:
+  # Minted on first start into $CLAUDE_GATEWAY_HOME/master.key (0600) and
+  # exported by bin/gateway-up.sh. Never committed, never reused across
+  # machines.
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+litellm_settings:
+  # --- Budget ---------------------------------------------------------------
+  # A hard, conservative, process-global spend cap. This exercise started with
+  # a $1,000 surprise bill, so the default is small enough that hitting it is
+  # an inconvenience rather than an invoice. Raising it is a deliberate edit,
+  # documented in docs/agent-gateway.md → Budget knobs.
+  #
+  # This cap is IN-MEMORY: it resets when the proxy restarts, and it is global
+  # rather than per-key. Per-virtual-key caps that survive a restart need the
+  # DB-backed key store (`DATABASE_URL`), also documented there.
+  max_budget: 25
+  budget_duration: 30d
+
+  # Providers disagree about which sampling parameters exist. Dropping the
+  # unsupported ones keeps one caller's request body portable across all three
+  # classes, which is the entire point of routing by class instead of by model.
+  drop_params: true
+
+  # Keep request/response bodies out of the log. The log is world-readable on a
+  # shared box and agent traffic carries repo contents.
+  set_verbose: false
+  redact_user_api_key_info: true
+
+  # Don't let one wedged upstream hold an agent's turn open indefinitely.
+  request_timeout: 600

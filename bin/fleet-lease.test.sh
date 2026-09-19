@@ -32,7 +32,7 @@ run() {
 
 echo "fleet-lease: free lease"
 run alpha status integrator
-[ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'FREE' \
+[ "$RC" = 0 ] && grep -q 'FREE' <<<"$OUT" \
   && ok "status reports FREE before anyone takes it" \
   || bad "expected FREE, rc=$RC: $OUT"
 
@@ -41,20 +41,20 @@ run alpha take integrator --ttl 60 --holder alpha --note "wave 1"
 [ "$RC" = 0 ] && ok "alpha takes the lease" || bad "take failed rc=$RC: $OUT"
 
 run alpha status integrator
-printf '%s' "$OUT" | grep -q 'holder  : alpha' && ok "holder is recorded" || bad "no holder: $OUT"
-printf '%s' "$OUT" | grep -q 'taken-at: 20'     && ok "timestamp is recorded" || bad "no timestamp: $OUT"
-printf '%s' "$OUT" | grep -q 'note    : wave 1' && ok "note is recorded" || bad "no note: $OUT"
-printf '%s' "$OUT" | grep -q 'state   : HELD'   && ok "state is HELD inside the ttl" || bad "not HELD: $OUT"
+grep -q 'holder  : alpha' <<<"$OUT" && ok "holder is recorded" || bad "no holder: $OUT"
+grep -q 'taken-at: 20' <<<"$OUT"     && ok "timestamp is recorded" || bad "no timestamp: $OUT"
+grep -q 'note    : wave 1' <<<"$OUT" && ok "note is recorded" || bad "no note: $OUT"
+grep -q 'state   : HELD' <<<"$OUT"   && ok "state is HELD inside the ttl" || bad "not HELD: $OUT"
 
 echo "fleet-lease: a second machine loses loudly"
 run beta take integrator --holder beta
 [ "$RC" = 3 ] && ok "beta's take exits 3, not 0" || bad "expected rc=3, got $RC: $OUT"
-printf '%s' "$OUT" | grep -q 'already held' && ok "says the lease is held" || bad "silent refusal: $OUT"
-printf '%s' "$OUT" | grep -q 'alpha'        && ok "names the holder" || bad "does not name holder: $OUT"
-printf '%s' "$OUT" | grep -q 'force'        && ok "points at the force-release escape" || bad "no escape hatch: $OUT"
+grep -q 'already held' <<<"$OUT" && ok "says the lease is held" || bad "silent refusal: $OUT"
+grep -q 'alpha' <<<"$OUT"        && ok "names the holder" || bad "does not name holder: $OUT"
+grep -q 'force' <<<"$OUT"        && ok "points at the force-release escape" || bad "no escape hatch: $OUT"
 # and the ref still belongs to alpha
 run alpha status integrator
-printf '%s' "$OUT" | grep -q 'holder  : alpha' && ok "a lost take does not overwrite the holder" || bad "holder clobbered: $OUT"
+grep -q 'holder  : alpha' <<<"$OUT" && ok "a lost take does not overwrite the holder" || bad "holder clobbered: $OUT"
 
 echo "fleet-lease: renew"
 run beta renew integrator --holder beta
@@ -62,31 +62,31 @@ run beta renew integrator --holder beta
 run alpha renew integrator --holder alpha --ttl 90
 [ "$RC" = 0 ] && ok "alpha renews its own lease" || bad "renew failed rc=$RC: $OUT"
 run alpha status integrator
-printf '%s' "$OUT" | grep -q 'ttl     : 90s' && ok "renew updates the ttl" || bad "ttl not updated: $OUT"
-printf '%s' "$OUT" | grep -q 'note    : wave 1' && ok "renew keeps the existing note" || bad "note lost on renew: $OUT"
+grep -q 'ttl     : 90s' <<<"$OUT" && ok "renew updates the ttl" || bad "ttl not updated: $OUT"
+grep -q 'note    : wave 1' <<<"$OUT" && ok "renew keeps the existing note" || bad "note lost on renew: $OUT"
 
 echo "fleet-lease: release"
 run beta release integrator --holder beta
 [ "$RC" = 3 ] && ok "beta cannot release alpha's lease" || bad "expected rc=3, got $RC: $OUT"
 run beta release integrator --holder beta --force
-[ "$RC" != 0 ] && printf '%s' "$OUT" | grep -q 'reason' \
+[ "$RC" != 0 ] && grep -q 'reason' <<<"$OUT" \
   && ok "--force without --reason is refused" || bad "forced release needs a reason: rc=$RC $OUT"
 run beta release integrator --holder beta --force --reason "alpha idle 3h, no pushes"
 [ "$RC" = 0 ] && ok "--force with --reason releases" || bad "forced release failed rc=$RC: $OUT"
-printf '%s' "$OUT" | grep -q 'alpha idle 3h' && ok "the reason is echoed for the record" || bad "reason not echoed: $OUT"
+grep -q 'alpha idle 3h' <<<"$OUT" && ok "the reason is echoed for the record" || bad "reason not echoed: $OUT"
 run alpha status integrator
-printf '%s' "$OUT" | grep -q 'FREE' && ok "the lease is free again" || bad "still held: $OUT"
+grep -q 'FREE' <<<"$OUT" && ok "the lease is free again" || bad "still held: $OUT"
 
 echo "fleet-lease: staleness"
 run alpha take integrator --ttl 0 --holder alpha
 [ "$RC" = 0 ] && ok "alpha re-takes the freed lease" || bad "re-take failed rc=$RC: $OUT"
 sleep 1
 run beta status integrator
-printf '%s' "$OUT" | grep -q 'state   : STALE' && ok "a lease past its ttl reads STALE, not HELD" || bad "not STALE: $OUT"
+grep -q 'state   : STALE' <<<"$OUT" && ok "a lease past its ttl reads STALE, not HELD" || bad "not STALE: $OUT"
 run alpha release integrator --holder alpha
 [ "$RC" = 0 ] || bad "owner release failed rc=$RC: $OUT"
 run alpha release integrator --holder alpha
-[ "$RC" = 0 ] && printf '%s' "$OUT" | grep -q 'already free' \
+[ "$RC" = 0 ] && grep -q 'already free' <<<"$OUT" \
   && ok "releasing a free lease is a no-op, not an error" || bad "double release: rc=$RC $OUT"
 
 echo "fleet-lease: input validation"

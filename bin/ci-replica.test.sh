@@ -31,9 +31,9 @@ run '{"version":1,"jobs":[
   {"name":"red","commands":["exit 7"]}
 ]}'
 [ "$RC" = 1 ] && ok "a failing job makes the run exit 1" || bad "expected rc=1, got $RC: $OUT"
-printf '%s' "$OUT" | grep -q 'PASS.*green' && ok "the passing job reads PASS" || bad "no PASS row: $OUT"
-printf '%s' "$OUT" | grep -q 'FAIL.*red'   && ok "the failing job reads FAIL" || bad "no FAIL row: $OUT"
-printf '%s' "$OUT" | grep -q 'exit 7'      && ok "the real exit code is reported, not a pipe's" || bad "exit code lost: $OUT"
+grep -q 'PASS.*green' <<<"$OUT" && ok "the passing job reads PASS" || bad "no PASS row: $OUT"
+grep -q 'FAIL.*red' <<<"$OUT"   && ok "the failing job reads FAIL" || bad "no FAIL row: $OUT"
+grep -q 'exit 7' <<<"$OUT"      && ok "the real exit code is reported, not a pipe's" || bad "exit code lost: $OUT"
 
 echo "ci-replica: a command that would read clean behind a pipe"
 # `false | tail -1` exits 0. Run bare, it must fail.
@@ -50,16 +50,16 @@ run '{"version":1,"jobs":[
   {"name":"macos","local":false,"localReason":"macOS runner only","commands":[]}
 ]}'
 [ "$RC" = 0 ] && ok "a NOT-RUN job does not fail the run" || bad "rc=$RC: $OUT"
-printf '%s' "$OUT" | grep -q 'NOT-RUN.*macos' && ok "the unrunnable job reads NOT-RUN" || bad "no NOT-RUN row: $OUT"
-printf '%s' "$OUT" | grep -q 'macOS runner only' && ok "its reason is printed" || bad "reason not printed: $OUT"
-printf '%s' "$OUT" | grep -q 'NOT-RUN is not PASS' \
+grep -q 'NOT-RUN.*macos' <<<"$OUT" && ok "the unrunnable job reads NOT-RUN" || bad "no NOT-RUN row: $OUT"
+grep -q 'macOS runner only' <<<"$OUT" && ok "its reason is printed" || bad "reason not printed: $OUT"
+grep -q 'NOT-RUN is not PASS' <<<"$OUT" \
   && ok "the summary says NOT-RUN is not coverage" || bad "silent hole in the gate: $OUT"
 
 echo "ci-replica: data-plane jobs are opt-in"
 DP='{"version":1,"jobs":[{"name":"e2e","needsDataPlane":true,"dataPlaneReason":"truncates the shared branch","commands":["touch '"$TMP"'/dp-ran"]}]}'
 run "$DP"
 [ -e "$TMP/dp-ran" ] && bad "ran a data-plane job without --data-plane" || ok "skipped without --data-plane"
-printf '%s' "$OUT" | grep -q 'NOT-RUN' && ok "and reports it NOT-RUN" || bad "silently skipped: $OUT"
+grep -q 'NOT-RUN' <<<"$OUT" && ok "and reports it NOT-RUN" || bad "silently skipped: $OUT"
 run "$DP" --data-plane
 [ -e "$TMP/dp-ran" ] && ok "--data-plane runs it" || bad "--data-plane did not run it: $OUT"
 
@@ -82,12 +82,12 @@ grep -q '### exit: 0' "$TMP/logs/logged.log" 2>/dev/null && ok "the log records 
 
 echo "ci-replica: budget flag"
 run '{"version":1,"jobs":[{"name":"slow","budgetSeconds":0,"commands":["true"]},{"name":"tight","budgetSeconds":1,"commands":["sleep 2"]}]}'
-printf '%s' "$OUT" | grep -q 'over budget' && ok "an over-budget job is flagged" || bad "no budget flag: $OUT"
-printf '%s' "$OUT" | grep -q 'PASS.*tight' && ok "over budget is still a PASS, not a FAIL" || bad "budget turned into a failure: $OUT"
-printf '%s' "$OUT" | grep -q 'contention' && bad "the discriminator hint should only print when something failed" \
+grep -q 'over budget' <<<"$OUT" && ok "an over-budget job is flagged" || bad "no budget flag: $OUT"
+grep -q 'PASS.*tight' <<<"$OUT" && ok "over budget is still a PASS, not a FAIL" || bad "budget turned into a failure: $OUT"
+grep -q 'contention' <<<"$OUT" && bad "the discriminator hint should only print when something failed" \
   || ok "no discriminator hint on an all-green run"
 run '{"version":1,"jobs":[{"name":"broken","commands":["exit 4"]}]}'
-printf '%s' "$OUT" | grep -q 'contention' \
+grep -q 'contention' <<<"$OUT" \
   && ok "on a failure it prints the alone-vs-in-suite discriminator" || bad "no discriminator on failure: $OUT"
 
 echo "ci-replica: selection"
@@ -99,7 +99,7 @@ run '{"version":1,"jobs":[{"name":"a","commands":["true"]}]}' --job typo
 echo "ci-replica: --list"
 run '{"version":1,"jobs":[{"name":"a","commands":["false"]},{"name":"m","local":false,"localReason":"macOS","commands":[]}]}' --list
 [ "$RC" = 0 ] && ok "--list exits 0" || bad "--list rc=$RC"
-printf '%s' "$OUT" | grep -q 'RUNS-HERE' && ok "--list prints the runs-here column" || bad "no table: $OUT"
+grep -q 'RUNS-HERE' <<<"$OUT" && ok "--list prints the runs-here column" || bad "no table: $OUT"
 
 echo "ci-replica: a malformed manifest is refused, not half-run"
 for bad_manifest in \
@@ -121,14 +121,14 @@ ok "every malformed manifest exits 2"
 
 run '{"version":1,"jobs":[{"name":"a","commands":["true"]}]}' --manifest "$TMP/nope.json"
 [ "$RC" = 2 ] && ok "a missing manifest exits 2 and says where the schema is" || bad "missing manifest: rc=$RC"
-printf '%s' "$OUT" | grep -q 'ci-replica-manifest' && ok "and points at the schema doc" || bad "no pointer: $OUT"
+grep -q 'ci-replica-manifest' <<<"$OUT" && ok "and points at the schema doc" || bad "no pointer: $OUT"
 
 echo "ci-replica: the shipped example manifest is valid"
 EXAMPLE="$(cd "$HERE/.." && pwd)/skills/operating-a-fleet/references/ci-replica.example.json"
 if [ -f "$EXAMPLE" ]; then
   OUT="$("$CIR" --repo-root "$ROOT" --manifest "$EXAMPLE" --list 2>&1)"; RC=$?
   [ "$RC" = 0 ] && ok "the documented example loads" || bad "example manifest rejected: $OUT"
-  printf '%s' "$OUT" | grep -q 'ios-simulator' && ok "and declares its unrunnable jobs" || bad "example missing local:false jobs"
+  grep -q 'ios-simulator' <<<"$OUT" && ok "and declares its unrunnable jobs" || bad "example missing local:false jobs"
 else
   bad "example manifest not found at $EXAMPLE"
 fi
