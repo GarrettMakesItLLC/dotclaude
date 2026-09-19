@@ -8,11 +8,21 @@
 #
 # Fail-open by design: missing repo, no network, no upstream configured ->
 # silent, exit 0. A sync check must never be the reason a session can't start.
+#
+# This is also the shared pull/rebuild engine for `bin/dot-sync.sh`, the
+# explicit "sync everything" command a person types. That script sources this
+# file (DOTREPO_SYNC_SOURCED=1) to reuse sync_repo/rebuild_artifacts verbatim
+# rather than duplicating the fast-forward-or-report logic a second time.
+# Setting DOTSYNC_VERBOSE=1 makes sync_repo report the quiet cases too
+# (already up to date, fetch failed, no upstream) instead of staying silent —
+# a session-start hook should never say "all good", but an explicit sync
+# command the person just ran should.
 
 set -uo pipefail
 
 DOTCLAUDE_DIR="${DOTCLAUDE_DIR:-$HOME/dotclaude}"
 DOTFILES_DIR="${DOTFILES_DIR:-$HOME/dotfiles}"
+DOTSYNC_VERBOSE="${DOTSYNC_VERBOSE:-0}"
 
 notes=()
 
@@ -32,12 +42,22 @@ LIVE_PATHS=("settings.json")
 
 sync_repo() {
   local dir="$1" label="$2"
-  [ -d "$dir/.git" ] || return 0
+  if [ ! -d "$dir/.git" ]; then
+    [ "$DOTSYNC_VERBOSE" = 1 ] && notes+=("$label: not found at $dir — skipped")
+    return 0
+  fi
 
-  git -C "$dir" fetch --quiet 2>/dev/null || return 0
+  if ! git -C "$dir" fetch --quiet 2>/dev/null; then
+    [ "$DOTSYNC_VERBOSE" = 1 ] && notes+=("$label: fetch failed (no network, or no remote reachable) — skipped")
+    return 0
+  fi
 
   local upstream
-  upstream="$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" || return 0
+  upstream="$(git -C "$dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"
+  if [ -z "$upstream" ]; then
+    [ "$DOTSYNC_VERBOSE" = 1 ] && notes+=("$label: no upstream configured (detached HEAD?) — skipped")
+    return 0
+  fi
 
   local counts ahead behind
   counts="$(git -C "$dir" rev-list --left-right --count "HEAD...$upstream" 2>/dev/null)" || return 0
@@ -45,7 +65,10 @@ sync_repo() {
   behind="$(printf '%s' "$counts" | awk '{print $2}')"
   [ -n "$ahead" ] && [ -n "$behind" ] || return 0
 
-  [ "$behind" = 0 ] && return 0
+  if [ "$behind" = 0 ]; then
+    [ "$DOTSYNC_VERBOSE" = 1 ] && notes+=("$label: up to date")
+    return 0
+  fi
 
   if [ "$ahead" != 0 ]; then
     notes+=("$label: $behind commit(s) behind, $ahead ahead — diverged, resolve by hand")
@@ -115,6 +138,13 @@ rebuild_artifacts() {
     notes+=("$label: github MCP sources changed but \`npm run build\` failed in \`$mcp\` — it is running STALE code until you build it by hand")
   fi
 }
+
+# `bin/dot-sync.sh` sources this file to reuse sync_repo/rebuild_artifacts and
+# drives them itself (plus its own reporting), so nothing past this point
+# should run when sourced — only when executed as the SessionStart hook.
+if [ "${DOTREPO_SYNC_SOURCED:-0}" = 1 ]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 sync_repo "$DOTCLAUDE_DIR" "dotclaude"
 sync_repo "$DOTFILES_DIR" "dotfiles"
