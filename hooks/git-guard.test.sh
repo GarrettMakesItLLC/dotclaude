@@ -176,6 +176,65 @@ check_env 2 1 'git push --force origin main'
 check_env 2 1 'git add .env'
 check_env 2 1 'git -c core.hooksPath=/tmp/x commit -m "y"'
 
+# --- #363: heredoc scrub must consume a `<<-'EOF'` heredoc nested inside a
+# `$(...)` command substitution even when the closing delimiter is indented
+# (the `<<-` form strips leading tabs and allows an indented terminator).
+check 0 "$(printf 'git commit -m "$(cat <<-'"'"'EOF'"'"'\n\tmentions .env.local in prose here\n\tEOF\n)"')"
+check 0 "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\ntest(web): isolate env-whitespace-guard.test.ts from ambient VITE_* env\n\nmentions .env.local in prose here\nEOF\n)"')"
+# A REAL staged .env file must still block even through the same $(...) shape.
+check 2 "$(printf 'git add .env && git commit -m "$(cat <<'"'"'EOF'"'"'\nnormal message\nEOF\n)"')"
+
+check_discard_env() {
+  local want="$1" envval="$2" cmd="$3"
+  local got
+  printf '%s' "$cmd" \
+    | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
+    | GIT_GUARD_ALLOW_DISCARD="$envval" "$GUARD" >/dev/null 2>&1
+  got=$?
+  if [ "$got" != "$want" ]; then
+    echo "FAIL: want exit $want, got $got for (GIT_GUARD_ALLOW_DISCARD=$envval): $cmd"
+    fail=1
+  fi
+}
+
+# --- #353: a path-scoped discard that would drop UNCOMMITTED work.
+# `git checkout <ref-other-than-HEAD> -- <path>` and `--staged`/`--source=`
+# restores are the safe, unimpeded forms; only the bare discard forms against
+# a DIRTY path are blocked, and only when the escape hatch isn't set.
+discard_repo="$(mktemp -d)/discard"
+git init -q "$discard_repo"
+git -C "$discard_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+(
+  cd "$discard_repo" || exit 1
+  echo committed > tracked.txt
+  git add tracked.txt
+  git -c user.email=t@t -c user.name=t commit -q -m "add tracked.txt"
+
+  # Dirty the file — this is the uncommitted work a discard would silently drop.
+  echo "uncommitted change" > tracked.txt
+
+  check 2 'git checkout -- tracked.txt'
+  check 2 'git checkout HEAD -- tracked.txt'
+  check 2 'git restore tracked.txt'
+
+  # Safe forms stay unimpeded even though the path is dirty.
+  check 0 'git checkout HEAD~0 -- tracked.txt'
+  check 0 'git checkout origin/main -- tracked.txt'
+  check 0 'git restore --staged tracked.txt'
+  check 0 'git restore --source=HEAD~1 tracked.txt'
+  check 0 'git checkout main'
+
+  # The escape hatch lifts ONLY this block, loudly.
+  check_discard_env 0 1 'git checkout -- tracked.txt'
+  check_discard_env 2 '' 'git checkout -- tracked.txt'
+
+  # A CLEAN path is never blocked.
+  git checkout -q -- tracked.txt
+  check 0 'git checkout -- tracked.txt'
+  check 0 'git restore tracked.txt'
+) || fail=1
+rm -rf "$(dirname "$discard_repo")"
+
 if [ "$fail" = 0 ]; then
   echo "git-guard: all cases passed"
 fi
