@@ -1,0 +1,38 @@
+{
+  "_comment": "Starter graph-view settings. The memory notes are the densely wiki-linked material, so they get their own color group to stand out from repo docs (which mostly link only through the generated index notes).",
+  "collapse-filter": true,
+  "search": "",
+  "showTags": false,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    {
+      "query": "path:memory",
+      "color": {
+        "a": 1,
+        "rgb": 4361555
+      }
+    },
+    {
+      "query": "path:repos",
+      "color": {
+        "a": 1,
+        "rgb": 14701138
+      }
+    }
+  ],
+  "collapse-display": false,
+  "showArrow": false,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": false,
+  "centerStrength": 0.5,
+  "repelStrength": 12,
+  "linkStrength": 1,
+  "linkDistance": 220,
+  "scale": 1,
+  "close": false
+}
