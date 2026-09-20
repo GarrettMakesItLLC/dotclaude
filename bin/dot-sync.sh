@@ -263,8 +263,13 @@ for f in "$DOTCLAUDE_DIR"/bin/gateway-*.sh "$DOTCLAUDE_DIR"/bin/claude-accounts*
   gateway_found=1
   if [ -x "$f" ]; then
     ok "found: $(basename "$f") (executable)"
+  elif head -5 "$f" 2>/dev/null | grep -qi 'sourced, never run'; then
+    # A library that is sourced is CORRECTLY non-executable — the missing bit
+    # is the signal, not a defect. Same predicate bootstrap.sh's doctor uses,
+    # so the two agree instead of one flagging what the other exempts.
+    ok "found: $(basename "$f") (sourced library)"
   else
-    note "found: $(basename "$f") (not executable)"
+    bad "found: $(basename "$f") — NOT executable, so it will silently never run"
   fi
 done
 shopt -u nullglob

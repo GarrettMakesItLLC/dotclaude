@@ -187,6 +187,30 @@ grep -q "gateway-status.sh" <<<"$out" || bad "should report the found gateway to
 ok "gateway tooling: detected, reported, left alone"
 rm -rf "$(dirname "$c1")" "$(dirname "$c2")"
 
+# --- a sourced library is correctly non-executable: reported as such, and
+#     never as a problem. bootstrap.sh's doctor exempts it by the same header
+#     marker, so the two must not disagree about the same file. ---
+c1="$(make_pair)"; c2="$(make_pair)"
+mkdir -p "$c1/bin"
+cat > "$c1/bin/gateway-common.sh" <<'STUB'
+#!/usr/bin/env bash
+# Shared plumbing. Sourced, never run.
+STUB
+chmod -x "$c1/bin/gateway-common.sh"
+cat > "$c1/bin/gateway-broken.sh" <<'STUB'
+#!/usr/bin/env bash
+echo stub
+STUB
+chmod -x "$c1/bin/gateway-broken.sh"
+out="$(DOTCLAUDE_DIR="$c1" DOTFILES_DIR="$c2" "$SCRIPT" 2>&1 | strip)"; code=$?
+grep -q "gateway-common.sh (sourced library)" <<<"$out" \
+  || bad "a sourced library must not read as a defect, got: $out"
+grep -q "gateway-broken.sh — NOT executable" <<<"$out" \
+  || bad "a real script without the bit must be flagged, got: $out"
+[ "$code" = 0 ] && bad "a non-executable real script should make dot-sync exit non-zero"
+ok "sourced library exempt; a real script missing the bit is flagged"
+rm -rf "$(dirname "$c1")" "$(dirname "$c2")"
+
 # --- no gateway/ledger tooling at all: reported as absent, tolerated ---
 c1="$(make_pair)"; c2="$(make_pair)"
 out="$(DOTCLAUDE_DIR="$c1" DOTFILES_DIR="$c2" "$SCRIPT" 2>&1 | strip)"; code=$?
