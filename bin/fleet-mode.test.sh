@@ -38,8 +38,8 @@ kind = os.environ["FIX_KIND"]
 def iso(offset):
     return datetime.fromtimestamp(time.time() + offset, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-def run(name, conclusion, dur, age, status="completed"):
-    return {"name": name, "status": status, "conclusion": conclusion,
+def run(name, conclusion, dur, age, status="completed", event="push"):
+    return {"name": name, "status": status, "conclusion": conclusion, "event": event,
             "run_started_at": iso(-age), "created_at": iso(-age),
             "updated_at": iso(-age + dur)}
 
@@ -65,6 +65,20 @@ elif kind == "stale-history":
     runs.append(run("validate", "success", 88, 120))
     for i in range(6):
         runs.append(run("workflow-%d" % i, "failure", 2, 3600 + i * 60))
+elif kind == "buried-refusal":
+    # #381: a repo that deploys often. 25 `deployment_status` runs conclude
+    # `skipped` and fill any count-based window, pushing every run that
+    # actually gates a merge past it. The refusal is in the data and the probe
+    # could not see it.
+    for i in range(25):
+        runs.append(run("Deployment status", "skipped", 1, 60 + i * 30, event="deployment_status"))
+    for i in range(6):
+        runs.append(run("workflow-%d" % (i % 3), "failure", 2, 3600 + i * 60))
+elif kind == "schedule-only":
+    # The fallback case: a repo whose CI genuinely only runs on a schedule.
+    # Filtering to zero gating runs must not make it permanently UNKNOWN.
+    for i in range(4):
+        runs.append(run("nightly", "success", 120, 3600 + i * 3600, event="schedule"))
 elif kind == "empty":
     pass
 elif kind == "garbage":
@@ -77,7 +91,7 @@ print(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
 '
 }
 
-for k in refused healthy one-flaky stale-history empty garbage; do
+for k in refused healthy one-flaky stale-history buried-refusal schedule-only empty garbage; do
   mkfixture "$k" > "$TMP/$k.json"
 done
 
@@ -111,6 +125,22 @@ want "refused/undeclared" "CI IS REFUSING JOBS" "$out"
 want "refused/undeclared" "degraded mode NOT declared" "$out"
 want "refused/undeclared" "UNMEASURED" "$out"
 want "refused/undeclared" "skills/operating-a-fleet" "$out"
+
+# --- 1b. A refusal buried under deploy runs is still found (#381) -----------
+# The feed's newest 25 runs are `deployment_status`, which conclude `skipped`
+# and fill any count-based window. Before windowing by EVENT the probe reported
+# UNKNOWN here — about a question the data answers.
+fresh; marker -
+out="$(run_probe buried-refusal)"
+want "buried-refusal" "CI IS REFUSING JOBS" "$out"
+wantnot "buried-refusal" "UNKNOWN" "$out"
+
+# --- 1c. A repo whose CI genuinely only runs on a schedule still gets an
+# answer. Filtering to zero gating runs falls back to the whole feed rather
+# than answering UNKNOWN forever.
+fresh; marker -
+out="$(run_probe schedule-only)"
+wantnot "schedule-only" "UNKNOWN" "$out"
 
 # --- 2. CI refusing AND degraded declared: the mode is on, say what to do ----
 fresh; marker degraded
