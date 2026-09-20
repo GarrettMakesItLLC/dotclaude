@@ -74,7 +74,14 @@ block() {
 # (Trade-off, unchanged: a deliberately quoted branch name could slip a
 # force-push past — acceptable for a backstop, since quoted branch names are
 # rare while quoted messages are universal.)
-scrubbed="$(printf '%s' "$cmd" | perl -0777 -pe "s/<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1.*?^\2\$/ /gms" \
+# The terminator line's own \s*\2\s* tolerates leading/trailing whitespace so
+# a `<<-'EOF'` heredoc (which strips leading TABS from the body AND allows an
+# indented terminator — routine inside a `$(cat <<-'EOF' ... EOF)` nested in a
+# `git commit -m "$(...)"`) still gets fully consumed. Without it, an indented
+# closing line doesn't match a bare `^\2$`, the heredoc body — including any
+# `.env.local` mentioned in prose — survives the scrub, and rule 3 blocks the
+# commit on its own message text (#363).
+scrubbed="$(printf '%s' "$cmd" | perl -0777 -pe "s/<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1.*?^[ \t]*\2[ \t]*\$/ /gms" \
   | sed -E "s/'[^']*'/ /g; s/\"[^\"]*\"/ /g")"
 
 # 0) Reckless recursive delete of a root / home / system / parent path. The one
@@ -193,6 +200,74 @@ if printf '%s' "$scrubbed" | grep -Eq '(^|[;&|]|^[[:space:]]*)[[:space:]]*git([[
       fi
       ;;
   esac
+fi
+
+# 5) A path-scoped discard (`git checkout -- <path>`, `git checkout HEAD --
+# <path>`, `git restore <path>`) silently overwrites the WORKING TREE from the
+# index/HEAD, taking any uncommitted change to that path with it — no warning,
+# no diff. The standing instruction to verify a guard by deliberately breaking
+# something routes agents straight at this: "undo the break" reads as
+# `git checkout -- <file>`, which reverts to the last commit and can erase
+# UNRELATED uncommitted work in the same file along with the deliberate one.
+#
+# `git checkout <ref-other-than-HEAD> -- <path>` (obtaining a REAL historical
+# defect, e.g. `git checkout origin/main -- <path>`) is the recommended form
+# and stays unimpeded, as do `--staged`, `--source=<ref>`, branch switches, and
+# a path with no uncommitted changes. Extracted from `$nq` (quotes stripped,
+# content kept), not `$scrubbed` — a quoted path is a real argument here, not
+# message prose to blank out.
+#
+# NARROW ESCAPE: GIT_GUARD_ALLOW_DISCARD=1 lifts ONLY this block, for the
+# deliberate case — always logged loudly, same shape as #185's escape above.
+#
+# KNOWN GAP: paths are matched on whitespace, so a path containing a space
+# isn't handled — same class of trade-off as the other rules in this file.
+checkout_args="$(printf '%s' "$nq" \
+  | perl -0777 -ne 'while (/git\s+checkout((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)/gs) { print "$1\n" }')"
+restore_args="$(printf '%s' "$nq" \
+  | perl -0777 -ne 'while (/git\s+restore((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)/gs) { print "$1\n" }')"
+
+discard_paths=""
+
+if [ -n "$checkout_args" ]; then
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    rest=""
+    if printf '%s' "$line" | grep -Eq '^[[:space:]]*--[[:space:]]+'; then
+      rest="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*--[[:space:]]+//')"
+    elif printf '%s' "$line" | grep -Eq '^[[:space:]]*HEAD[[:space:]]+--[[:space:]]+'; then
+      rest="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*HEAD[[:space:]]+--[[:space:]]+//')"
+    fi
+    [ -n "$rest" ] && discard_paths="$discard_paths $rest"
+  done <<EOF
+$checkout_args
+EOF
+fi
+
+if [ -n "$restore_args" ]; then
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    printf '%s' "$line" | grep -Eq -- '--staged|--source' && continue
+    rest="$(printf '%s' "$line" | sed -E 's/(^|[[:space:]])--[a-zA-Z-]+(=[^[:space:]]*)?//g')"
+    [ -n "$(printf '%s' "$rest" | tr -d '[:space:]')" ] && discard_paths="$discard_paths $rest"
+  done <<EOF
+$restore_args
+EOF
+fi
+
+discard_paths_trimmed="$(printf '%s' "$discard_paths" | tr -d '[:space:]')"
+if [ -n "$discard_paths_trimmed" ]; then
+  if [ -n "${GIT_GUARD_ALLOW_DISCARD:-}" ]; then
+    echo "⚠️  dotclaude git-guard: allowing a path-scoped discard — GIT_GUARD_ALLOW_DISCARD is set." >&2
+    echo "   This can silently drop uncommitted work in the named path(s). Only legitimate for a" >&2
+    echo "   deliberate discard you have already reviewed." >&2
+  else
+    for p in $discard_paths; do
+      if [ -n "$(git status --porcelain -- "$p" 2>/dev/null)" ]; then
+        block "git checkout/restore would discard UNCOMMITTED changes in '$p' — silently, with no warning or diff. Commit first (git reset --soft HEAD~1 undoes it), or restore a REAL historical defect with a ref-scoped form instead: git checkout <sha-or-origin/trunk> -- $p. Genuinely deliberate? cp $p $p.bak && mv it back afterward, or set GIT_GUARD_ALLOW_DISCARD=1 for this one command."
+      fi
+    done
+  fi
 fi
 
 exit 0
