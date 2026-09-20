@@ -147,6 +147,74 @@ describe("claim_release", () => {
     });
   });
 
+  /**
+   * A degraded-mode wave (`operating-a-fleet`) stacks its batch PRs into one
+   * integration branch, merges that, and closes the batch PRs UNMERGED. Every
+   * per-issue lock branch is then ahead of the trunk with commits in no merged
+   * PR, while the work itself is in the trunk under a different squash SHA —
+   * so the two existing containment tests both say "landed nowhere" about work
+   * that landed. Clearing a wave's locks then needs `force` every time, which
+   * is how force stops meaning anything (#382).
+   */
+  describe("commits that were re-landed under a different SHA", () => {
+    const releaseWithTimeline = async (timeline: unknown[]) => {
+      let deleted = false;
+      fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+        if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
+        if (init.method === "GET" && url.endsWith("/repos/octo/repo")) {
+          return makeResponse({ status: 200, body: { default_branch: "main" } });
+        }
+        if (init.method === "GET" && url.includes("/compare/")) {
+          return makeResponse({ status: 200, body: { ahead_by: 3, behind_by: 0, status: "ahead" } });
+        }
+        // Closed UNMERGED, exactly as a wave leaves its batch PRs.
+        if (init.method === "GET" && url.includes("/pulls")) {
+          return makeResponse({
+            status: 200,
+            body: [{ number: 91, html_url: "https://gh/pr/91", state: "closed", merged_at: null }],
+          });
+        }
+        if (init.method === "GET" && url.includes("/timeline")) {
+          return makeResponse({ status: 200, body: timeline });
+        }
+        if (init.method === "GET" && url.endsWith("/issues/12")) {
+          return makeResponse({ status: 200, body: { number: 12, title: "t", state: "closed", labels: [] } });
+        }
+        if (init.method === "DELETE" && url.includes("/git/refs/heads/")) {
+          deleted = true;
+          return makeResponse({ status: 204 });
+        }
+        if (init.method === "DELETE") return makeResponse({ status: 204 });
+        if (init.method === "PUT" && url.endsWith("/labels")) return makeResponse({ status: 200, body: [] });
+        return makeResponse({ status: 500 });
+      });
+      const handler = await getClaimHandler("claim_release");
+      const res = await handler({ repo: "octo/repo", number: 12 });
+      return { out: JSON.parse(res.content[0].text) as Record<string, unknown>, deleted };
+    };
+
+    it("releases without force when a commit closed the issue", async () => {
+      // `commit_id` on a `closed` event means a commit message's closing
+      // keyword did the closing, so that commit is on the default branch.
+      const { out, deleted } = await releaseWithTimeline([
+        { event: "labeled" },
+        { event: "closed", commit_id: "634ede628b8d6a99cfe117e0079726e6ac4047a6" },
+      ]);
+      expect(out.released).toBe(true);
+      expect(deleted).toBe(true);
+    });
+
+    it("still refuses when the issue was closed by hand, with no commit", async () => {
+      // The other direction, so the new test cannot pass by matching nothing:
+      // a `closed` event with no `commit_id` is not evidence of anything, and
+      // the refusal has to stand.
+      const { out, deleted } = await releaseWithTimeline([{ event: "closed", commit_id: null }]);
+      expect(out.released).toBe(false);
+      expect(out.reason).toBe("unmerged-commits");
+      expect(deleted).toBe(false);
+    });
+  });
+
 
   it("deletes the lock ref when the branch is not ahead of the default branch", async () => {
     let deleted = false;
