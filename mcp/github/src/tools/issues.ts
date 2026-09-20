@@ -115,6 +115,26 @@ async function ensureMilestone(
   );
   const match = existing.find((m) => decodeHtmlEntities(m.title) === normalizedTitle);
   if (match) return match.number;
+  // An all-digit title is almost always a milestone NUMBER passed where a
+  // TITLE goes. Creating it succeeds, attaches the issue, and returns happily
+  // — and the junk milestone is then indistinguishable from a real one to
+  // every downstream check, because `missing-milestone` asks whether an issue
+  // HAS a milestone, not whether it means anything. MuscleBuddy carried a
+  // milestone literally titled "10" holding two live production issues,
+  // scheduled where nobody would look (#384).
+  //
+  // Refused only on CREATE. A repo that genuinely has an all-digit title
+  // still matches it above and is unaffected.
+  if (/^\d+$/.test(normalizedTitle)) {
+    const byNumber = existing.find((m) => String(m.number) === normalizedTitle);
+    throw new Error(
+      `Refusing to create a milestone titled ${JSON.stringify(normalizedTitle)}: this parameter ` +
+        `takes a milestone TITLE, and an all-digit value is almost always its number. ` +
+        (byNumber
+          ? `Milestone ${normalizedTitle} is ${JSON.stringify(decodeHtmlEntities(byNumber.title))} — pass that title instead.`
+          : `No milestone numbered ${normalizedTitle} exists in this repo either; pass the title you meant.`),
+    );
+  }
   const created = await ghRequest<{ number: number; title: string }>(
     `/repos/${owner}/${name}/milestones`,
     { method: "POST", body: { title: normalizedTitle, description, due_on } },
