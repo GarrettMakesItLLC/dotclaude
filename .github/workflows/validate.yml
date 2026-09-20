@@ -101,6 +101,23 @@ jobs:
           sys.exit(1 if fail else 0)
           PY
 
+      - name: Every hook and tool is executable
+        # The bit is a repo fact, so it belongs here rather than being
+        # discovered by the SessionStart link-doctor on whichever machine pulls
+        # next. A file committed without it is present, readable and inert, and
+        # Claude Code does not complain about a hook it cannot execute. A
+        # library that declares itself sourced is correctly non-executable.
+        run: |
+          fail=0
+          for f in hooks/*.sh bin/*.sh; do
+            [ -x "$f" ] && continue
+            head -5 "$f" | grep -qi 'sourced, never run' && continue
+            echo "✗ $f is not executable — it would silently never run"
+            fail=1
+          done
+          [ $fail -eq 0 ] && echo "✓ hooks/ and bin/ are executable"
+          exit $fail
+
       - name: Every hook has a self-test
         run: |
           fail=0

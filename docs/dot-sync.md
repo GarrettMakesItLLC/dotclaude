@@ -22,6 +22,55 @@ one engine:
   the machine still needs (a missing `gh` auth, an absent credential file the
   roster in `integrations.md` expects, and so on).
 
+## The rest of the fleet
+
+The two dot repos are pulled on every session start. The repos everything
+*builds against* are not, and that is where drift actually hides: one machine's
+`platform` checkout sat 52 commits behind its default branch for three weeks
+with nothing broken enough to notice.
+
+`bin/repo-sweep.sh` fast-forwards them, and `dot-sync.sh` runs it as step 4.
+Pulling the fleet had been attempted before and was dropped after intermittent
+errors, so **the failure handling is the deliverable, not the pull**. Every repo
+either moves, is already current, or is skipped with one line naming the reason,
+and the run never aborts on any of them — a sweep that stops at the first
+awkward checkout tells you nothing about the other nine. The
+skipped-with-reason rows are the product.
+
+What it refuses to do:
+
+- **`--ff-only`, always.** Never a merge, rebase, force, branch switch or stash.
+  `refs/stash` is shared by every worktree of a repo, so a sweep that stashed
+  would pop a sibling agent's work.
+- **Never a checkout with active linked worktrees.** Sibling agents resolve
+  `node_modules` upward from the main checkout, so moving it under them
+  invalidates installs in trees that are mid-flight. On this box that is most
+  repos, most days — which is why those rows are the normal output, not an
+  error.
+- **Never assume `main`.** Each repo's default branch is read from its own
+  remote; `platform`'s is `dev`, and that one assumption is enough to make a
+  sweep wrong everywhere.
+- **No retry loop.** An intermittent network or auth failure is a skip with a
+  reason. Retrying is what turned the previous attempt at this into something
+  that hung instead of reporting.
+
+Dependency installs are behind `--deps`, off by default, and only run where a
+repo actually moved. With no GitHub Packages token in the environment the
+install is skipped rather than run — an empty token does not 401, it exits 0
+having silently omitted every `@gmi/*` package.
+
+The repo list is dotfiles' `bootstrap/repos.tsv`, with discovery under
+`$WORKSPACE` as the fallback for a machine whose dotfiles checkout predates a
+repo. One implementation, two entry points: `dot-sync.sh` calls it, and
+dotfiles' `bootstrap/device.sh` calls it instead of its own inline pull.
+
+```bash
+bin/repo-sweep.sh --dry-run     # decide and report, change nothing
+bin/repo-sweep.sh --only ci     # one repo
+dsync --deps                    # sweep and install where something moved
+dsync --no-repos                # dot repos only
+```
+
 One engine, not two copies of the fast-forward-or-report logic: `dot-sync.sh`
 sources `hooks/dotrepo-sync.sh` rather than reimplementing `sync_repo`.
 `DOTSYNC_VERBOSE=1` (set by `dot-sync.sh`, unset for the hook) makes that

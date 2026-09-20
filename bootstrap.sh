@@ -66,6 +66,14 @@ EXTERNAL_SKILLS=(
   "email-marketing-bible=CosmoBlk/email-marketing-bible"  # MIT; deliverability triage, lifecycle flows, send-safety gates
 )
 
+# A library that is sourced, not run, is CORRECTLY non-executable — the missing
+# bit is the signal. `bin/gateway-common.sh` is the case. Recognised by its own
+# header rather than by a filename pattern, so a second library declares itself
+# the same way instead of needing an edit here.
+is_sourced_library() {
+  head -5 "$1" 2>/dev/null | grep -qi 'sourced, never run'
+}
+
 MODE="install"
 case "${1:-}" in
   --check|-c)  MODE="check" ;;
@@ -152,8 +160,75 @@ doctor() {
       echo "  ✓ mcp/github/dist"
     fi
   fi
+  # The executable bit is the gap that made this doctor able to report a
+  # machine healthy while nothing ran. Git records the bit, but a clone across
+  # a filesystem that drops it (a DrvFs mount, a zip download, a restore from
+  # a backup that flattened modes) leaves every hook present, linked, readable
+  # — and inert. Claude Code does not complain about a hook it cannot execute,
+  # so the only symptom is that the guards stop guarding.
+  local script inert=0
+  for script in "$REPO_DIR"/hooks/*.sh "$REPO_DIR"/bin/*.sh; do
+    [ -e "$script" ] || continue
+    [ -x "$script" ] && continue
+    is_sourced_library "$script" && continue
+    echo "  ✗ ${script#"$REPO_DIR"/} — not executable. It will silently never run."
+    inert=$((inert + 1))
+    problems=$((problems + 1))
+  done
+  [ "$inert" -eq 0 ] && echo "  ✓ hooks/ and bin/ are executable"
+
+  # The agent gateway reads its class manifest from the repo (resolved through
+  # readlink, so it works via the ~/.claude symlink farm) rather than from a
+  # linked directory — which means nothing above would notice it missing.
+  if [ -d "$REPO_DIR/bin" ] && [ -e "$REPO_DIR/bin/gateway-common.sh" ]; then
+    if [ -r "$REPO_DIR/gateway/classes.manifest" ]; then
+      echo "  ✓ gateway/classes.manifest"
+    else
+      echo "  ✗ gateway/classes.manifest — missing; bin/gateway-*.sh cannot resolve any class"
+      problems=$((problems + 1))
+    fi
+  fi
+
+  # Machine prerequisites. Every SessionStart hook renders its payload with
+  # python3 and exits 0 without it — by design, since a session must never be
+  # blocked — so a machine with no python3 has a complete, healthy-looking
+  # symlink farm and not one working hook. That is exactly the drift this
+  # doctor exists to catch, and it is invisible in a link check.
+  echo "  machine prerequisites:"
+  local cmd
+  for cmd in git python3; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      echo "    ✓ $cmd"
+    else
+      echo "    ✗ $cmd — required; every hook silently no-ops without it"
+      problems=$((problems + 1))
+    fi
+  done
+  # Soft: these gate one tool each, not the whole config, so they are reported
+  # rather than failed — a machine can be legitimately set up without them.
+  for cmd in gh node npm rsync; do
+    command -v "$cmd" >/dev/null 2>&1 \
+      && echo "    ✓ $cmd" \
+      || echo "    · $cmd — absent (gh: fleet tools; node/npm: github MCP build; rsync: bin/kb-sync.sh)"
+  done
+  if command -v gh >/dev/null 2>&1 && ! gh auth status >/dev/null 2>&1; then
+    echo "    · gh is installed but not authenticated — \`gh auth login\`"
+  fi
+
+  # The one per-machine secret this repo's own registry declares. Gitignored by
+  # design, so it is never a symlink problem and would never be seen above.
+  local settings_local="$CLAUDE_DIR/settings.local.json"
+  if [ ! -f "$settings_local" ]; then
+    echo "    · settings.local.json — absent (per-machine secrets; see integrations.md#per-machine-secrets)"
+  elif command -v python3 >/dev/null 2>&1 && \
+       ! python3 -c "import json,sys; sys.exit(0 if json.load(open('$settings_local')).get('env',{}).get('UPLOAD_POST_API_KEY') else 1)" 2>/dev/null; then
+    echo "    · UPLOAD_POST_API_KEY not set in settings.local.json — the upload-post MCP will 401"
+  else
+    echo "    ✓ settings.local.json"
+  fi
+
   if [ "$problems" -eq 0 ]; then
-    echo "✓ All symlinks healthy."
+    echo "✓ Config healthy: links, executability, gateway config and prerequisites."
     return 0
   fi
   echo
@@ -218,13 +293,15 @@ done
 
 # Hook scripts must be executable (git preserves the bit, but some clones drop
 # it). A non-executable hook silently no-ops, so warn loudly if we can't fix it.
-if [ -d "$REPO_DIR/hooks" ]; then
-  chmod +x "$REPO_DIR"/hooks/*.sh 2>/dev/null || true
-  for hook in "$REPO_DIR"/hooks/*.sh; do
-    [ -e "$hook" ] || continue
-    [ -x "$hook" ] || echo "  WARNING: $hook is not executable — the hook will not run" >&2
-  done
-fi
+# Hook scripts AND the bin/ tooling must be executable. Git records the bit, but
+# a clone across a filesystem that drops it leaves everything present, linked,
+# readable and inert — and nothing complains about a hook it cannot execute.
+for script in "$REPO_DIR"/hooks/*.sh "$REPO_DIR"/bin/*.sh; do
+  [ -e "$script" ] || continue
+  is_sourced_library "$script" && continue
+  chmod +x "$script" 2>/dev/null || true
+  [ -x "$script" ] || echo "  WARNING: $script is not executable — it will silently never run" >&2
+done
 
 # Per-skill links into ~/.claude/skills/ (coexist with other skill sources).
 if [ "${#SHARED_SKILLS[@]}" -gt 0 ]; then
