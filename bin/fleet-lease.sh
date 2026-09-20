@@ -55,6 +55,23 @@ default_holder() {
 [ $# -ge 1 ] || usage 1
 ACTION="$1"; shift
 NAME=""
+# Push a lease ref with the target repo's pre-push hook bypassed.
+#
+# A lease ref carries NO CONTENT to verify — it is a timestamp and a holder
+# name — so the repo's gate has nothing to say about it. Left unbypassed, the
+# push runs whatever that repo's pre-push hook is: in MuscleBuddy that is a
+# full typecheck chain behind the check lock, minutes on a contended box, for
+# a ref the gate cannot have an opinion about. Worse, when it failed the lease
+# silently did not land while the caller had every reason to think it had, and
+# two machines built the same wave (#376).
+#
+# THIS IS NOT A PRECEDENT FOR CODE. The repo-level rule against bypassing the
+# hook is about commits and code pushes, where the gate has everything to say.
+# It applies here only because refs under refs/fleet-lease/ contain none.
+lease_push() {
+  git push --quiet --no-verify "$@" 2>/dev/null
+}
+
 case "$ACTION" in
   take|renew|release|status) ;;
   -h|--help) usage 0 ;;
@@ -163,11 +180,19 @@ case "$ACTION" in
     report_holder "$sha"
     ;;
 
+
   take)
     commit="$(make_lease_commit)" || die "could not create the lease commit"
     # Empty expected value => the server requires the ref NOT to exist. This is
     # the atomic bit: a second machine's take is rejected, never merged.
-    if git push --quiet --force-with-lease="$REF:" "$TARGET" "$commit:$REF" 2>/dev/null; then
+    if lease_push --force-with-lease="$REF:" "$TARGET" "$commit:$REF"; then
+      # The push can report success and leave no ref (MuscleBuddy#7143), and a
+      # lease nobody holds looks exactly like a lease this machine holds. Read
+      # it back before saying it was taken.
+      sha="$(remote_sha)"
+      if [ -z "$sha" ]; then
+        die "push of $REF reported success but the ref is not on '$TARGET' — the lease was NOT taken"
+      fi
       printf 'took %s as %s (ttl %ss)\n' "$NAME" "$HOLDER" "$TTL"
       exit 0
     fi
@@ -194,7 +219,7 @@ case "$ACTION" in
     fi
     [ -n "$NOTE" ] || NOTE="$(field "$body" note)"
     commit="$(make_lease_commit)" || die "could not create the lease commit"
-    git push --quiet --force-with-lease="$REF:$sha" "$TARGET" "$commit:$REF" \
+    lease_push --force-with-lease="$REF:$sha" "$TARGET" "$commit:$REF" \
       || die "renew lost the race — someone changed $REF; re-read it with 'status'"
     printf 'renewed %s as %s (ttl %ss)\n' "$NAME" "$HOLDER" "$TTL"
     ;;
@@ -220,7 +245,7 @@ case "$ACTION" in
       echo "force-releasing $NAME held by '$current'" >&2
       echo "reason: $REASON" >&2
     fi
-    git push --quiet --force-with-lease="$REF:$sha" "$TARGET" ":$REF" \
+    lease_push --force-with-lease="$REF:$sha" "$TARGET" ":$REF" \
       || die "release lost the race — someone changed $REF; re-read it with 'status'"
     printf 'released %s\n' "$NAME"
     ;;

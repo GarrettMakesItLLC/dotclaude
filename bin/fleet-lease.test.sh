@@ -30,6 +30,38 @@ run() {
   OUT="$(cd "$TMP/$m" && "$LEASE" "$@" 2>&1)"; RC=$?
 }
 
+# A target repo whose pre-push hook REFUSES. The lease must still be takeable:
+# a lease ref carries no content for that hook to have an opinion about, and
+# before #376 the push ran it — in MuscleBuddy a full typecheck chain — then
+# silently failed to land while the caller believed it had.
+git init --quiet "$TMP/hooked"
+git -C "$TMP/hooked" config user.email hooked@test
+git -C "$TMP/hooked" config user.name hooked
+git -C "$TMP/hooked" remote add origin "$TMP/remote.git"
+mkdir -p "$TMP/hooked/.git/hooks"
+cat > "$TMP/hooked/.git/hooks/pre-push" <<'HOOK'
+#!/bin/sh
+echo "pre-push hook ran (it must not, for a lease ref)" >&2
+exit 1
+HOOK
+chmod +x "$TMP/hooked/.git/hooks/pre-push"
+
+echo "fleet-lease: a refusing pre-push hook does not block a lease (#376)"
+run hooked take hooked-lease --ttl 60 --holder hooked
+[ "$RC" = 0 ] && ok "take succeeds through a failing pre-push hook" \
+  || bad "the repo's pre-push hook blocked the lease, rc=$RC: $OUT"
+grep -q 'pre-push hook ran' <<<"$OUT" \
+  && bad "the hook ran — the bypass is not in effect: $OUT" \
+  || ok "the hook did not run"
+
+run hooked status hooked-lease
+grep -q 'holder  : hooked' <<<"$OUT" \
+  && ok "and the lease actually landed on the remote" \
+  || bad "take reported success but the ref is not there: $OUT"
+
+run hooked release hooked-lease --holder hooked
+[ "$RC" = 0 ] && ok "release works through the hook too" || bad "release failed rc=$RC: $OUT"
+
 echo "fleet-lease: free lease"
 run alpha status integrator
 [ "$RC" = 0 ] && grep -q 'FREE' <<<"$OUT" \
