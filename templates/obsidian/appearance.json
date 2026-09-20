@@ -1,0 +1,6 @@
+{
+  "_comment": "Starter appearance. Follows the OS theme so it matches Windows light/dark; monospace-ish reading font since this vault is mostly technical notes.",
+  "accentColor": "",
+  "theme": "system",
+  "baseFontSize": 16
+}

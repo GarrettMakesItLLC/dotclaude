@@ -54,7 +54,7 @@ c1="$(make_pair)"; c2="$(make_pair)"
 advance_remote "$c1"
 out="$(run "$c1" "$c2")"; code=$?
 [ "$code" = 0 ] || { echo "FAIL: must exit 0 on clean pull, got $code"; fail=1; }
-printf '%s' "$out" | grep -q 'pulled 1 new commit' \
+grep -q 'pulled 1 new commit' <<<"$out" \
   || { echo "FAIL: should report pulling 1 commit, got: $out"; fail=1; }
 [ "$(git -C "$c1" rev-parse HEAD)" = "$(git -C "$c1" rev-parse '@{u}')" ] \
   || { echo "FAIL: c1 should now be at upstream HEAD"; fail=1; }
@@ -67,7 +67,7 @@ echo local-edit >> "$c1/file"
 before="$(git -C "$c1" rev-parse HEAD)"
 out="$(run "$c1" "$c2")"; code=$?
 [ "$code" = 0 ] || { echo "FAIL: must exit 0 when dirty, got $code"; fail=1; }
-printf '%s' "$out" | grep -q 'uncommitted' \
+grep -q 'uncommitted' <<<"$out" \
   || { echo "FAIL: should report uncommitted local changes, got: $out"; fail=1; }
 [ "$(git -C "$c1" rev-parse HEAD)" = "$before" ] \
   || { echo "FAIL: dirty repo must not be pulled"; fail=1; }
@@ -119,7 +119,7 @@ out="$(run "$c1" "$c2")"; code=$?
   || { echo "FAIL(live-clash): must not pull over a locally-edited live file"; fail=1; }
 grep -q 'opus' "$c1/settings.json" \
   || { echo "FAIL(live-clash): local settings.json was clobbered"; fail=1; }
-printf '%s' "$out" | grep -q 'settings.json' \
+grep -q 'settings.json' <<<"$out" \
   || { echo "FAIL(live-clash): the note should name the file, got: $out"; fail=1; }
 rm -rf "$(dirname "$c1")" "$(dirname "$c2")"
 
@@ -133,7 +133,7 @@ git -C "$c1" commit --quiet -am local-commit
 before="$(git -C "$c1" rev-parse HEAD)"
 out="$(run "$c1" "$c2")"; code=$?
 [ "$code" = 0 ] || { echo "FAIL: must exit 0 when diverged, got $code"; fail=1; }
-printf '%s' "$out" | grep -q 'diverged' \
+grep -q 'diverged' <<<"$out" \
   || { echo "FAIL: should report diverged history, got: $out"; fail=1; }
 [ "$(git -C "$c1" rev-parse HEAD)" = "$before" ] \
   || { echo "FAIL: diverged repo must not be pulled"; fail=1; }
@@ -180,7 +180,7 @@ out="$(PATH="$bin:$PATH" run "$c1" "$c2")"; code=$?
 [ "$code" = 0 ] || { echo "FAIL(rebuild): must exit 0, got $code"; fail=1; }
 grep -q 'run --silent build' "$bin/calls" 2>/dev/null \
   || { echo "FAIL(rebuild): should have run the MCP build, calls: $(cat "$bin/calls" 2>/dev/null)"; fail=1; }
-printf '%s' "$out" | grep -q 'rebuilt github MCP' \
+grep -q 'rebuilt github MCP' <<<"$out" \
   || { echo "FAIL(rebuild): should report the rebuild, got: $out"; fail=1; }
 rm -rf "$bin" "$(dirname "$c1")" "$(dirname "$c2")"
 
@@ -216,7 +216,7 @@ mkdir -p "$c1/mcp/github/node_modules"
 bin="$(mktemp -d)"; stub_npm "$bin" fail
 out="$(PATH="$bin:$PATH" run "$c1" "$c2")"; code=$?
 [ "$code" = 0 ] || { echo "FAIL(build-fail): must exit 0, got $code"; fail=1; }
-printf '%s' "$out" | grep -q 'STALE' \
+grep -q 'STALE' <<<"$out" \
   || { echo "FAIL(build-fail): a failed build must say the MCP is stale, got: $out"; fail=1; }
 rm -rf "$bin" "$(dirname "$c1")" "$(dirname "$c2")"
 

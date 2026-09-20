@@ -39,11 +39,11 @@ run() {
     quiet)
       [ -z "$out" ] || { echo "FAIL: expected silence for $2, got: $out"; fail=1; } ;;
     fires)
-      printf '%s' "$out" | grep -q '"hookEventName": "PostToolUse"' \
+      grep -q '"hookEventName": "PostToolUse"' <<<"$out" \
         || { echo "FAIL: expected a PostToolUse payload for $2, got: $out"; fail=1; }
-      printf '%s' "$out" | grep -q "$2" \
+      grep -q "$2" <<<"$out" \
         || { echo "FAIL: report should name the failing tool $2"; fail=1; }
-      printf '%s' "$out" | grep -q 'dotclaude' \
+      grep -q 'dotclaude' <<<"$out" \
         || { echo "FAIL: report should name where to file"; fail=1; } ;;
   esac
 }

@@ -39,7 +39,7 @@ assert() {
     fail=1
     return
   fi
-  if printf '%s' "$out" | grep -q "Verification check"; then
+  if grep -q "Verification check" <<<"$out"; then
     [ "$want" = nudge ] || { echo "FAIL: unexpected reminder for: $label"; fail=1; }
   else
     [ "$want" = silent ] || { echo "FAIL: expected a reminder for: $label"; fail=1; }
@@ -54,7 +54,7 @@ check_tool nudge 'mcp__github-rest__pr_create'
 
 # --- issue linkage: pr_create nudge mentions issue linking ---
 out="$(printf '%s' '{"tool_name":"mcp__github-rest__pr_create","tool_input":{}}' | "$HOOK")"
-if printf '%s' "$out" | grep -q "Closes #"; then
+if grep -q "Closes #" <<<"$out"; then
   :
 else
   echo "FAIL: pr_create nudge should mention 'Closes #'"
@@ -76,7 +76,7 @@ check_tool silent 'mcp__github-rest__pr_list'
 
 # --- follow-through: the nudge always demands every finding be accounted for ---
 out="$(printf '%s' '{"tool_name":"mcp__github-rest__pr_create","tool_input":{}}' | "$HOOK")"
-printf '%s' "$out" | grep -q "Finish what you find" \
+grep -q "Finish what you find" <<<"$out" \
   || { echo "FAIL: nudge should carry the Finish-what-you-find accounting"; fail=1; }
 
 # --- deferred-work scan: markers this branch ADDS are named with file:line ---
@@ -100,23 +100,23 @@ scan_code=$?
 [ "$scan_code" = 0 ] || { echo "FAIL: hook must exit 0 with a marker scan, got $scan_code"; fail=1; }
 # Indented, so entries line up: a bare .strip() on the marker block would eat the
 # first one's indent.
-printf '%s' "$scan_out" | grep -q '  added.py:2' \
+grep -q '  added.py:2' <<<"$scan_out" \
   || { echo "FAIL: scan should report the added FIXME as an indented added.py:2"; fail=1; }
-printf '%s' "$scan_out" | grep -q 'added.test.js:1' \
+grep -q 'added.test.js:1' <<<"$scan_out" \
   || { echo "FAIL: scan should report the added .skip( as added.test.js:1"; fail=1; }
-printf '%s' "$scan_out" | grep -q 'pre-existing' \
+grep -q 'pre-existing' <<<"$scan_out" \
   && { echo "FAIL: scan must not report markers the base branch already carried"; fail=1; }
 
 # A branch with no added markers gets the base nudge and no marker block.
 clean_out="$(cd "$scan_repo" && git checkout -q main && printf '%s' '{"tool_name":"mcp__github-rest__pr_create","tool_input":{}}' | "$HOOK")"
-printf '%s' "$clean_out" | grep -q "Verification check" \
+grep -q "Verification check" <<<"$clean_out" \
   || { echo "FAIL: clean branch should still get the base nudge"; fail=1; }
-printf '%s' "$clean_out" | grep -q "deferred-work markers" \
+grep -q "deferred-work markers" <<<"$clean_out" \
   && { echo "FAIL: clean branch should not get a marker block"; fail=1; }
 
 # Outside a git repo the scan drops silently and the nudge still fires.
 nogit_out="$(cd "$(mktemp -d)" && printf '%s' '{"tool_name":"mcp__github-rest__pr_create","tool_input":{}}' | "$HOOK")"
-printf '%s' "$nogit_out" | grep -q "Verification check" \
+grep -q "Verification check" <<<"$nogit_out" \
   || { echo "FAIL: nudge must survive running outside a git repo"; fail=1; }
 
 rm -rf "$scan_repo"

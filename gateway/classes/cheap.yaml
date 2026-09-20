@@ -1,0 +1,9 @@
+  # cheap — hosted, metered, an order of magnitude below frontier. Bulk
+  # mechanical work with a cheap check on the output: triage, label censuses,
+  # log summarisation, doc-drift diffs, commit-message and test-name drafting.
+  - model_name: cheap
+    litellm_params:
+      model: gemini/gemini-3.8-flash
+      api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      mode: chat

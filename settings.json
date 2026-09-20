@@ -40,6 +40,14 @@
           {
             "type": "command",
             "command": "\"$HOME\"/.claude/hooks/worktree-install-check.sh"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/claude-accounts-report.sh"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/fleet-mode-report.sh"
           }
         ]
       }

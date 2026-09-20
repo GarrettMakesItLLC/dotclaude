@@ -1,0 +1,7 @@
+{
+  "_comment": "Starter Obsidian app settings, dropped in by bin/kb-sync.sh on first run only. Never overwritten once the vault exists, so later in-app tweaks survive a refresh.",
+  "alwaysUpdateLinks": true,
+  "newLinkFormat": "shortest",
+  "attachmentFolderPath": "./_attachments",
+  "showUnsupportedFiles": false
+}

@@ -1,0 +1,9 @@
+  # frontier-light — frontier-grade judgment on a bounded job. Also where
+  # `frontier` lands when Opus is overloaded; the fallback stays inside the
+  # class so a degraded answer is still an answer from a frontier model.
+  - model_name: frontier-light
+    litellm_params:
+      model: anthropic/claude-sonnet-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      mode: chat
