@@ -8,6 +8,21 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GUARD="$HERE/git-guard.sh"
 fail=0
 
+# Failures are recorded in a FILE, not a variable.
+#
+# Most cases below run inside `( … )` subshells (one per temp repo). A
+# `fail=1` there is set in the subshell and discarded when it exits, and the
+# `) || fail=1` that follows only fires when the subshell's LAST command
+# exited non-zero — which is a passing `check 0` in every block. So every
+# failing case except a trailing one was invisible, the suite printed "all
+# cases passed", and it exited 0. Verified: four deliberately-failing cases
+# printed FAIL and the run still exited 0.
+#
+# A file crosses the subshell boundary, so the verdict is whatever actually
+# happened rather than whatever the last line happened to return (#383).
+FAIL_MARKER="$(mktemp)"
+trap 'rm -f "$FAIL_MARKER"' EXIT
+
 # wrap a raw command string as the PreToolUse stdin JSON, run the guard.
 check() {
   local want="$1" cmd="$2"
@@ -18,7 +33,7 @@ check() {
   got=$?
   if [ "$got" != "$want" ]; then
     echo "FAIL: want exit $want, got $got for: $cmd"
-    fail=1
+    echo x >> "$FAIL_MARKER"
   fi
 }
 
@@ -193,7 +208,7 @@ check_discard_env() {
   got=$?
   if [ "$got" != "$want" ]; then
     echo "FAIL: want exit $want, got $got for (GIT_GUARD_ALLOW_DISCARD=$envval): $cmd"
-    fail=1
+    echo x >> "$FAIL_MARKER"
   fi
 }
 
@@ -217,8 +232,21 @@ git -C "$discard_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty 
   check 2 'git checkout HEAD -- tracked.txt'
   check 2 'git restore tracked.txt'
 
-  # Safe forms stay unimpeded even though the path is dirty.
-  check 0 'git checkout HEAD~0 -- tracked.txt'
+  # Every spelling of HEAD is blocked, not just the word. `HEAD~0` was
+  # asserted here as a SAFE form and is not one: it resolves to the commit
+  # already checked out, so it discards uncommitted work exactly as the
+  # blocked `git checkout HEAD -- <path>` does. The test encoded the
+  # matcher's behaviour rather than the property the guard exists to hold
+  # (#383).
+  check 2 'git checkout @ -- tracked.txt'
+  check 2 'git checkout HEAD~0 -- tracked.txt'
+  check 2 'git checkout HEAD^0 -- tracked.txt'
+  check 2 'git checkout @~0 -- tracked.txt'
+
+  # Safe forms stay unimpeded even though the path is dirty. These name a
+  # DIFFERENT commit, which is the whole point — they fetch an older version
+  # of the file rather than overwriting it with the one you already have.
+  check 0 'git checkout HEAD~1 -- tracked.txt'
   check 0 'git checkout origin/main -- tracked.txt'
   check 0 'git restore --staged tracked.txt'
   check 0 'git restore --source=HEAD~1 tracked.txt'
@@ -234,6 +262,11 @@ git -C "$discard_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty 
   check 0 'git restore tracked.txt'
 ) || fail=1
 rm -rf "$(dirname "$discard_repo")"
+
+if [ -s "$FAIL_MARKER" ]; then
+  echo "git-guard: $(wc -l < "$FAIL_MARKER" | tr -d ' ') case(s) FAILED"
+  fail=1
+fi
 
 if [ "$fail" = 0 ]; then
   echo "git-guard: all cases passed"
