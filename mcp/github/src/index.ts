@@ -6,6 +6,7 @@ import { registerIssueTools } from "./tools/issues.js";
 import { registerRepoTools } from "./tools/repo.js";
 import { registerLabelTools } from "./tools/labels.js";
 import { registerClaimTools } from "./tools/claims.js";
+import { registerCodeScanningTools } from "./tools/code-scanning.js";
 
 async function main(): Promise<void> {
   const server = new McpServer({
@@ -18,6 +19,7 @@ async function main(): Promise<void> {
   registerRepoTools(server);
   registerLabelTools(server);
   registerClaimTools(server);
+  registerCodeScanningTools(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
