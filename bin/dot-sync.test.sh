@@ -195,6 +195,46 @@ grep -q "no gateway/ledger tooling" <<<"$out" || bad "should say so, got: $out"
 [ "$code" = 0 ] && ok "no gateway/ledger tooling: reported absent, exit 0"
 rm -rf "$(dirname "$c1")" "$(dirname "$c2")"
 
+# --- the repo-fleet sweep is DELEGATED, not reimplemented here ---
+c1="$(make_pair)"; c2="$(make_pair)"
+mkdir -p "$c1/bin"
+cat > "$c1/bin/repo-sweep.sh" <<STUB
+#!/usr/bin/env bash
+echo "sweep \$*" >> "$c1/sweep-calls"
+echo "  REPO  BRANCH  RESULT"
+STUB
+chmod +x "$c1/bin/repo-sweep.sh"
+out="$(DOTCLAUDE_DIR="$c1" DOTFILES_DIR="$c2" "$SCRIPT" 2>&1 | strip)"
+grep -q "4. Repo fleet" <<<"$out" || bad "the fleet sweep should be its own reported step, got: $out"
+[ -f "$c1/sweep-calls" ] || bad "repo-sweep.sh should have been invoked"
+grep -q "fleet swept" <<<"$out" || bad "a successful sweep should say so, got: $out"
+ok "repo fleet: delegated to bin/repo-sweep.sh"
+
+# --deps is passed through; without it, it must not be.
+rm -f "$c1/sweep-calls"
+DOTCLAUDE_DIR="$c1" DOTFILES_DIR="$c2" "$SCRIPT" >/dev/null 2>&1
+grep -q -- "--deps" "$c1/sweep-calls" && bad "--deps must not be passed unless asked for"
+rm -f "$c1/sweep-calls"
+DOTCLAUDE_DIR="$c1" DOTFILES_DIR="$c2" "$SCRIPT" --deps >/dev/null 2>&1
+grep -q -- "--deps" "$c1/sweep-calls" || bad "--deps should reach repo-sweep.sh"
+ok "repo fleet: --deps is opt-in and passed through"
+
+# --no-repos skips it entirely.
+rm -f "$c1/sweep-calls"
+out="$(DOTCLAUDE_DIR="$c1" DOTFILES_DIR="$c2" "$SCRIPT" --no-repos 2>&1 | strip)"
+[ -f "$c1/sweep-calls" ] && bad "--no-repos must not invoke the sweep"
+grep -q "skipped (--no-repos)" <<<"$out" || bad "--no-repos should say so, got: $out"
+ok "repo fleet: --no-repos skips it and says so"
+rm -rf "$(dirname "$c1")" "$(dirname "$c2")"
+
+# --- a checkout with no repo-sweep.sh (mid-merge on another machine) ---
+c1="$(make_pair)"; c2="$(make_pair)"
+out="$(DOTCLAUDE_DIR="$c1" DOTFILES_DIR="$c2" "$SCRIPT" 2>&1 | strip)"; code=$?
+[ "$code" = 0 ] || bad "an absent repo-sweep.sh must not fail the run, got $code"
+grep -q "repo-sweep.sh not found" <<<"$out" || bad "should say the sweep is absent, got: $out"
+ok "repo fleet: an absent sweep is tolerated, not an error"
+rm -rf "$(dirname "$c1")" "$(dirname "$c2")"
+
 if [ "$fail" = 0 ]; then
   echo "dot-sync: all cases passed"
 fi

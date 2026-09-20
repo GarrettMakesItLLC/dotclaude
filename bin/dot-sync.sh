@@ -16,12 +16,15 @@
 #   2. `bootstrap.sh --check` for dotclaude, dotfiles' own installer for
 #      dotfiles — report drift with the fix command, never apply it silently
 #   3. flag (and, with --build-mcp, rebuild) a stale github MCP dist
-#   4. refresh the Obsidian vault, only with --kb (bin/kb-sync.sh; several
+#   4. fast-forward the rest of the repo fleet (bin/repo-sweep.sh), which
+#      is where drift actually hides — the dot repos are pulled every
+#      session, the repos everything BUILDS against are not
+#   5. refresh the Obsidian vault, only with --kb (bin/kb-sync.sh; several
 #      seconds, a copy of multiple trees)
-#   5. report the agent gateway / Claude account ledger state, if those
+#   6. report the agent gateway / Claude account ledger state, if those
 #      files exist on this machine — never create or edit them, another
 #      agent owns them
-#   6. report what the machine is still missing: an un-run install, an
+#   7. report what the machine is still missing: an un-run install, an
 #      absent credential file the roster expects, a tool the sync itself
 #      needed and didn't find
 #
@@ -30,6 +33,8 @@
 #   bin/dot-sync.sh --fix           # also apply `bootstrap.sh` for reported link drift
 #   bin/dot-sync.sh --build-mcp     # also rebuild a stale github MCP dist outright
 #   bin/dot-sync.sh --kb            # also refresh the Obsidian vault (bin/kb-sync.sh)
+#   bin/dot-sync.sh --deps          # also install deps in a fleet repo that moved
+#   bin/dot-sync.sh --no-repos      # skip the fleet sweep (dot repos only)
 #   bin/dot-sync.sh --skip-checks   # pull only — skip bootstrap --check and reports
 #
 # Every step reports what it did or found; nothing here is silent about a
@@ -60,15 +65,19 @@ DOTFILES_DIR="${DOTFILES_DIR:-$HOME/dotfiles}"
 FIX=0
 BUILD_MCP=0
 DO_KB=0
+DO_REPOS=1
+DO_DEPS=0
 SKIP_CHECKS=0
 for arg in "$@"; do
   case "$arg" in
     --fix)         FIX=1 ;;
     --build-mcp)   BUILD_MCP=1 ;;
     --kb)          DO_KB=1 ;;
+    --no-repos)    DO_REPOS=0 ;;
+    --deps)        DO_DEPS=1 ;;
     --skip-checks) SKIP_CHECKS=1 ;;
     -h|--help)
-      sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "dot-sync: unknown option '$arg' (try --help)" >&2; exit 2 ;;
   esac
@@ -199,10 +208,35 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# 4. Obsidian vault refresh — only with --kb (docs/knowledge-base.md: a copy
+# 4. The rest of the repo fleet. The two dot repos are pulled every session;
+#    the repos everything BUILDS against are not, and that is where drift
+#    actually hides — one machine's `platform` sat 52 commits behind for three
+#    weeks with nothing broken enough to notice. Delegated to bin/repo-sweep.sh
+#    so dotfiles' bootstrap/device.sh runs the same code rather than a second
+#    copy of it. Fast-forward only; every skip is reported with its reason.
+# --------------------------------------------------------------------------
+say "4. Repo fleet"
+
+sweep="$DOTCLAUDE_DIR/bin/repo-sweep.sh"
+if [ "$DO_REPOS" != 1 ]; then
+  note "skipped (--no-repos)"
+elif [ ! -x "$sweep" ]; then
+  note "bin/repo-sweep.sh not found or not executable — may be mid-merge on another machine"
+else
+  sweep_args=()
+  [ "$DO_DEPS" = 1 ] && sweep_args+=(--deps)
+  if bash "$sweep" "${sweep_args[@]+"${sweep_args[@]}"}" 2>&1 | sed 's/^/      /'; then
+    ok "fleet swept"
+  else
+    bad "repo-sweep.sh failed — see output above"
+  fi
+fi
+
+# --------------------------------------------------------------------------
+# 5. Obsidian vault refresh — only with --kb (docs/knowledge-base.md: a copy
 #    of several trees, seconds of cost, not something every sync should pay).
 # --------------------------------------------------------------------------
-say "4. Knowledge base (Obsidian vault)"
+say "5. Knowledge base (Obsidian vault)"
 
 kb_sync="$DOTCLAUDE_DIR/bin/kb-sync.sh"
 if [ "$DO_KB" != 1 ]; then
@@ -218,10 +252,10 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# 5. Agent gateway / Claude account ledger — report only. Another agent owns
+# 6. Agent gateway / Claude account ledger — report only. Another agent owns
 #    these files; this script must never create or edit them.
 # --------------------------------------------------------------------------
-say "5. Agent gateway / account ledger"
+say "6. Agent gateway / account ledger"
 
 gateway_found=0
 shopt -s nullglob
@@ -241,9 +275,9 @@ fi
 [ "$gateway_found" = 1 ] || note "no gateway/ledger tooling on this checkout yet — not this script's to create"
 
 # --------------------------------------------------------------------------
-# 6. What the machine still needs.
+# 7. What the machine still needs.
 # --------------------------------------------------------------------------
-say "6. What this machine still needs"
+say "7. What this machine still needs"
 
 missing=()
 command -v git    >/dev/null 2>&1 || missing+=("git")

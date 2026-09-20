@@ -70,7 +70,16 @@ bash ~/dotclaude/bootstrap.sh
 The script is idempotent and narrates what it links; re-run it any time — a newly
 committed skill or directory needs a run to get its symlink. Real files already
 sitting at a link target are moved to `~/.claude.bak.<timestamp>/`, never
-overwritten. `bash ~/dotclaude/bootstrap.sh --check` is a read-only link doctor.
+overwritten.
+
+`bash ~/dotclaude/bootstrap.sh --check` is the read-only doctor. It verifies more
+than links, because a link check can report a machine healthy while nothing runs:
+it also checks that `hooks/` and `bin/` are **executable** (git records the bit, a
+clone across a filesystem that drops it leaves everything present and inert, and
+Claude Code does not complain about a hook it cannot execute), that the gateway
+class manifest resolves, and that the machine has the commands the config assumes
+— `python3` above all, since every SessionStart hook renders its payload with it
+and exits 0 without it.
 
 Two things bootstrap can't do for you:
 
