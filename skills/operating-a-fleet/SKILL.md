@@ -1,7 +1,7 @@
 ---
 name: operating-a-fleet
 description: Use when more than one machine, or more than a couple of agent sessions, are working one repo at the same time — deciding who implements, who validates and who merges, taking the single fleet-wide integrator lease, batching related issues into one PR, and running a local CI replica when GitHub Actions is unavailable or too expensive to be the gate. Covers the degraded-mode wave procedure and the reconcile pass that runs after every merge.
-allowed-tools: Bash(bin/fleet-lease.sh:*), Bash(bin/fleet-reconcile.sh:*), Bash(bin/ci-replica.sh:*), Bash(gh api:*), Bash(git:*), mcp__github-rest__issue_open, mcp__github-rest__issue_comment, mcp__github-rest__pr_create, mcp__github-rest__pr_auto_merge
+allowed-tools: Bash(bin/fleet-lease.sh:*), Bash(bin/fleet-reconcile.sh:*), Bash(bin/ci-replica.sh:*), Bash(bin/fleet-mode.sh:*), Bash(gh api:*), Bash(git:*), mcp__github-rest__issue_open, mcp__github-rest__issue_comment, mcp__github-rest__pr_create, mcp__github-rest__pr_auto_merge
 ---
 
 # Operating a fleet
@@ -84,6 +84,27 @@ budget.
 
 **Leave it when** CI is green again *and* the queue has drained. Leaving is not automatic — the last
 integrator says so on the coordination issue and restores the rules.
+
+### Which mode is this repo in? Do not guess, and do not wait to be told
+
+`bin/fleet-mode.sh` answers it, and `hooks/fleet-mode-report.sh` puts the answer in front of every
+session at SessionStart — silent when CI is healthy, loud when it is not. The two facts have two
+different kinds of source, and keeping them apart is the whole design:
+
+- **Is CI answering?** Observable, and it changes without anyone editing anything, so it is **probed**
+  live. A billing refusal has a specific signature: a run that concludes `failure` seconds after
+  starting, jobs that executed zero steps, across more than one workflow. Nothing a repo does to
+  itself looks like that.
+- **Has degraded mode been authorized?** Not observable at all, so it is **declared** — committed, in
+  `<repo>/.claude/fleet-mode.json`.
+
+Because the probe is the authority on the first, a declaration that went stale is *caught* rather than
+believed: a repo still declaring `degraded` while Actions is running jobs again is reported as a stale
+declaration, which is the failure a marker file alone can never see. When the probe cannot tell — no
+`gh`, no network, no runs — it says **unknown** and guesses nothing, because telling a session to trust
+a gate that is not running is worse than telling it nothing.
+
+Full matrix, the signature, the file format and the caching: `references/mode-detection.md`.
 
 **Degraded mode is owner-authorized policy, not an agent's call.** An agent may *observe* the triggers
 and say so; entering the mode means lifting branch protection, which needs Garrett's authorization for
