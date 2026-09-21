@@ -292,18 +292,37 @@ print(json.dumps({"mode": mode, "issue": ref, "since": d.get("since", "")}))
 ' "$marker_file" 2>/dev/null
 }
 
+# --- can this box produce the substitute verdict? ---------------------------
+# In degraded mode an `ALL GREEN @ <sha>` line from bin/ci-replica.sh is the
+# ONLY artifact authorising a merge. The runner is fleet-wide and lives in
+# dotclaude; the manifest is per-repo. Either half can be missing, and the
+# symptom is `command not found`, which reads as "this box does not do replica
+# runs" rather than "this box cannot authorise a merge right now" (#392).
+replica_gate() {
+  local runner="" manifest="$repo_root/.claude/ci-replica.json"
+  for cand in "$HERE/ci-replica.sh" "$HOME/dotclaude/bin/ci-replica.sh" \
+              "$HOME/.claude/bin/ci-replica.sh"; do
+    if [ -x "$cand" ]; then runner="$cand"; break; fi
+  done
+  if [ -z "$runner" ]; then echo "no-runner"; return; fi
+  if [ ! -f "$manifest" ]; then echo "no-manifest"; return; fi
+  echo "ok"
+}
+
 # --- rendering --------------------------------------------------------------
 # One place decides what a session is told, so `status`, the hook banner and the
 # JSON all agree by construction.
 render() {
   local verdict="$1" marker="$2"
-  FLEET_VERDICT="$verdict" FLEET_MARKER="$marker" FLEET_REPO="$slug" python3 -c '
+  FLEET_VERDICT="$verdict" FLEET_MARKER="$marker" FLEET_REPO="$slug" \
+  FLEET_REPLICA="$(replica_gate)" python3 -c '
 import json, os
 
 v = json.loads(os.environ["FLEET_VERDICT"])
 m = os.environ["FLEET_MARKER"]
 m = json.loads(m) if m.strip() else {}
 repo = os.environ["FLEET_REPO"]
+replica = os.environ.get("FLEET_REPLICA", "")
 ci = v.get("ci", "unknown")
 declared = m.get("mode", "")
 issue = m.get("issue", "")
@@ -321,6 +340,26 @@ DO_DEGRADED = (
     "Read " + skill + " before acting on any of it."
 )
 
+def replica_warning():
+    """Named remedy, not just a complaint — the fix is one command."""
+    if replica == "no-runner":
+        return (
+            "⚠ THIS BOX CANNOT AUTHORISE A MERGE RIGHT NOW.\n"
+            "  bin/ci-replica.sh is not on this machine, so the `ALL GREEN @ <sha>` line that\n"
+            "  substitutes for CI cannot be produced here. A gate that never ran reads exactly\n"
+            "  like a gate that passed — do not merge on the absence of a red check.\n"
+            "  Fix: run `dotclaude-sync` on this box."
+        )
+    if replica == "no-manifest":
+        return (
+            "⚠ THIS BOX CANNOT AUTHORISE A MERGE FOR THIS REPO.\n"
+            "  bin/ci-replica.sh is present, but this repo has no .claude/ci-replica.json for it\n"
+            "  to execute, so there is nothing to run and no verdict to quote. A gate that never\n"
+            "  ran reads exactly like a gate that passed.\n"
+            "  Fix: add the manifest — see references/ci-replica-manifest.md."
+        )
+    return ""
+
 lines = []
 if ci == "refused" and declared == "degraded":
     lines.append("FLEET MODE: DEGRADED — %s" % repo)
@@ -328,6 +367,10 @@ if ci == "refused" and declared == "degraded":
                  % (" (%s)" % issue if issue else ""))
     lines.append(v.get("reason", ""))
     lines.append("")
+    warn = replica_warning()
+    if warn:
+        lines.append(warn)
+        lines.append("")
     lines.append(DO_DEGRADED)
 elif ci == "refused":
     lines.append("FLEET MODE: CI IS REFUSING JOBS — %s (degraded mode NOT declared)" % repo)
@@ -343,6 +386,10 @@ elif ci == "refused":
         "Until then you may still batch and validate locally (`bin/ci-replica.sh`).\n"
         "Read " + skill + "."
     )
+    warn = replica_warning()
+    if warn:
+        lines.append("")
+        lines.append(warn)
 elif ci == "healthy" and declared == "degraded":
     lines.append("FLEET MODE: STALE DECLARATION — %s" % repo)
     lines.append(".claude/fleet-mode.json declares degraded, but Actions is running jobs again.")

@@ -40,6 +40,7 @@ variable that must not leak in.
 | `dataPlaneReason` | string | when `needsDataPlane` | What it touches and how to provision it. |
 | `budgetSeconds` | integer | no | Wall-clock expectation. Over it, the job is still PASS but is flagged `over budget`. |
 | `mutatesTree` | array of glob | no | Paths this job is ALLOWED to leave changed in the working tree. Anything else it changes fails it — see below. |
+| `withoutFiles` | array of path | no | Paths that must be ABSENT while this job runs. The runner moves each aside before the job's commands and puts it back afterwards, including when the job fails or the run is interrupted. Repo-relative; an absolute path or one escaping the root is refused. |
 
 A command containing a newline is rejected at load: the plan is one command per line, and a multi-line
 entry would silently run only its first line. Put a multi-step sequence in a repo script and name the
@@ -76,6 +77,37 @@ Three things about it are deliberate:
 - **`-uall`, not plain `--porcelain`.** Git collapses a newly created directory
   to `gen/`, and then no file-level pattern in `mutatesTree` can ever match what
   is inside it.
+### `withoutFiles` — a file whose mere presence changes the answer
+
+Some jobs are only meaningful against a tree that does NOT contain a given
+file. Two of MuscleBuddy's did, for unrelated reasons: an authenticated axe
+scan inherited a live Supabase session from `apps/web/.env.local` and hung on
+the sign-in screen, and a native build declared `VITE_API_URL` to mirror CI
+while the same `.env.local` said `localhost`, so the repo's ambient-env guard
+failed the job on the disagreement in about seven seconds.
+
+Both were carried as prose in `$localDeviations` — "move the file aside, run,
+put it back" — which is not enforcement. A validator who forgot got a failure
+whose message pointed somewhere else entirely; the native one read as a stray
+shell export.
+
+```json
+{
+  "name": "native",
+  "withoutFiles": ["apps/web/.env.local"],
+  "commands": ["npm run build:native"]
+}
+```
+
+The move and the restore belong to the runner, not to a human's memory. The
+restore runs after a FAILING job and on SIGINT/SIGTERM too — a run that aborts
+leaving a repo's `.env.local` renamed is worse than the problem the field
+solves. It also runs before the working-tree check, so a moved-aside file never
+reads as the job having deleted it.
+
+Name the field for the mechanism, not the case: `.env.local` is simply the
+first path that needed it.
+
 - **An intentional write is DECLARED, beside `local` and `needsDataPlane`.** A
   job that is supposed to write says so in the manifest, which makes it
   reviewable rather than discovered. Entries are `fnmatch` globs against the
