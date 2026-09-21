@@ -120,6 +120,45 @@ export function hasTickedOwnerAction(body: string | null | undefined): boolean {
 }
 
 /**
+ * Why an issue is an index rather than pickable work, or `null` if it is work.
+ *
+ * `status:ready` means "scoped and startable". An epic is explicitly not
+ * startable — `managing-work-with-issues` calls it "an index, not work: its
+ * body links its children and carries the scope statement, and nothing is ever
+ * implemented on it directly". Both wear the same label, and nothing in the
+ * taxonomy separates them, so a `ready` count silently overstates the backlog
+ * (#395: NetWorthy reported 20 ready issues and had zero ready leaves).
+ *
+ * Two ways to be an index, because either one alone misses half the set:
+ *
+ *   - `"sub-issues"` — GitHub already knows: the issue has children. Costs
+ *     nothing per-issue and needs no migration.
+ *   - `"body-marker"` — a CHILDLESS epic, which the first test cannot see at
+ *     all. Twelve of NetWorthy's sixteen roadmap epics had no sub-issues filed
+ *     and were indistinguishable from leaf issues nobody had started. They are
+ *     `source:owner`, they carry real milestones, and they are correctly
+ *     `ready` by the taxonomy as written — the label simply cannot express
+ *     "this is an index". The body can, and does, verbatim.
+ *
+ * Returned as a reason rather than a boolean so a caller can tell a parent from
+ * a childless epic. They need different handling: the first has children to
+ * claim instead, the second has nothing yet and wants decomposing.
+ */
+export type IndexReason = "sub-issues" | "body-marker";
+
+/** The line every roadmap epic body carries, matched loosely enough to survive rewording around it. */
+const INDEX_BODY_MARKER = /never implemented directly/i;
+
+export function indexReason(raw: {
+  sub_issues_summary?: { total?: number; completed?: number } | null;
+  body?: string | null;
+}): IndexReason | null {
+  if ((raw.sub_issues_summary?.total ?? 0) > 0) return "sub-issues";
+  if (raw.body != null && INDEX_BODY_MARKER.test(raw.body)) return "body-marker";
+  return null;
+}
+
+/**
  * Further project an already-slimmed object down to just the named keys —
  * the common case is a dedupe pass across many issues/PRs that only needs
  * `number`/`title`/`state` (#184). `undefined`/empty `fields` returns `obj`
@@ -162,6 +201,10 @@ export function slimIssue(raw: RawIssue, opts: { body?: boolean } = {}): Record<
     // Surfaced even when the body is not returned, so a LIST shows it. An
     // agent scanning a blocked queue never opens the answered one otherwise.
     owner_action_answered: hasTickedOwnerAction(raw.body) ? true : undefined,
+    // Same reasoning: an agent sizing a backlog from a `status:ready` count
+    // reads the list, not each body. Without this the count is the thing that
+    // sends it at an empty backlog (#395).
+    is_index: indexReason(raw) ?? undefined,
     body: opts.body ? (raw.body ?? "") : undefined,
   });
 }

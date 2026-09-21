@@ -35,7 +35,15 @@ import {
   setProjectSingleSelect,
 } from "../project.js";
 import { setIssueStatus } from "../issue-status.js";
-import { labelNames, pick, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";
+import {
+  indexReason,
+  labelNames,
+  pick,
+  slimComment,
+  slimIssue,
+  type RawIssue,
+  type RawLabel,
+} from "../slim.js";
 import {
   acquireClaimLock,
   claimBranchName,
@@ -50,6 +58,10 @@ interface IssueLike {
   number: number;
   // Present only on items that are actually pull requests.
   pull_request?: unknown;
+  // The list endpoint returns the full body and sub-issue summary, which is
+  // what lets `pickable` decide an index from a leaf without a second fetch.
+  body?: string | null;
+  sub_issues_summary?: { total?: number; completed?: number } | null;
 }
 
 async function resolveAssignees(assignees: string[]): Promise<string[]> {
@@ -190,7 +202,13 @@ export function registerIssueTools(server: McpServer): void {
     "issue_list",
     {
       description:
-        "List issues in a repo (up to `limit` issues, default 30, following pagination). Pull requests are filtered out.",
+        "List issues in a repo (up to `limit` issues, default 30, following pagination). Pull " +
+        "requests are filtered out.\n\n" +
+        "Each row carries `is_index` when the issue is an INDEX rather than pickable work — " +
+        "`\"sub-issues\"` when it has children, `\"body-marker\"` when its body says it is never " +
+        "implemented directly (a childless epic, which the first test cannot see). An index is " +
+        "not startable, so a `status:ready` count that includes them overstates the backlog. " +
+        "Pass `pickable: true` to drop them and have `limit` count real leaves.",
       inputSchema: {
         repo: repoParam,
         state: z.enum(["open", "closed", "all"]).default("open"),
@@ -198,6 +216,14 @@ export function registerIssueTools(server: McpServer): void {
           .array(z.string())
           .optional()
           .describe("Filter to issues having all of these labels."),
+        pickable: z
+          .boolean()
+          .optional()
+          .describe(
+            "Drop index issues (epics and childless roadmap placeholders), leaving only work " +
+              "that can actually be started. Use this whenever the answer feeds a dispatch or a " +
+              "backlog size, not a census.",
+          ),
         limit: z.number().int().positive().optional().describe("Max issues (<=1000, default 30)."),
         fields: z
           .array(z.string())
@@ -209,11 +235,15 @@ export function registerIssueTools(server: McpServer): void {
           ),
       },
     },
-    async ({ repo, state, labels, limit, fields }) => {
+    async ({ repo, state, labels, limit, pickable, fields }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
         // The /issues endpoint mixes in PRs, so filter them out and page until
         // we have `limit` real issues — otherwise PR-heavy repos return too few.
+        // `pickable` is applied in the same place for the same reason: a
+        // post-filter would let `limit` be spent on indexes and return fewer
+        // leaves than asked for, which is the undercount version of the bug
+        // this parameter exists to fix (#395).
         const issuesOnly = await ghPaginate<IssueLike>(
           `/repos/${owner}/${name}/issues`,
           {
@@ -222,7 +252,10 @@ export function registerIssueTools(server: McpServer): void {
               labels: labels && labels.length ? labels.join(",") : undefined,
             },
             limit,
-            filter: (item) => !("pull_request" in item) || !item.pull_request,
+            filter: (item) => {
+              if ("pull_request" in item && item.pull_request) return false;
+              return !pickable || indexReason(item) === null;
+            },
           },
         );
         return jsonText(issuesOnly.map((i) => pick(slimIssue(i), fields)));
@@ -677,6 +710,20 @@ export function registerIssueTools(server: McpServer): void {
               "decomposed, not implemented directly. Claim a specific sub-issue instead " +
               "(issue_list_sub_issues to see them).",
             { open_sub_issues: openSubIssues, total_sub_issues: subTotal },
+          );
+        }
+        // A CHILDLESS epic passes the test above and is the harder half of
+        // #395: nothing about it is mislabelled — it is scoped, unblocked and
+        // milestoned, so it is correctly `status:ready` — and it is still not
+        // work. Twelve of NetWorthy's sixteen roadmap epics were in exactly
+        // this state, indistinguishable from a leaf nobody had started. The
+        // body is the only place that says so, and it says so verbatim.
+        if (indexReason(issue) === "body-marker") {
+          throw new ClaimEpicError(
+            `Issue #${number} is an index, not work — its body says it is never implemented ` +
+              "directly. It has no sub-issues filed yet, so there is nothing to claim under it " +
+              "either: decompose it into sub-issues first, then claim one of those.",
+            { open_sub_issues: 0, total_sub_issues: 0 },
           );
         }
         const target = branch ?? claimBranchName(number, issue.title ?? "");
