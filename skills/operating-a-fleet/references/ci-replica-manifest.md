@@ -39,10 +39,51 @@ variable that must not leak in.
 | `needsDataPlane` | boolean | no | Default `false`. The job talks to a real database or a shared test branch. Skipped as NOT-RUN unless `--data-plane` is passed. |
 | `dataPlaneReason` | string | when `needsDataPlane` | What it touches and how to provision it. |
 | `budgetSeconds` | integer | no | Wall-clock expectation. Over it, the job is still PASS but is flagged `over budget`. |
+| `mutatesTree` | array of glob | no | Paths this job is ALLOWED to leave changed in the working tree. Anything else it changes fails it — see below. |
 
 A command containing a newline is rejected at load: the plan is one command per line, and a multi-line
 entry would silently run only its first line. Put a multi-step sequence in a repo script and name the
 script here.
+
+## The tree guard
+
+Every job runs against **one** working tree, in sequence. A job that writes into
+it silently changes what every later job measures, and GitHub Actions cannot see
+this class of failure at all, because it gives each job its own checkout.
+
+It is not hypothetical. MuscleBuddy's `build:budget` gained a `prebuild` step so
+the gate would measure the catalogue Vercel compiles in; it did, and then left
+the fetched catalogue in the tree. `marketing-budgets` runs before `a11y`, so the
+axe sweep scanned show routes the committed tree does not have and reported a
+WCAG violation on a page that exists in no commit. Two validators read that as a
+real accessibility regression before anyone found the cause.
+
+So the runner snapshots `git status --porcelain -uall` before each job and again
+after, and a job that leaves an undeclared change fails with exit 91:
+
+```
+    ! tree-guard: marketing-budgets changed undeclared files:
+        apps/web/src/data/db-shows.generated.ts
+        Every later job now measures a tree no commit describes.
+        Restore them, or declare them in this job's `mutatesTree`.
+```
+
+Three things about it are deliberate:
+
+- **It runs after a FAILING job too.** Otherwise the first red job hides the dirt
+  it left for the next one — and a timed-out or half-finished command is exactly
+  when a tree gets left mid-write.
+- **`-uall`, not plain `--porcelain`.** Git collapses a newly created directory
+  to `gen/`, and then no file-level pattern in `mutatesTree` can ever match what
+  is inside it.
+- **An intentional write is DECLARED, beside `local` and `needsDataPlane`.** A
+  job that is supposed to write says so in the manifest, which makes it
+  reviewable rather than discovered. Entries are `fnmatch` globs against the
+  repo-relative path.
+
+`--no-tree-guard` turns it off for a run. That is for debugging the guard itself;
+a job that legitimately writes wants `mutatesTree`, because the flag disables the
+check for every job at once.
 
 ## Reading the result
 

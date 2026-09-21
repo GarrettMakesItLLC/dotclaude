@@ -17,7 +17,7 @@
 #     database and passes about the wrong thing
 #
 #   ci-replica.sh [--manifest PATH] [--job NAME]... [--data-plane] [--list]
-#                 [--log-dir DIR] [--repo-root DIR]
+#                 [--log-dir DIR] [--repo-root DIR] [--no-tree-guard]
 #
 # Exit 0 when no job FAILed, 1 when any did, 2 on a bad manifest or usage.
 set -uo pipefail
@@ -28,6 +28,7 @@ LOG_DIR=""
 ROOT=""
 DATA_PLANE=0
 LIST_ONLY=0
+TREE_GUARD=1
 SELECTED=()
 
 die() { echo "$PROG: $*" >&2; exit 2; }
@@ -39,6 +40,7 @@ while [ $# -gt 0 ]; do
     --log-dir)   LOG_DIR="${2:-}"; shift 2 || die "--log-dir needs a path" ;;
     --repo-root) ROOT="${2:-}"; shift 2 || die "--repo-root needs a path" ;;
     --data-plane) DATA_PLANE=1; shift ;;
+    --no-tree-guard) TREE_GUARD=0; shift ;;
     --list)      LIST_ONLY=1; shift ;;
     -h|--help)   sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option '$1'" ;;
@@ -132,6 +134,12 @@ for i, job in enumerate(jobs):
     if not isinstance(budget, int) or isinstance(budget, bool) or budget < 0:
         bail(f"job {name}: `budgetSeconds` must be a non-negative integer")
 
+    mutates = job.get("mutatesTree") or []
+    if not isinstance(mutates, list) or any(
+        not isinstance(x, str) or not x.strip() or "\n" in x for x in mutates
+    ):
+        bail(f"job {name}: `mutatesTree` must be an array of non-empty single-line paths")
+
     job_env = job.get("env") or {}
     job_unset = job.get("unset") or []
     if not isinstance(job_env, dict):
@@ -149,6 +157,8 @@ for i, job in enumerate(jobs):
         fh.write(f"needs_data_plane={'1' if needs_dp else '0'}\n")
         fh.write(f"data_plane_reason={dp_reason}\n")
         fh.write(f"budget={budget}\n")
+    with open(os.path.join(d, "mutates"), "w") as fh:
+        fh.write("".join(x + "\n" for x in mutates))
     with open(os.path.join(d, "cmds"), "w") as fh:
         fh.write("".join(c + "\n" for c in cmds))
     merged = dict(global_env)
@@ -246,6 +256,17 @@ while IFS="	" read -r idx name; do
     echo "### started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "$log"
 
+  # The tree as this job found it. Every job runs against ONE working tree, in
+  # sequence, so a job that writes into it silently changes what every later job
+  # measures. GitHub Actions gives each job its own checkout and cannot see this
+  # class of failure at all: `build:budget` once left a fetched catalogue behind
+  # and the a11y sweep that ran next reported a WCAG violation on a page that
+  # exists in no commit (MuscleBuddy#8294).
+  tree_before=""
+  if [ "$TREE_GUARD" = 1 ]; then
+    tree_before=$(cd "$ROOT" && git status --porcelain -uall 2>/dev/null || true)
+  fi
+
   started=$(date +%s)
   rc=0
   failed_cmd=""
@@ -264,6 +285,39 @@ while IFS="	" read -r idx name; do
     if [ "$rc" -ne 0 ]; then failed_cmd="$cmd"; break; fi
   done < "$d/cmds"
   elapsed=$(( $(date +%s) - started ))
+
+  # Checked after a FAILING job too: the first red job would otherwise hide the
+  # dirt it left for the next one, and a timed-out or half-finished command is
+  # exactly when a tree gets left mid-write.
+  if [ "$TREE_GUARD" = 1 ]; then
+    tree_after=$(cd "$ROOT" && git status --porcelain -uall 2>/dev/null || true)
+    if [ "$tree_after" != "$tree_before" ]; then
+      undeclared=$(
+        TREE_BEFORE="$tree_before" TREE_AFTER="$tree_after" DECL="$d/mutates" python3 - <<'TREEPY'
+import os, fnmatch
+before = {l[3:] for l in os.environ["TREE_BEFORE"].splitlines() if len(l) > 3}
+after = {l[3:] for l in os.environ["TREE_AFTER"].splitlines() if len(l) > 3}
+declared = [p.strip() for p in open(os.environ["DECL"]) if p.strip()]
+changed = sorted(after - before)
+for path in changed:
+    if not any(fnmatch.fnmatch(path, d) for d in declared):
+        print(path)
+TREEPY
+      )
+      if [ -n "$undeclared" ]; then
+        {
+          echo ""
+          echo "### tree-guard: this job changed files it did not declare:"
+          echo "$undeclared" | sed 's/^/###   /'
+        } >> "$log"
+        printf '    ! tree-guard: %s changed undeclared files:\n' "$name"
+        echo "$undeclared" | sed 's/^/        /'
+        echo "        Every later job now measures a tree no commit describes."
+        echo "        Restore them, or declare them in this job's \`mutatesTree\`."
+        if [ "$rc" -eq 0 ]; then rc=91; failed_cmd="tree-guard: undeclared changes after $name"; fi
+      fi
+    fi
+  fi
 
   if [ "$rc" -eq 0 ]; then
     flag=""
