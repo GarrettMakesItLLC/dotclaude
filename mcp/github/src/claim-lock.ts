@@ -139,9 +139,57 @@ export async function assertIssueClaimable(
   }
 }
 
+/** Thrown when several lock refs exist for one issue and none was named. */
+export class ClaimAmbiguousError extends Error {
+  constructor(
+    message: string,
+    readonly branches: string[],
+  ) {
+    super(message);
+    this.name = "ClaimAmbiguousError";
+  }
+}
+
 /**
- * The lock branch for an issue: `branch` when given, otherwise derived from the
- * issue's current title.
+ * Every lock ref that exists for an issue, read from the remote rather than
+ * derived from the issue's title.
+ *
+ * A ref is immutable and a title is not, so the two diverge for two reasons
+ * that are both legitimate: a batch lock is deliberately named for the batch
+ * (`issue-8273-moderation-batch`), and any retitle after the claim orphans the
+ * derived name silently (#397).
+ *
+ * Empty on any failure, which leaves the caller on the derived name — the
+ * behaviour that held before this existed.
+ */
+export async function findClaimBranches(
+  owner: string,
+  name: string,
+  number: number,
+): Promise<string[]> {
+  try {
+    const refs = await ghRequest<{ ref: string }[]>(
+      `/repos/${owner}/${name}/git/matching-refs/heads/${CLAIM_BRANCH_PREFIX}${number}`,
+    );
+    // The prefix is textual, so `issue-39` also matches `issue-397-…`; the
+    // parsed issue number is what actually selects this issue's locks.
+    return refs
+      .map((r) => r.ref.replace(/^refs\/heads\//, ""))
+      .filter((b) => issueNumberForBranch(b) === number);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The lock branch for an issue: `branch` when given, otherwise the ref that
+ * actually exists on the remote, otherwise the name derived from the issue's
+ * current title.
+ *
+ * Deriving a name is right for `issue_claim`, which is CREATING the ref. It is
+ * wrong for every operation that has to FIND one: a derived name that no longer
+ * matches reports "not-held", which reads as "already clean" and is the one
+ * answer that makes a caller stop looking (#397).
  */
 export async function resolveClaimBranch(
   owner: string,
@@ -150,6 +198,16 @@ export async function resolveClaimBranch(
   branch?: string,
 ): Promise<string> {
   if (branch) return branch;
+  const existing = await findClaimBranches(owner, name, number);
+  if (existing.length === 1) return existing[0];
+  if (existing.length > 1) {
+    throw new ClaimAmbiguousError(
+      `Issue #${number} has ${existing.length} lock refs on the remote ` +
+        `(${existing.join(", ")}) — naming one is a decision this tool must not guess. ` +
+        "Re-run with `branch` set to the one you mean.",
+      existing,
+    );
+  }
   const issue = await ghRequest<IssueSummary>(`/repos/${owner}/${name}/issues/${number}`);
   return claimBranchName(number, issue.title ?? "");
 }

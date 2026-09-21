@@ -13,6 +13,7 @@ import {
 import { setIssueStatus } from "../issue-status.js";
 import {
   CLAIM_BRANCH_PREFIX,
+  ClaimAmbiguousError,
   claimHolder,
   defaultBranch,
   deleteClaimLock,
@@ -87,14 +88,20 @@ async function closedByCommit(
         "into the default branch and not in a merged PR) unless `force` is set, so a live claim on " +
         "another machine cannot be dropped by accident. Also returns an OPEN issue to " +
         "`status:ready` — a closed one has its status cleared instead, because done is the absence " +
-        "of a status — and unassigns the authenticated user (best-effort, reported via `_warnings`).",
+        "of a status — and unassigns the authenticated user (best-effort, reported via `_warnings`). " +
+        "The lock is found by reading the `issue-<N>-*` refs that exist, not by re-deriving a slug " +
+        "from the issue's current title, so a batch-named lock or one whose issue was retitled is " +
+        "still reachable; pass `branch` when several refs exist for the issue.",
       inputSchema: {
         repo: repoParam,
         number: z.number().int().positive().describe("Issue number whose claim is released."),
         branch: z
           .string()
           .optional()
-          .describe("Override the derived lock branch name (default `issue-<N>-<title-slug>`)."),
+          .describe(
+            "The lock branch to release. Defaults to whichever `issue-<N>-*` ref exists on the " +
+              "remote; required only when several do.",
+          ),
         force: z
           .boolean()
           .default(false)
@@ -104,7 +111,21 @@ async function closedByCommit(
     async ({ repo, number, branch, force }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const target = await resolveClaimBranch(owner, name, number, branch);
+        let target: string;
+        try {
+          target = await resolveClaimBranch(owner, name, number, branch);
+        } catch (err) {
+          if (err instanceof ClaimAmbiguousError) {
+            return structuredError({
+              released: false,
+              reason: "ambiguous-lock",
+              issue: number,
+              branches: err.branches,
+              message: err.message,
+            });
+          }
+          throw err;
+        }
         const base = await defaultBranch(owner, name);
 
         let comparison: CompareResponse;
