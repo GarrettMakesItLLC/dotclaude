@@ -123,6 +123,52 @@ run '{"version":1,"jobs":[{"name":"a","commands":["true"]}]}' --manifest "$TMP/n
 [ "$RC" = 2 ] && ok "a missing manifest exits 2 and says where the schema is" || bad "missing manifest: rc=$RC"
 grep -q 'ci-replica-manifest' <<<"$OUT" && ok "and points at the schema doc" || bad "no pointer: $OUT"
 
+echo "ci-replica: a job that changes the tree the next job measures"
+# Every job runs against ONE working tree in sequence, so an undeclared write
+# silently changes what every later job reads. CI cannot see this class at all:
+# it gives each job its own checkout.
+( cd "$ROOT" && echo base > tracked.txt && git add -A \
+  && git -c user.email=t@t -c user.name=t commit -qm fixture )
+
+run '{"version":1,"jobs":[
+  {"name":"clean","commands":["true"]},
+  {"name":"dirties","commands":["echo changed > tracked.txt"]}
+]}'
+[ "$RC" = 1 ] && ok "an undeclared write fails the run" || bad "expected rc=1, got $RC: $OUT"
+grep -q 'tree-guard' <<<"$OUT"  && ok "and says tree-guard" || bad "no tree-guard row: $OUT"
+grep -q 'tracked.txt' <<<"$OUT" && ok "and names the file it changed" || bad "file not named: $OUT"
+grep -q 'PASS.*clean' <<<"$OUT" && ok "the job before it still reads PASS" || bad "clean job lost: $OUT"
+( cd "$ROOT" && git checkout -q -- tracked.txt )
+
+run '{"version":1,"jobs":[
+  {"name":"declared","commands":["echo changed > tracked.txt"],"mutatesTree":["tracked.txt"]}
+]}'
+[ "$RC" = 0 ] && ok "a DECLARED write passes" || bad "declared write rejected: $OUT"
+( cd "$ROOT" && git checkout -q -- tracked.txt )
+
+# A new directory: `git status --porcelain` collapses it to `gen/` unless
+# -uall is passed, and then no file-level pattern can ever match it.
+run '{"version":1,"jobs":[
+  {"name":"newdir","commands":["mkdir -p gen && echo x > gen/a.generated.ts"],"mutatesTree":["gen/*.generated.ts"]}
+]}'
+[ "$RC" = 0 ] && ok "a declared file inside a NEW directory passes" || bad "new-dir glob not matched: $OUT"
+( cd "$ROOT" && rm -rf gen )
+
+run '{"version":1,"jobs":[
+  {"name":"red-and-dirty","commands":["echo changed > tracked.txt; exit 3"]}
+]}'
+grep -q 'tree-guard' <<<"$OUT" && ok "a FAILING job is still checked for dirt" || bad "guard skipped on failure: $OUT"
+( cd "$ROOT" && git checkout -q -- tracked.txt )
+
+run '{"version":1,"jobs":[
+  {"name":"dirties","commands":["echo changed > tracked.txt"]}
+]}' --no-tree-guard
+[ "$RC" = 0 ] && ok "--no-tree-guard turns it off" || bad "opt-out ignored: $OUT"
+( cd "$ROOT" && git checkout -q -- tracked.txt )
+
+run '{"version":1,"jobs":[{"name":"bad","commands":["true"],"mutatesTree":"tracked.txt"}]}'
+[ "$RC" = 2 ] && ok "a non-array mutatesTree is refused" || bad "expected rc=2, got $RC: $OUT"
+
 echo "ci-replica: the shipped example manifest is valid"
 EXAMPLE="$(cd "$HERE/.." && pwd)/skills/operating-a-fleet/references/ci-replica.example.json"
 if [ -f "$EXAMPLE" ]; then
