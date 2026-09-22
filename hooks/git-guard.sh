@@ -235,8 +235,14 @@ if [ -n "$checkout_args" ]; then
     rest=""
     if printf '%s' "$line" | grep -Eq '^[[:space:]]*--[[:space:]]+'; then
       rest="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*--[[:space:]]+//')"
-    elif printf '%s' "$line" | grep -Eq '^[[:space:]]*HEAD[[:space:]]+--[[:space:]]+'; then
-      rest="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*HEAD[[:space:]]+--[[:space:]]+//')"
+    elif printf '%s' "$line" | grep -Eq '^[[:space:]]*(HEAD|@)(~0|\^0)?[[:space:]]+--[[:space:]]+'; then
+      # Every spelling that RESOLVES to HEAD, not just the word: `@` is its
+      # documented synonym and `HEAD~0`/`HEAD^0`/`@~0`/`@^0` are the same
+      # commit. The discriminator is what the ref resolves to, and a textual
+      # match on `HEAD` alone let three spellings of it through while blocking
+      # the fourth — `git checkout HEAD~0 -- <path>` discards exactly as much
+      # as `git checkout HEAD -- <path>` (#383).
+      rest="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*(HEAD|@)(~0|\^0)?[[:space:]]+--[[:space:]]+//')"
     fi
     [ -n "$rest" ] && discard_paths="$discard_paths $rest"
   done <<EOF
@@ -264,7 +270,7 @@ if [ -n "$discard_paths_trimmed" ]; then
   else
     for p in $discard_paths; do
       if [ -n "$(git status --porcelain -- "$p" 2>/dev/null)" ]; then
-        block "git checkout/restore would discard UNCOMMITTED changes in '$p' — silently, with no warning or diff. Commit first (git reset --soft HEAD~1 undoes it), or restore a REAL historical defect with a ref-scoped form instead: git checkout <sha-or-origin/trunk> -- $p. Genuinely deliberate? cp $p $p.bak && mv it back afterward, or set GIT_GUARD_ALLOW_DISCARD=1 for this one command."
+        block "git checkout/restore would discard UNCOMMITTED changes in '$p' — silently, with no warning or diff. Commit first (git reset --soft HEAD~1 undoes it), or restore a REAL historical defect with a ref-scoped form instead: git checkout <sha-or-origin/trunk> -- $p (a ref that is NOT HEAD — HEAD, @ and HEAD~0 all resolve to the commit you are already on, so they discard your uncommitted work rather than fetching an older version of it). Genuinely deliberate? cp $p $p.bak && mv it back afterward, or set GIT_GUARD_ALLOW_DISCARD=1 for this one command."
       fi
     done
   fi

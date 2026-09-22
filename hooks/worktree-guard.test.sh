@@ -9,6 +9,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GUARD="$HERE/worktree-guard.sh"
 fail=0
 
+# Failures go to a FILE, not a variable — five `( … )` subshells below set
+# `fail=1` where it is discarded on exit, and the `) || fail=1` after each one
+# only fires when the subshell's LAST command failed. Same defect as
+# git-guard.test.sh carried (#383): a failing case printed FAIL and the suite
+# still exited 0 saying "all cases passed".
+FAIL_MARKER="$(mktemp)"
+trap 'rm -f "$FAIL_MARKER"' EXIT
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
@@ -24,6 +32,8 @@ print(json.dumps({"tool_name":sys.argv[1],"tool_input":{sys.argv[2]:sys.argv[3]}
   if [ "$got" != "$want" ]; then
     echo "FAIL: want $want, got $got for $tool $key=$path off='$off'"
     fail=1
+  echo x >> "$FAIL_MARKER"
+    echo x >> "$FAIL_MARKER"
   fi
 }
 
@@ -42,6 +52,7 @@ print(json.dumps({"tool_name":"Bash","tool_input":{"command":"echo hello"}}))
 if [ "$broken_got" != "2" ]; then
   echo "FAIL: want 2, got $broken_got for a BROKEN extractor (must fail closed, #319)"
   fail=1
+  echo x >> "$FAIL_MARKER"
 fi
 # And the same input through the real guard is allowed, so the case above is
 # measuring the breakage rather than the command.
@@ -52,6 +63,7 @@ print(json.dumps({"tool_name":"Bash","tool_input":{"command":"echo hello"}}))
 if [ "$healthy_got" != "0" ]; then
   echo "FAIL: want 0, got $healthy_got for 'echo hello' through a healthy guard"
   fail=1
+  echo x >> "$FAIL_MARKER"
 fi
 
 # --- convention repo: .worktrees/ gitignored, one commit, one linked worktree
@@ -331,6 +343,7 @@ if ! printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$HERE/../CLA
      | "$TMP/hooks-link/worktree-guard.sh" >/dev/null 2>&1; then
   echo "FAIL: config-repo exemption did not fire through a symlinked hooks dir"
   fail=1
+  echo x >> "$FAIL_MARKER"
 fi
 
 # --- NetWorthy#223: a Bash command that merely REFERENCES a credential-shaped
@@ -386,8 +399,12 @@ check 0 Bash command "echo 'ln -s x node_modules is a bad idea'"
 # A real copy is a real install, and stays allowed.
 check 0 Bash command "cp -r /a/b/node_modules /tmp/node_modules"
 
+if [ -s "$FAIL_MARKER" ]; then
+  echo "worktree-guard: $(wc -l < "$FAIL_MARKER" | tr -d ' ') case(s) FAILED"
+  fail=1
+fi
+
 if [ "$fail" = 0 ]; then
-  
-echo "worktree-guard: all cases passed"
+  echo "worktree-guard: all cases passed"
 fi
 exit "$fail"
