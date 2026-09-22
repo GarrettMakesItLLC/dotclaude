@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   errorResult,
   getViewerLogin,
+  ghPaginate,
   ghRequest,
   jsonText,
   listLimit,
@@ -50,6 +51,33 @@ interface CommitResponse {
 }
 
 export function registerClaimTools(server: McpServer): void {
+/**
+ * The SHA of the commit that closed this issue, when one did.
+ *
+ * `closed` events carry `commit_id` only when a commit message's closing
+ * keyword did the closing — which means the commit is on the default branch.
+ * Returns `undefined` for an open issue, a hand-closed one, or when the
+ * timeline cannot be read (unreadable is never treated as evidence).
+ */
+async function closedByCommit(
+  owner: string,
+  name: string,
+  issue: number,
+): Promise<string | undefined> {
+  try {
+    const events = await ghPaginate<{ event: string; commit_id?: string | null }>(
+      `/repos/${owner}/${name}/issues/${issue}/timeline`,
+      { limit: 300 },
+    );
+    const closed = events.filter(
+      (e: { event: string; commit_id?: string | null }) => e.event === "closed" && e.commit_id,
+    );
+    return closed.length > 0 ? (closed[closed.length - 1]!.commit_id ?? undefined) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
   server.registerTool(
     "claim_release",
     {
@@ -124,7 +152,24 @@ export function registerClaimTools(server: McpServer): void {
 
         if (comparison.ahead_by > 0 && !force) {
           const merged = pulls.find((p) => p.merged_at);
-          if (!merged) {
+          // A THIRD way commits can have landed, which the two tests above
+          // both miss. In degraded mode (`operating-a-fleet`) a wave stacks
+          // its batch PRs into one integration branch, merges that, and closes
+          // the batch PRs UNMERGED. So every per-issue lock branch is ahead of
+          // the trunk with commits that are in no merged PR — while the work
+          // itself is in the trunk under a different squash SHA.
+          //
+          // The signal the wave leaves behind is the issue's own closing
+          // event: GitHub records `commit_id` on the `closed` event when a
+          // commit's `Closes #N` closed it, and that commit is on the default
+          // branch by construction. So a CLOSED issue closed BY a commit is
+          // evidence the work landed, whatever the branch's own SHAs say.
+          //
+          // Without this, a wave's locks can only be cleared with `force`, and
+          // using force dozens of times in a row is how it stops meaning
+          // anything on the day it would have saved real unpushed work (#382).
+          const relanded = !merged ? await closedByCommit(owner, name, number) : undefined;
+          if (!merged && !relanded) {
             return structuredError({
               released: false,
               reason: "unmerged-commits",
