@@ -57,7 +57,27 @@ fi
 command -v python3 >/dev/null 2>&1 || die "python3 is required to read the manifest"
 
 PLAN="$(mktemp -d)"
-trap 'rm -rf "$PLAN"' EXIT
+
+# Paths moved aside for a `withoutFiles` job, as `original<TAB>stashed` lines.
+# Restored before the plan directory is removed — an aborted run that leaves a
+# repo's `.env.local` renamed is worse than the problem the field solves, so
+# the trap covers INT and TERM as well as EXIT (#391).
+WITHOUT_ACTIVE="$PLAN/without-active"
+: > "$WITHOUT_ACTIVE"
+restore_without() {
+  [ -s "$WITHOUT_ACTIVE" ] || return 0
+  local src stashed
+  while IFS="	" read -r src stashed; do
+    [ -n "$src" ] || continue
+    [ -e "$stashed" ] || continue
+    mkdir -p "$(dirname "$src")"
+    mv -f "$stashed" "$src"
+  done < "$WITHOUT_ACTIVE"
+  : > "$WITHOUT_ACTIVE"
+}
+trap 'restore_without; rm -rf "$PLAN"' EXIT
+trap 'restore_without; rm -rf "$PLAN"; exit 130' INT
+trap 'restore_without; rm -rf "$PLAN"; exit 143' TERM
 
 # Expand the manifest into one directory per job: .meta (key=value), .cmds (one
 # command per line), .env (KEY=VALUE), .unset (one name per line). Passing the
@@ -140,6 +160,24 @@ for i, job in enumerate(jobs):
     ):
         bail(f"job {name}: `mutatesTree` must be an array of non-empty single-line paths")
 
+    # `withoutFiles`: paths that MUST be absent while this job runs. Two jobs
+    # in MuscleBuddy's manifest carried the same instruction as prose — move
+    # `apps/web/.env.local` aside, run, put it back — for two different reasons
+    # (an authenticated axe scan inheriting a live Supabase session; the
+    # ambient-env guard failing on VITE_API_URL disagreement). Neither was
+    # enforced, and a validator who forgot got a failure pointing somewhere
+    # else entirely (#391).
+    without = job.get("withoutFiles") or []
+    if not isinstance(without, list):
+        bail(f"job {name}: `withoutFiles` must be an array")
+    for x in without:
+        if not isinstance(x, str) or not x.strip() or "\n" in x:
+            bail(f"job {name}: `withoutFiles` entries must be non-empty single-line paths")
+        if os.path.isabs(x):
+            bail(f"job {name}: withoutFiles {x!r} must be relative to the repo root")
+        if os.path.normpath(x).startswith(".."):
+            bail(f"job {name}: withoutFiles {x!r} escapes the repo root")
+
     job_env = job.get("env") or {}
     job_unset = job.get("unset") or []
     if not isinstance(job_env, dict):
@@ -159,6 +197,8 @@ for i, job in enumerate(jobs):
         fh.write(f"budget={budget}\n")
     with open(os.path.join(d, "mutates"), "w") as fh:
         fh.write("".join(x + "\n" for x in mutates))
+    with open(os.path.join(d, "without"), "w") as fh:
+        fh.write("".join(x + "\n" for x in without))
     with open(os.path.join(d, "cmds"), "w") as fh:
         fh.write("".join(c + "\n" for c in cmds))
     merged = dict(global_env)
@@ -267,6 +307,20 @@ while IFS="	" read -r idx name; do
     tree_before=$(cd "$ROOT" && git status --porcelain -uall 2>/dev/null || true)
   fi
 
+  # Move `withoutFiles` aside for the duration of this job only.
+  stash_n=0
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    src="$ROOT/$rel"
+    [ -e "$src" ] || continue
+    stash_n=$(( stash_n + 1 ))
+    stashed="$PLAN/without-stash/$idx.$stash_n"
+    mkdir -p "$(dirname "$stashed")"
+    mv "$src" "$stashed" || die "cannot move $rel aside for job $name"
+    printf '%s\t%s\n' "$src" "$stashed" >> "$WITHOUT_ACTIVE"
+    echo "### withoutFiles: moved $rel aside for this job" >> "$log"
+  done < "$d/without"
+
   started=$(date +%s)
   rc=0
   failed_cmd=""
@@ -285,6 +339,10 @@ while IFS="	" read -r idx name; do
     if [ "$rc" -ne 0 ]; then failed_cmd="$cmd"; break; fi
   done < "$d/cmds"
   elapsed=$(( $(date +%s) - started ))
+
+  # Before the tree check below, so a moved-aside file never reads as the job
+  # having deleted it.
+  restore_without
 
   # Checked after a FAILING job too: the first red job would otherwise hide the
   # dirt it left for the next one, and a timed-out or half-finished command is
