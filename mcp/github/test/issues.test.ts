@@ -507,6 +507,43 @@ describe("milestone_ensure", () => {
     const ms = JSON.parse(res.content[0].text) as { number: number };
     expect(ms.number).toBe(5);
   });
+
+  it("refuses to CREATE an all-digit title, naming the milestone with that number (#384)", async () => {
+    // The failure this catches is silent in both directions: the caller gets a
+    // success with a milestone attached, and `missing-milestone` passes the
+    // issue because it HAS one. MuscleBuddy ended up with a milestone titled
+    // "10" holding two live production issues.
+    fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+      if (init.method === "GET" && url.includes("/milestones")) {
+        return makeResponse({
+          status: 200,
+          body: [{ number: 10, title: "Launch 1.0 — Beta Exit" }],
+        });
+      }
+      return makeResponse({ status: 500, body: { message: "should not create" } });
+    });
+    const handler = await getIssueHandler("milestone_ensure");
+    const res = await handler({ repo: "octo/repo", title: "10" });
+    expect(res.isError).toBeTruthy();
+    // The message has to carry the answer, not just the complaint.
+    expect(res.content[0].text).toContain("Launch 1.0 — Beta Exit");
+  });
+
+  it("still MATCHES an existing all-digit title, so the refusal is create-only (#384)", async () => {
+    // A repo that genuinely names a milestone "2026" must keep working — the
+    // guard is about creating junk, not about rejecting digits.
+    fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+      if (init.method === "GET" && url.includes("/milestones")) {
+        return makeResponse({ status: 200, body: [{ number: 7, title: "2026" }] });
+      }
+      return makeResponse({ status: 500, body: { message: "should not create" } });
+    });
+    const handler = await getIssueHandler("milestone_ensure");
+    const res = await handler({ repo: "octo/repo", title: "2026" });
+    expect(res.isError).toBeFalsy();
+    const ms = JSON.parse(res.content[0].text) as { number: number };
+    expect(ms.number).toBe(7);
+  });
 });
 
 describe("milestone_update", () => {
