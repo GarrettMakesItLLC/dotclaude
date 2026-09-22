@@ -57,7 +57,14 @@ CACHE_DIR="${FLEET_MODE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/dotclaude/fle
 SOFT_TTL="${FLEET_MODE_SOFT_TTL:-1800}"     # serve from cache, refresh in background
 HARD_TTL="${FLEET_MODE_HARD_TTL:-14400}"    # too old to serve: re-probe in the foreground
 PROBE_TIMEOUT="${FLEET_MODE_PROBE_TIMEOUT:-8}"
-RUNS_PER_PAGE="${FLEET_MODE_RUNS_PER_PAGE:-20}"
+# Fetched wide, then windowed by EVENT below. A repo that deploys often fills
+# its feed with `deployment_status` and `schedule` runs, which conclude
+# `skipped` and say nothing about whether a PR can be gated — on MuscleBuddy
+# they pushed every gating run past a 20-run window and the probe answered
+# UNKNOWN about a question the data answered (#381).
+RUNS_PER_PAGE="${FLEET_MODE_RUNS_PER_PAGE:-100}"
+# How many GATING runs to classify once the feed is filtered.
+RUNS_WINDOW="${FLEET_MODE_RUNS_WINDOW:-20}"
 
 # A run that concluded `failure` within this many seconds of starting, having
 # executed no steps, is not a test failure. It is the runner never being handed
@@ -159,12 +166,13 @@ has_workflows() {
 classify() {
   local runs_json="$1" workflows="$2"
   FLEET_SLUG="$slug" FLEET_WORKFLOWS="$workflows" \
-  FLEET_INSTANT="$INSTANT_SECONDS" python3 -c '
+  FLEET_INSTANT="$INSTANT_SECONDS" FLEET_WINDOW="$RUNS_WINDOW" python3 -c '
 import json, os, sys, time
 from datetime import datetime
 
 slug = os.environ["FLEET_SLUG"]
 instant = float(os.environ["FLEET_INSTANT"])
+window = int(os.environ.get("FLEET_WINDOW") or 20)
 has_wf = os.environ["FLEET_WORKFLOWS"] == "1"
 
 def ts(s):
@@ -196,8 +204,19 @@ if not runs:
         emit("unknown", "workflows are declared but no run has ever been recorded")
     emit("absent", "this repo declares no workflows and has no Actions runs")
 
+# Only the events that GATE A MERGE carry information about whether CI can be
+# the gate. `deployment_status`, `schedule`, `dynamic` and friends run on their
+# own cadence and conclude `skipped` constantly; counting them is how a feed
+# full of deploys hides a refusal (#381).
+GATING_EVENTS = {"push", "pull_request", "merge_group", "workflow_dispatch"}
+gating = [r for r in runs if r.get("event") in GATING_EVENTS]
+# Fall back to the whole feed rather than answering "unknown" about a repo
+# whose CI genuinely only runs on a schedule — a worse answer than the one the
+# unfiltered feed can give.
+windowed = (gating or runs)[:window]
+
 parsed = []
-for r in runs:
+for r in windowed:
     start = ts(r.get("run_started_at") or r.get("created_at"))
     end = ts(r.get("updated_at"))
     parsed.append({
