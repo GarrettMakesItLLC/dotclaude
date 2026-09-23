@@ -37,6 +37,7 @@ The method is here. The realm checklists are in `references/` — load only the 
 | Domain-science validity (formulas, thresholds, cited sources) | `references/domain-science-validity.md` |
 | Observability & cost | `references/observability-cost.md` |
 | Product & spec coherence (tiers, flags, invariants) | `references/product-spec-coherence.md` |
+| Business-logic claim fulfilment (claims × situations, end to end) | `references/business-logic-claims.md` |
 | i18n, units & time | `references/i18n-units-time.md` |
 | API contract quality | `references/api-contract-quality.md` |
 
@@ -104,6 +105,8 @@ For **realm**, **launch-readiness** and **full-spectrum** depth, fan out with th
 **File the epic shell before dispatching, and hand every auditor its number.** The epic body is the live dedupe list — auditors that read it deduped; auditors handed a skip-list in a scratchpad file re-found wave-1 findings anyway. On a second wave, the brief says `skip #A–#B` and points at the epic again.
 
 **Long reports do not survive the return channel.** A final result over a few thousand characters comes back as `[result truncated — ask the agent for the rest via SendMessage]`. The brief mandates delivery: write the full report to a named file in the lead's scratchpad (or the repo's audit directory) and message the path, or send it via `SendMessage` in numbered parts of ≤6,000 characters — and return a one-paragraph summary only.
+
+**An auditor that reads production gets exactly one query helper, written by the lead.** Use the direct (session) database URL, with each query wrapped in `BEGIN READ ONLY; …; ROLLBACK`. Left to themselves, auditors write their own helpers, and the "safe" one they reach for is a session-level `default_transaction_read_only` on the transaction-pooler URL. A pooler shares backends across clients, so that setting leaks into the production app's own connections and fails its writes. Auditors never write a connection string to a file.
 
 **A fan-out is resumable or it is re-run from scratch.** Auditors share one failure domain (the account limit, a harness restart), and they all stop in the same minute. Persist each report to durable storage as it arrives, and keep one `STATE.md` per audit with a row per realm — `complete` / `partial` / `missing`, plus merge decisions — so an interruption costs a re-dispatch of the missing rows with the skip range, not the whole batch. A second independent pass over a realm often finds the deeper class of defect; both blockers in one audit came from wave two.
 
