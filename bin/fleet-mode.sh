@@ -234,24 +234,34 @@ def is_instant_fail(p):
 instant_fails = [p for p in parsed if is_instant_fail(p)]
 names = {p["name"] for p in instant_fails}
 
+def is_executing(p):
+    return (p["conclusion"] == "success"
+            or p["status"] in ("in_progress", "queued")
+            or (p["dur"] is not None and p["dur"] > 60))
+
 # A refusal, not a defect. Three signals together, because each alone has an
 # innocent explanation: many instant failures (one flaky fast job does not
 # repeat), across more than one workflow (a repo does not break every workflow
-# at once), and the most recent run is one of them (otherwise it is history).
-if len(instant_fails) >= 3 and len(names) >= 2 and is_instant_fail(parsed[0]):
-    others = [n for n in sorted(names) if n != parsed[0]["name"]][:3]
+# at once), and the refusal is CURRENT (otherwise it is history). Current means
+# nothing among the last few runs executed and at least one of them was
+# refused. It is not "the newest run is instant": a refused many-job workflow
+# can take tens of seconds to record its jobs as refused, and that one slow
+# record used to veto nineteen corroborating ones (#398).
+recent = parsed[:5]
+if (len(instant_fails) >= 3 and len(names) >= 2
+        and not any(is_executing(p) for p in recent)
+        and any(is_instant_fail(p) for p in recent)):
+    newest = next(p for p in recent if is_instant_fail(p))
+    others = [n for n in sorted(names) if n != newest["name"]][:3]
     emit("refused",
          "Actions is refusing jobs — %d of the last %d runs failed within %ds of starting, "
          "across %d workflows" % (len(instant_fails), len(parsed), int(instant), len(names)),
-         "most recent: %s%s" % (parsed[0]["name"],
+         "most recent: %s%s" % (newest["name"],
                                 "; also " + ", ".join(others) if others else ""))
 
 # Actions is demonstrably executing work if anything succeeded, is still
 # running, or ran long enough to have done something.
-executing = [p for p in parsed
-             if p["conclusion"] == "success"
-             or p["status"] in ("in_progress", "queued")
-             or (p["dur"] is not None and p["dur"] > 60)]
+executing = [p for p in parsed if is_executing(p)]
 if executing:
     emit("healthy", "Actions is running jobs normally",
          "%d of the last %d runs executed" % (len(executing), len(parsed)))
