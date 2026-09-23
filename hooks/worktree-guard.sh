@@ -363,17 +363,47 @@ if tool == "Bash":
         parts.append("".join(buf))
         return [p for p in parts if p.strip()]
 
+    # Literal assignments made earlier in the same command (`W=/abs/wt`, then
+    # `cd "$W"` on a later line) are as static as a literal `cd /abs/wt`, and
+    # a script that names its worktree once and `cd`s into it is the shape the
+    # block message itself recommends (#401). Only a value with no expansion
+    # in it is recorded; anything else forgets the name, so a `W=$(pwd)`
+    # reassignment can never leave a stale literal behind.
+    assigned = {}
+    assign_re = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(\S*)$")
+
+    def note_assignment(seg):
+        m = assign_re.match(seg.strip())
+        if not m:
+            return False
+        name, val = m.group(1), m.group(2).strip(QUOTES)
+        if val and not any(c in val for c in "$`"):
+            assigned[name] = val
+        else:
+            assigned.pop(name, None)
+        return True
+
+    def cd_target(raw):
+        """The directory a `cd <raw>` enters, or None when it is not static."""
+        t = raw.strip(QUOTES)
+        m = re.fullmatch(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?(/.*)?", t)
+        if m and m.group(1) in assigned:
+            t = assigned[m.group(1)] + (m.group(2) or "")
+        if not t or t == "-" or any(c in t for c in "$`"):
+            return None
+        return t
+
     segs_ordered = split_unquoted(blanked)
     per_seg = []  # (base_or_None, segment_text)
     for seg in segs_ordered:
+        if note_assignment(seg):
+            continue
         toks = seg.split()
         if toks and toks[0] == "cd":
-            if len(toks) == 2 and not toks[1].startswith("$") and toks[1] != "-":
-                resolved = join(effective, toks[1].strip(QUOTES))
-                if resolved is not None:
-                    effective, have_base = resolved, True
-                else:
-                    have_base = False
+            target = cd_target(toks[1]) if len(toks) == 2 else None
+            resolved = join(effective, target) if target is not None else None
+            if resolved is not None:
+                effective, have_base = resolved, True
             else:
                 have_base = False
             continue
@@ -503,8 +533,9 @@ if tool == "Bash":
         # line-granular, best-effort, the same rule the segment loop above
         # applies per shell-separated segment.
         cd_m = re.match(r"\s*cd\s+(\S+)\s*(?:&&|;)", line)
-        if cd_m and not cd_m.group(1).startswith("$") and cd_m.group(1) != "-":
-            resolved = joined_walk(walk_effective, cd_m.group(1).strip(QUOTES), walk_have_base)
+        cd_t = cd_target(cd_m.group(1)) if cd_m else None
+        if cd_t is not None:
+            resolved = joined_walk(walk_effective, cd_t, walk_have_base)
             if resolved is not None:
                 walk_effective, walk_have_base = resolved, True
             else:
@@ -642,7 +673,7 @@ check_one() {
         # Matched against the raw payload, so the anchor allows any non-word
         # character before `cd` — the command sits inside JSON, where it is
         # preceded by a quote rather than by start-of-line.
-        if printf '%s' "$input" | grep -qE '(^|[^a-zA-Z0-9_/.-])cd +("?\$|`|-([ "\\]|$))'; then
+        if printf '%s' "$input" | grep -qE '(^|[^a-zA-Z0-9_/.-])cd +((\\?")?\$|`|-([ "\\]|$))'; then
           echo "Reason: '$file_path' is relative, and the \`cd\` before it is one this guard" >&2
           echo "  cannot resolve — a variable, \`cd -\`, or a bare \`cd\`. So the directory" >&2
           echo "  this write lands in is not knowable from the command text, and unknowable" >&2
