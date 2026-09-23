@@ -416,6 +416,18 @@ describe("claim_release", () => {
       expect(deleted).toBe(false);
     });
 
+    it("still refuses when the file list reaches the compare endpoint's truncation cap", async () => {
+      const files = Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}.ts`, status: "modified" }));
+      const same = Object.fromEntries(files.map((f) => [f.filename, "x"]));
+      const { out, deleted } = await releaseWithContent({
+        files,
+        targetContent: same,
+        baseContent: same,
+      });
+      expect(out.released).toBe(false);
+      expect(deleted).toBe(false);
+    });
+
     it("still refuses when the compare has no files to check (no evidence either way)", async () => {
       const { out, deleted } = await releaseWithContent({
         files: [],

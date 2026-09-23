@@ -136,6 +136,8 @@ async function fileContentAt(
  * "not proven landed" rather than "landed" — a false negative here just falls
  * through to requiring `force`, which is the safe direction to be wrong in.
  */
+const COMPARE_FILES_CAP = 300;
+
 async function contentAlreadyLanded(
   owner: string,
   name: string,
@@ -147,7 +149,10 @@ async function contentAlreadyLanded(
       `/repos/${owner}/${name}/compare/${base}...${target}`,
     );
     const files = comparison.files ?? [];
-    if (files.length === 0) return false;
+    // The compare endpoint lists at most COMPARE_FILES_CAP files and truncates
+    // silently, so a list that reaches the cap may be missing the one file
+    // that did not land.
+    if (files.length === 0 || files.length >= COMPARE_FILES_CAP) return false;
     for (const f of files) {
       if (f.status === "removed") {
         const onBase = await fileContentAt(owner, name, base, f.filename);
