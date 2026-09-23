@@ -72,6 +72,115 @@ describe("claimBranchName", () => {
   });
 });
 
+describe("claim_release resolves the lock ref that exists, not a re-derived slug", () => {
+  /**
+   * A ref is immutable and a title is not. A batch lock is named for the batch,
+   * and a retitle after the claim orphans the derived name with no event
+   * anywhere — both then report `not-held`, which reads as "already clean" and
+   * is the one answer that makes a caller stop looking (#397).
+   */
+  const releaseWith = async (refs: string[], args: Record<string, unknown> = {}) => {
+    let deletedRef: string | null = null;
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
+      if (init.method === "GET" && url.endsWith("/repos/octo/repo")) {
+        return makeResponse({ status: 200, body: { default_branch: "main" } });
+      }
+      if (init.method === "GET" && url.includes("/git/matching-refs/heads/issue-8297")) {
+        return makeResponse({
+          status: 200,
+          body: refs.map((r) => ({ ref: `refs/heads/${r}`, object: { sha: "abc" } })),
+        });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/8297")) {
+        // The CURRENT title, which no longer matches the ref that exists.
+        return makeResponse({
+          status: 200,
+          body: { number: 8297, title: "ci a11y: an axe timeout is reported as a pass", state: "open", labels: [] },
+        });
+      }
+      if (init.method === "GET" && url.includes("/compare/")) {
+        // `compare` is what tells the tool the ref exists, so it must 404 for a
+        // name nothing on the remote carries — otherwise the derived-slug
+        // fallback looks identical to a real hit.
+        const target = decodeURIComponent(url.split("main...")[1] ?? "");
+        const known = [...refs, ...(args.branch ? [args.branch as string] : [])];
+        return known.includes(target)
+          ? makeResponse({ status: 200, body: { ahead_by: 0, behind_by: 2, status: "behind" } })
+          : makeResponse({ status: 404, body: { message: "Not Found" } });
+      }
+      if (init.method === "GET" && url.includes("/pulls")) return makeResponse({ status: 200, body: [] });
+      if (init.method === "DELETE" && url.includes("/git/refs/heads/")) {
+        deletedRef = url.split("/git/refs/heads/")[1];
+        return makeResponse({ status: 204 });
+      }
+      if (init.method === "DELETE") return makeResponse({ status: 204 });
+      if (init.method === "PUT" && url.endsWith("/labels")) {
+        const sent = (JSON.parse(init.body ?? "{}") as { labels: string[] }).labels;
+        return makeResponse({ status: 200, body: sent.map((n) => ({ name: n })) });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getClaimHandler("claim_release");
+    const res = await handler({ repo: "octo/repo", number: 8297, ...args });
+    return { res, out: JSON.parse(res.content[0].text) as Record<string, unknown>, deletedRef };
+  };
+
+  it("releases a lock whose name the issue's current title would never derive", async () => {
+    const { out, deletedRef } = await releaseWith(["issue-8297-a11y-verdict"]);
+    expect(out.released).toBe(true);
+    expect(out.branch).toBe("issue-8297-a11y-verdict");
+    expect(deletedRef).toBe("issue-8297-a11y-verdict");
+  });
+
+  it("names every candidate rather than guessing when an issue has several locks", async () => {
+    const { res, out, deletedRef } = await releaseWith([
+      "issue-8297-a11y-verdict",
+      "issue-8297-moderation-batch",
+    ]);
+    expect(res.isError).toBe(true);
+    expect(out.reason).toBe("ambiguous-lock");
+    expect(out.branches).toEqual(["issue-8297-a11y-verdict", "issue-8297-moderation-batch"]);
+    expect(deletedRef).toBeNull();
+  });
+
+  it("still reports not-held when no ref exists at all", async () => {
+    const { out, deletedRef } = await releaseWith([]);
+    expect(out.released).toBe(false);
+    expect(out.reason).toBe("not-held");
+    expect(deletedRef).toBeNull();
+  });
+
+  it("honours an explicit branch without consulting the refs", async () => {
+    const { out, deletedRef } = await releaseWith(["issue-8297-a11y-verdict"], {
+      branch: "issue-8297-moderation-batch",
+    });
+    expect(out.released).toBe(true);
+    expect(deletedRef).toBe("issue-8297-moderation-batch");
+  });
+});
+
+describe("findClaimBranches", () => {
+  it("selects by the parsed issue number, so a textual prefix match is not enough", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "x" } });
+      if (url.includes("/git/matching-refs/heads/issue-39")) {
+        return makeResponse({
+          status: 200,
+          body: [
+            { ref: "refs/heads/issue-39-real", object: { sha: "a" } },
+            { ref: "refs/heads/issue-397-other", object: { sha: "b" } },
+            { ref: "refs/heads/issue-390", object: { sha: "c" } },
+          ],
+        });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const { findClaimBranches } = await import("../src/claim-lock.js");
+    expect(await findClaimBranches("octo", "repo", 39)).toEqual(["issue-39-real"]);
+  });
+});
+
 describe("claim_release", () => {
   /**
    * Deleting a branch that heads an OPEN pull request closes that PR. `force`

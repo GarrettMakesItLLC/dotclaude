@@ -94,6 +94,13 @@ Every issue that isn't a standalone one-off answers two questions, and they are 
 
 An issue with a milestone and no parent is orphaned work; an issue with a parent and no milestone is unscheduled work. Both are how a backlog becomes unreadable.
 
+**`status:ready` counts indexes, so never size a backlog from one.** `ready` means scoped and startable, an index is explicitly not startable, and the label cannot tell them apart — NetWorthy reported 20 ready issues and had one ready leaf, which is how an agent got dispatched at an empty backlog. **Pass `pickable: true` to `issue_list`** whenever the answer feeds a dispatch or a count rather than a census; it drops indexes and makes `limit` count leaves. Every row also carries `is_index` when it is one, and the value says which kind:
+
+- `"sub-issues"` — it has children. Claim one of those instead.
+- `"body-marker"` — a **childless epic**, whose body says it is never implemented directly. Nothing about it is mislabelled: it is scoped, unblocked and milestoned, so it is correctly `ready`, and it is still not work. There is nothing under it to claim either — decompose it into sub-issues first. Twelve of NetWorthy's sixteen roadmap epics were in exactly this state, indistinguishable from a leaf nobody had started.
+
+`issue_claim` refuses both, so the protocol catches what a count misses. A `status:backlog` label is **not** the answer and is recorded as rejected: it is deprecated, and backlog is already expressible as `ready` with no milestone. These epics have milestones — they are scheduled indexes, which is the thing the taxonomy had no name for.
+
 Close an epic when its children are closed — an **exhausted epic** left open reads as live work, and the next session re-derives its contents. Never file a child under a closed parent.
 
 Audit findings land on exactly this shape: the audit epic is the findings index, one child per finding, all on the dated milestone — see **running-an-audit**.
