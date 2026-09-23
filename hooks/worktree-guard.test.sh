@@ -310,6 +310,34 @@ EOF"
   check 0 Bash command "echo hi > $CONV/.worktrees/wt/notes.md"
   check 0 Bash command "cd $CONV/.worktrees/wt && echo hi > notes.md"
 
+  # Should ALLOW — the `cd` applies to every later line, not only its own
+  # `&&` chain (#402), and a literal assigned earlier in the same command is
+  # as static as the path itself (#401).
+  check 0 Bash command "cd $CONV/.worktrees/wt && cat >> notes.md <<'EOF'
+a > b
+EOF
+sed -i s/a/b/ other.md"
+  check 0 Bash command "cd $CONV/.worktrees/wt
+cp notes.md notes.bak"
+  check 0 Bash command "W=$CONV/.worktrees/wt
+cd \"\$W\"
+cp notes.md notes.bak"
+  check 0 Bash command "export W=$CONV/.worktrees; cd \${W}/wt && echo hi > notes.md"
+
+  # Should still BLOCK — a non-literal assignment is not static, and it must
+  # also forget an earlier literal under the same name.
+  check 2 Bash command "W=$CONV/.worktrees/wt; W=\$(pwd); cd \"\$W\" && echo hi > notes.md"
+
+  # The quoted-variable form gets the unresolvable-cd explanation, not the
+  # generic "never entered" one: in the JSON payload its quote is escaped.
+  msg=$(python3 -c 'import json; print(json.dumps({"tool_name":"Bash","tool_input":{"command":"cd \"$NOPE\" && echo hi > notes.md"}}))' \
+    | "$GUARD" 2>&1 >/dev/null)
+  case "$msg" in
+    *"cannot resolve"*) ;;
+    *) echo "FAIL: cd \"\$VAR\" did not get the unresolvable-cd message (#401)"
+       echo x >> "$FAIL_MARKER" ;;
+  esac
+
   # Should still BLOCK — an absolute main-tree target is judged on its own path,
   # not on the cwd it was issued from.
   check 2 Bash command "echo hi > $CONV/src/absolute.ts"

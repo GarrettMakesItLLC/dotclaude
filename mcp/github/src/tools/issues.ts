@@ -35,7 +35,15 @@ import {
   setProjectSingleSelect,
 } from "../project.js";
 import { setIssueStatus } from "../issue-status.js";
-import { labelNames, pick, slimComment, slimIssue, type RawIssue, type RawLabel } from "../slim.js";
+import {
+  indexReason,
+  labelNames,
+  pick,
+  slimComment,
+  slimIssue,
+  type RawIssue,
+  type RawLabel,
+} from "../slim.js";
 import {
   acquireClaimLock,
   claimBranchName,
@@ -50,6 +58,10 @@ interface IssueLike {
   number: number;
   // Present only on items that are actually pull requests.
   pull_request?: unknown;
+  // The list endpoint returns the full body and sub-issue summary, which is
+  // what lets `pickable` decide an index from a leaf without a second fetch.
+  body?: string | null;
+  sub_issues_summary?: { total?: number; completed?: number } | null;
 }
 
 async function resolveAssignees(assignees: string[]): Promise<string[]> {
@@ -98,7 +110,9 @@ function decodeHtmlEntities(text: string): string {
 }
 
 /**
- * Find a milestone by exact title, or create it. Returns the milestone number.
+ * Find a milestone by exact title, or create it. Returns the milestone number,
+ * and whether this call minted it — a caller that meant an existing milestone
+ * needs to be able to tell "filed under it" from "invented one" (#400).
  * Shared by the `milestone_ensure` tool and `issue_open`.
  */
 async function ensureMilestone(
@@ -107,14 +121,14 @@ async function ensureMilestone(
   title: string,
   description?: string,
   due_on?: string,
-): Promise<number> {
+): Promise<{ number: number; created: boolean }> {
   const normalizedTitle = decodeHtmlEntities(title);
   const existing = await ghPaginate<{ number: number; title: string }>(
     `/repos/${owner}/${name}/milestones`,
     { query: { state: "all" }, limit: 1000 },
   );
   const match = existing.find((m) => decodeHtmlEntities(m.title) === normalizedTitle);
-  if (match) return match.number;
+  if (match) return { number: match.number, created: false };
   // An all-digit title is almost always a milestone NUMBER passed where a
   // TITLE goes. Creating it succeeds, attaches the issue, and returns happily
   // — and the junk milestone is then indistinguishable from a real one to
@@ -139,7 +153,7 @@ async function ensureMilestone(
     `/repos/${owner}/${name}/milestones`,
     { method: "POST", body: { title: normalizedTitle, description, due_on } },
   );
-  return created.number;
+  return { number: created.number, created: true };
 }
 
 /**
@@ -190,7 +204,13 @@ export function registerIssueTools(server: McpServer): void {
     "issue_list",
     {
       description:
-        "List issues in a repo (up to `limit` issues, default 30, following pagination). Pull requests are filtered out.",
+        "List issues in a repo (up to `limit` issues, default 30, following pagination). Pull " +
+        "requests are filtered out.\n\n" +
+        "Each row carries `is_index` when the issue is an INDEX rather than pickable work — " +
+        "`\"sub-issues\"` when it has children, `\"body-marker\"` when its body says it is never " +
+        "implemented directly (a childless epic, which the first test cannot see). An index is " +
+        "not startable, so a `status:ready` count that includes them overstates the backlog. " +
+        "Pass `pickable: true` to drop them and have `limit` count real leaves.",
       inputSchema: {
         repo: repoParam,
         state: z.enum(["open", "closed", "all"]).default("open"),
@@ -198,6 +218,14 @@ export function registerIssueTools(server: McpServer): void {
           .array(z.string())
           .optional()
           .describe("Filter to issues having all of these labels."),
+        pickable: z
+          .boolean()
+          .optional()
+          .describe(
+            "Drop index issues (epics and childless roadmap placeholders), leaving only work " +
+              "that can actually be started. Use this whenever the answer feeds a dispatch or a " +
+              "backlog size, not a census.",
+          ),
         limit: z.number().int().positive().optional().describe("Max issues (<=1000, default 30)."),
         fields: z
           .array(z.string())
@@ -209,11 +237,15 @@ export function registerIssueTools(server: McpServer): void {
           ),
       },
     },
-    async ({ repo, state, labels, limit, fields }) => {
+    async ({ repo, state, labels, limit, pickable, fields }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
         // The /issues endpoint mixes in PRs, so filter them out and page until
         // we have `limit` real issues — otherwise PR-heavy repos return too few.
+        // `pickable` is applied in the same place for the same reason: a
+        // post-filter would let `limit` be spent on indexes and return fewer
+        // leaves than asked for, which is the undercount version of the bug
+        // this parameter exists to fix (#395).
         const issuesOnly = await ghPaginate<IssueLike>(
           `/repos/${owner}/${name}/issues`,
           {
@@ -222,7 +254,10 @@ export function registerIssueTools(server: McpServer): void {
               labels: labels && labels.length ? labels.join(",") : undefined,
             },
             limit,
-            filter: (item) => !("pull_request" in item) || !item.pull_request,
+            filter: (item) => {
+              if ("pull_request" in item && item.pull_request) return false;
+              return !pickable || indexReason(item) === null;
+            },
           },
         );
         return jsonText(issuesOnly.map((i) => pick(slimIssue(i), fields)));
@@ -679,6 +714,20 @@ export function registerIssueTools(server: McpServer): void {
             { open_sub_issues: openSubIssues, total_sub_issues: subTotal },
           );
         }
+        // A CHILDLESS epic passes the test above and is the harder half of
+        // #395: nothing about it is mislabelled — it is scoped, unblocked and
+        // milestoned, so it is correctly `status:ready` — and it is still not
+        // work. Twelve of NetWorthy's sixteen roadmap epics were in exactly
+        // this state, indistinguishable from a leaf nobody had started. The
+        // body is the only place that says so, and it says so verbatim.
+        if (indexReason(issue) === "body-marker") {
+          throw new ClaimEpicError(
+            `Issue #${number} is an index, not work — its body says it is never implemented ` +
+              "directly. It has no sub-issues filed yet, so there is nothing to claim under it " +
+              "either: decompose it into sub-issues first, then claim one of those.",
+            { open_sub_issues: 0, total_sub_issues: 0 },
+          );
+        }
         const target = branch ?? claimBranchName(number, issue.title ?? "");
         const lock = await acquireClaimLock(owner, name, target, number);
 
@@ -807,7 +856,8 @@ export function registerIssueTools(server: McpServer): void {
     "milestone_ensure",
     {
       description:
-        "Find a milestone by exact title, or create it. Returns the milestone number and title.",
+        "Find a milestone by exact title, or create it. Returns the milestone number, title, and " +
+          "`created` (true when this call minted it).",
       inputSchema: {
         repo: repoParam,
         title: z.string().describe("Milestone title (exact match)."),
@@ -818,8 +868,8 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, title, description, due_on }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const number = await ensureMilestone(owner, name, title, description, due_on);
-        return jsonText({ number, title });
+        const { number, created } = await ensureMilestone(owner, name, title, description, due_on);
+        return jsonText({ number, title, created });
       } catch (err) {
         return errorResult(err);
       }
@@ -1018,12 +1068,14 @@ export function registerIssueTools(server: McpServer): void {
 
         // The issue is already created at this point — enrichment failures below must not
         // hide that creation behind an errorResult, or a retry would create a duplicate.
+        let milestoneCreated = false;
         if (milestone) {
           try {
-            const milestoneNumber = await ensureMilestone(owner, name, milestone);
+            const ensured = await ensureMilestone(owner, name, milestone);
+            milestoneCreated = ensured.created;
             await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
               method: "PATCH",
-              body: { milestone: milestoneNumber },
+              body: { milestone: ensured.number },
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -1069,7 +1121,9 @@ export function registerIssueTools(server: McpServer): void {
         const final = await ghRequest<RawIssue>(
           `/repos/${owner}/${name}/issues/${number}`,
         );
-        const slim = slimIssue(final);
+        // `milestone_created` distinguishes "filed under an existing milestone" from
+        // "invented one" — a returned title alone reads as confirmation either way (#400).
+        const slim = { ...slimIssue(final), ...(milestoneCreated ? { milestone_created: true } : {}) };
         return jsonText(warnings.length ? { ...slim, _warnings: warnings } : slim);
       } catch (err) {
         return errorResult(err);

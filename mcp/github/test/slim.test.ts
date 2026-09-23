@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   actorLogins,
+  indexReason,
   labelNames,
   pick,
   slimBranch,
@@ -121,6 +122,8 @@ describe("slimIssue", () => {
       milestone: "v1",
       comments: 2,
       sub_issues: "1/4",
+      // Four children, so this fixture is a parent — an index, not work (#395).
+      is_index: "sub-issues",
       created_at: "2026-07-29T15:56:50Z",
       updated_at: "2026-07-29T15:56:50Z",
       html_url: "https://github.com/o/r/issues/55",
@@ -336,5 +339,58 @@ describe("pick", () => {
 
   it("silently drops an unrecognized field name instead of erroring", () => {
     expect(pick({ number: 1 }, ["number", "bogus"])).toEqual({ number: 1 });
+  });
+});
+
+describe("indexReason", () => {
+  it("names an issue with children a parent", () => {
+    expect(indexReason({ sub_issues_summary: { total: 5, completed: 2 } })).toBe("sub-issues");
+  });
+
+  it("names a childless epic by its body, which is the only thing that says so", () => {
+    // Verbatim from NetWorthy #25-#39 — twelve roadmap epics with no
+    // sub-issues filed, correctly `status:ready`, and not work (#395).
+    const body =
+      "RSU vesting schedules, ISO and NSO exercise modelling with AMT.\n\n" +
+      "Sub-issues index below. This epic is never implemented directly.";
+    expect(indexReason({ body })).toBe("body-marker");
+    expect(indexReason({ body, sub_issues_summary: { total: 0, completed: 0 } })).toBe(
+      "body-marker",
+    );
+  });
+
+  it("prefers the child count when an epic has both", () => {
+    // A parent has children to claim instead; a childless one has nothing yet.
+    // The caller needs to tell them apart, so the more actionable answer wins.
+    expect(
+      indexReason({
+        body: "This epic is never implemented directly.",
+        sub_issues_summary: { total: 3, completed: 0 },
+      }),
+    ).toBe("sub-issues");
+  });
+
+  it("calls an ordinary leaf issue work", () => {
+    expect(indexReason({ body: "Fix the thing.", sub_issues_summary: { total: 0 } })).toBeNull();
+    expect(indexReason({})).toBeNull();
+    expect(indexReason({ body: null })).toBeNull();
+  });
+
+  it("does not match prose that merely mentions implementing something", () => {
+    expect(indexReason({ body: "Implement this directly in the reducer." })).toBeNull();
+    expect(indexReason({ body: "This was never implemented." })).toBeNull();
+  });
+
+  it("is what slimIssue surfaces, so a LIST shows it without opening each body", () => {
+    const epic = slimIssue({
+      number: 25,
+      title: "Equity compensation",
+      state: "open",
+      body: "Sub-issues index below. This epic is never implemented directly.",
+    } as never);
+    expect(epic["is_index"]).toBe("body-marker");
+
+    const leaf = slimIssue({ number: 26, title: "Fix it", state: "open", body: "x" } as never);
+    expect(leaf).not.toHaveProperty("is_index");
   });
 });

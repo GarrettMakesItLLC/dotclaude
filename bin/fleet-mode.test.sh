@@ -74,6 +74,13 @@ elif kind == "buried-refusal":
         runs.append(run("Deployment status", "skipped", 1, 60 + i * 30, event="deployment_status"))
     for i in range(6):
         runs.append(run("workflow-%d" % (i % 3), "failure", 2, 3600 + i * 60))
+elif kind == "slow-newest-refusal":
+    # #398: 19 instant refusals across 19 workflows, and the single newest run
+    # is a refused many-job workflow whose record took 42s to close. That one
+    # duration must not veto the other nineteen.
+    runs.append(run("Scheduled lane staleness", "failure", 42, 30))
+    for i in range(19):
+        runs.append(run("workflow-%d" % i, "failure", 3, 60 + i * 60))
 elif kind == "schedule-only":
     # The fallback case: a repo whose CI genuinely only runs on a schedule.
     # Filtering to zero gating runs must not make it permanently UNKNOWN.
@@ -91,7 +98,7 @@ print(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
 '
 }
 
-for k in refused healthy one-flaky stale-history buried-refusal schedule-only empty garbage; do
+for k in refused healthy one-flaky stale-history buried-refusal slow-newest-refusal schedule-only empty garbage; do
   mkfixture "$k" > "$TMP/$k.json"
 done
 
@@ -134,6 +141,10 @@ fresh; marker -
 out="$(run_probe buried-refusal)"
 want "buried-refusal" "CI IS REFUSING JOBS" "$out"
 wantnot "buried-refusal" "UNKNOWN" "$out"
+
+out="$(run_probe slow-newest-refusal)"
+want "slow-newest-refusal" "CI IS REFUSING JOBS" "$out"
+wantnot "slow-newest-refusal" "UNKNOWN" "$out"
 
 # --- 1c. A repo whose CI genuinely only runs on a schedule still gets an
 # answer. Filtering to zero gating runs falls back to the whole feed rather

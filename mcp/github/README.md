@@ -124,8 +124,12 @@ Pull requests:
 
 Issues:
 
-- `issue_list` — list issues (PRs filtered out; `state`, `labels`, `limit`,
-  `fields`).
+- `issue_list` — list issues (PRs filtered out; `state`, `labels`, `pickable`,
+  `limit`, `fields`). Rows carry `is_index` (`"sub-issues"` or `"body-marker"`)
+  when the issue is an index rather than startable work; `pickable: true` drops
+  those and makes `limit` count real leaves. Use it whenever the answer sizes a
+  backlog or feeds a dispatch — a `status:ready` count includes indexes and
+  overstates what is available.
 - `issue_view` — view one issue.
 - `issue_create` — create an issue (`title`, `body?`, `labels?`, `assignees?`).
 - `issue_update` — update an issue (`title?`, `body?`, `state?`, `state_reason?`
