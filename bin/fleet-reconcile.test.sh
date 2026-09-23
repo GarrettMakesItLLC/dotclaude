@@ -130,7 +130,20 @@ MERGE_SHA="$(git -C "$WORK" rev-parse HEAD)"
 git -C "$WORK" checkout --quiet -b feature/999-live
 echo three > "$WORK/c"; git -C "$WORK" add c; git -C "$WORK" commit --quiet -m live
 git -C "$WORK" checkout --quiet main
-git -C "$WORK" push --quiet origin main feature/101-thing feature/999-live
+# #410 option 3: lock branches (issue-<N>-*) for a wave's shipped issues.
+# `issue-101-fix-the-thing` is NOT an ancestor of $MERGE_SHA — a degraded-mode
+# wave squashes it into an integration branch under a different SHA, which is
+# exactly why the ancestry-based sweep above can't reach it. This is
+# deliberately a separate branch from feature/101-thing (the PR's own head, and
+# already covered by the ancestry sweep) so the assertion below is testing the
+# NEW path, not the existing one.
+git -C "$WORK" checkout --quiet -b issue-101-fix-the-thing main
+echo four > "$WORK/d"; git -C "$WORK" add d; git -C "$WORK" commit --quiet -m "issue 101 lock"
+git -C "$WORK" checkout --quiet -b issue-104-already-closed main
+echo five > "$WORK/e"; git -C "$WORK" add e; git -C "$WORK" commit --quiet -m "issue 104 lock"
+git -C "$WORK" checkout --quiet main
+git -C "$WORK" push --quiet origin main feature/101-thing feature/999-live \
+  issue-101-fix-the-thing issue-104-already-closed
 
 cat > "$FIX/repos_acme_widget_pulls_7.json" <<JSON
 {"number":7,"title":"fix: the thing","merged_at":"2026-09-18T10:00:00Z",
@@ -155,6 +168,8 @@ run --pr 7
 [ ! -s "$WRITES" ] && ok "dry run performs no writes at all" || bad "dry run wrote: $(cat "$WRITES")"
 grep -q 'WOULD close #101' <<<"$OUT" && ok "names the shipped-but-open issue" || bad "no #101 line: $OUT"
 grep -q 'dry run' <<<"$OUT" && ok "says it is a dry run" || bad "no dry-run notice"
+grep -q "WOULD delete lock branch 'issue-104-already-closed'" <<<"$OUT" \
+  && ok "dry run projects deleting an already-closed issue's lock branch" || bad "no dry-run projection for #104's lock branch: $OUT"
 
 echo "fleet-reconcile: closing keywords are read the way GitHub reads them"
 grep -q '#103' <<<"$OUT" && ok "a repeated keyword (Fixes #103) is a reference" || bad "missed #103"
@@ -194,6 +209,14 @@ grep -q 'DELETE repos/acme/widget/git/refs/heads/feature/101-thing' "$WRITES" \
 grep -q 'refs/heads/feature/999-live' "$WRITES" && bad "deleted a branch not contained in the merge" \
   || ok "a branch not contained in the merge is left alone"
 grep -q 'refs/heads/main' "$WRITES" && bad "deleted a protected branch" || ok "protected branches are never deleted"
+
+echo "fleet-reconcile: #410 option 3 — a wave's lock branches, not ancestors of the merge"
+grep -q 'DELETE repos/acme/widget/git/refs/heads/issue-101-fix-the-thing' "$WRITES" \
+  && ok "a lock branch is deleted once its issue closes, even though it is not an ancestor of the merge" \
+  || bad "lock branch not deleted: $(cat "$WRITES")"
+grep -q 'DELETE repos/acme/widget/git/refs/heads/issue-104-already-closed' "$WRITES" \
+  && ok "a lock branch for an issue already closed before this PR is deleted too" \
+  || bad "#104's lock branch not deleted: $(cat "$WRITES")"
 
 : > "$WRITES"
 run --pr 7 --apply --no-branches
