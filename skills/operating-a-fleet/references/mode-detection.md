@@ -58,7 +58,7 @@ believed**:
 - `healthy` + declared `degraded` → **stale declaration.** Actions is running jobs again while every
   machine still reads a mode this repo is no longer in. Leaving degraded mode is not automatic — the
   last integrator says so on the coordination issue and restores the rules.
-- `healthy` + nothing declared → silence.
+- `healthy` + nothing declared → silence, unless an `owedVerdicts` ledger has unpaid items → **verdicts owed**.
 - no workflows and no runs → says so: nothing gates a merge here but what you ran locally.
 - unreadable (no `gh`, no network, an unparseable response) → says **unknown**, and never guesses.
   A confidently wrong answer here tells a session to trust a gate that is not running, which is worse
@@ -78,7 +78,10 @@ believed**:
 ```
 
 Only `mode` is required (`normal` or `degraded`); `issue` is the standing coordination issue, echoed
-into the banner so a session knows where to read and report. Absent, unparseable, or carrying any
+into the banner so a session knows where to read and report. `owedVerdicts`, optional, is the
+repo-relative path of the ledger of verdicts a degraded window left unmeasured (see `degraded-mode.md`,
+"Leaving degraded mode"); the banner lists its unpaid items, and a `normal` repo with any unpaid is not
+silent. A named ledger that cannot be read is reported as unreadable, never as nothing owed. Absent, unparseable, or carrying any
 other mode value, the file is treated as not declared — a malformed file must never be able to assert
 degraded mode by accident.
 

@@ -165,6 +165,44 @@ out="$(run_probe stale-history)"
 want "stale marker" "STALE DECLARATION" "$out"
 want "stale marker" "Actions is running jobs again" "$out"
 
+# --- 4b. Verdicts owed for the blind window (MuscleBuddy#8389) --------------
+owed_marker() {  # owed_marker <mode> <ledger-json>
+  mkdir -p "$REPO/.claude"
+  printf '%s\n' "$2" > "$REPO/.claude/owed.json"
+  printf '{"mode":"%s","issue":"GarrettMakesItLLC/fixture#1","owedVerdicts":".claude/owed.json"}\n' "$1" \
+    > "$REPO/.claude/fleet-mode.json"
+}
+LEDGER='{"items":[{"id":"ios-compile","paid":null},{"id":"nightly","paid":{"at":"x"}}]}'
+fresh; owed_marker degraded "$LEDGER"
+out="$(run_probe stale-history)"
+want "owed/stale" "STALE DECLARATION" "$out"
+want "owed/stale" "1 verdict(s) owed" "$out"
+want "owed/stale" "ios-compile" "$out"
+wantnot "owed/stale" "nightly" "$out"
+want "owed/stale" "BEFORE declaring normal" "$out"
+
+fresh; owed_marker degraded "$LEDGER"
+out="$(run_probe refused)"
+want "owed/degraded" "FLEET MODE: DEGRADED" "$out"
+want "owed/degraded" "ios-compile" "$out"
+
+# Normal again with a debt outstanding is NOT the silent case.
+fresh; owed_marker normal "$LEDGER"
+out="$(run_report healthy)"
+want "owed/normal" "VERDICTS OWED" "$out"
+want "owed/normal" "ios-compile" "$out"
+
+# Everything paid: silent again.
+fresh; owed_marker normal '{"items":[{"id":"ios-compile","paid":{"at":"x"}}]}'
+out="$(run_report healthy)"
+[ -z "$out" ] || { echo "FAIL (owed/paid): expected silence, got:"; echo "$out"; fail=1; }
+
+# A named ledger that cannot be read says so, never "nothing owed".
+fresh; owed_marker normal '{{{ not json'
+out="$(run_report healthy)"
+want "owed/unreadable" "unreadable" "$out"
+rm -f "$REPO/.claude/owed.json"
+
 # --- 5. One workflow failing fast is a bug, not a refusal -------------------
 fresh; marker -
 out="$(run_report one-flaky)"
