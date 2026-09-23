@@ -110,7 +110,9 @@ function decodeHtmlEntities(text: string): string {
 }
 
 /**
- * Find a milestone by exact title, or create it. Returns the milestone number.
+ * Find a milestone by exact title, or create it. Returns the milestone number,
+ * and whether this call minted it — a caller that meant an existing milestone
+ * needs to be able to tell "filed under it" from "invented one" (#400).
  * Shared by the `milestone_ensure` tool and `issue_open`.
  */
 async function ensureMilestone(
@@ -119,14 +121,14 @@ async function ensureMilestone(
   title: string,
   description?: string,
   due_on?: string,
-): Promise<number> {
+): Promise<{ number: number; created: boolean }> {
   const normalizedTitle = decodeHtmlEntities(title);
   const existing = await ghPaginate<{ number: number; title: string }>(
     `/repos/${owner}/${name}/milestones`,
     { query: { state: "all" }, limit: 1000 },
   );
   const match = existing.find((m) => decodeHtmlEntities(m.title) === normalizedTitle);
-  if (match) return match.number;
+  if (match) return { number: match.number, created: false };
   // An all-digit title is almost always a milestone NUMBER passed where a
   // TITLE goes. Creating it succeeds, attaches the issue, and returns happily
   // — and the junk milestone is then indistinguishable from a real one to
@@ -151,7 +153,7 @@ async function ensureMilestone(
     `/repos/${owner}/${name}/milestones`,
     { method: "POST", body: { title: normalizedTitle, description, due_on } },
   );
-  return created.number;
+  return { number: created.number, created: true };
 }
 
 /**
@@ -854,7 +856,8 @@ export function registerIssueTools(server: McpServer): void {
     "milestone_ensure",
     {
       description:
-        "Find a milestone by exact title, or create it. Returns the milestone number and title.",
+        "Find a milestone by exact title, or create it. Returns the milestone number, title, and " +
+          "`created` (true when this call minted it).",
       inputSchema: {
         repo: repoParam,
         title: z.string().describe("Milestone title (exact match)."),
@@ -865,8 +868,8 @@ export function registerIssueTools(server: McpServer): void {
     async ({ repo, title, description, due_on }) => {
       try {
         const { owner, name } = await resolveRepo(repo);
-        const number = await ensureMilestone(owner, name, title, description, due_on);
-        return jsonText({ number, title });
+        const { number, created } = await ensureMilestone(owner, name, title, description, due_on);
+        return jsonText({ number, title, created });
       } catch (err) {
         return errorResult(err);
       }
@@ -1065,12 +1068,14 @@ export function registerIssueTools(server: McpServer): void {
 
         // The issue is already created at this point — enrichment failures below must not
         // hide that creation behind an errorResult, or a retry would create a duplicate.
+        let milestoneCreated = false;
         if (milestone) {
           try {
-            const milestoneNumber = await ensureMilestone(owner, name, milestone);
+            const ensured = await ensureMilestone(owner, name, milestone);
+            milestoneCreated = ensured.created;
             await ghRequest(`/repos/${owner}/${name}/issues/${number}`, {
               method: "PATCH",
-              body: { milestone: milestoneNumber },
+              body: { milestone: ensured.number },
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -1116,7 +1121,9 @@ export function registerIssueTools(server: McpServer): void {
         const final = await ghRequest<RawIssue>(
           `/repos/${owner}/${name}/issues/${number}`,
         );
-        const slim = slimIssue(final);
+        // `milestone_created` distinguishes "filed under an existing milestone" from
+        // "invented one" — a returned title alone reads as confirmation either way (#400).
+        const slim = { ...slimIssue(final), ...(milestoneCreated ? { milestone_created: true } : {}) };
         return jsonText(warnings.length ? { ...slim, _warnings: warnings } : slim);
       } catch (err) {
         return errorResult(err);

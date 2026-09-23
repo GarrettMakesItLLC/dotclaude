@@ -487,8 +487,9 @@ describe("milestone_ensure", () => {
     const handler = await getIssueHandler("milestone_ensure");
     const res = await handler({ repo: "octo/repo", title: "v2" });
     expect(res.isError).toBeFalsy();
-    const ms = JSON.parse(res.content[0].text) as { number: number };
+    const ms = JSON.parse(res.content[0].text) as { number: number; created: boolean };
     expect(ms.number).toBe(4);
+    expect(ms.created).toBe(false);
   });
 
   it("normalizes HTML-escaped titles before matching, so an escaped and unescaped title resolve to the same milestone (#212)", async () => {
@@ -1616,6 +1617,33 @@ describe("issue_open", () => {
     const res = await handler({ repo: "octo/repo", title: "Ship v2", milestone: "v2" });
     expect(res.isError).toBeFalsy();
     expect(milestonePatched).toBe(true);
+    expect(JSON.parse(res.content[0].text).milestone_created).toBeUndefined();
+  });
+
+  it("reports milestone_created when it had to mint the milestone (#400)", async () => {
+    fetchMock.mockImplementation(async (url: string, init: { method?: string; body?: string }) => {
+      if (init.method === "POST" && url.endsWith("/issues")) {
+        return makeResponse({ status: 201, body: { number: 45, id: 8004 } });
+      }
+      if (init.method === "GET" && url.includes("/milestones")) {
+        return makeResponse({ status: 200, body: [{ number: 3, title: "v1" }] });
+      }
+      if (init.method === "POST" && url.includes("/milestones")) {
+        return makeResponse({ status: 201, body: { number: 9, title: "v3" } });
+      }
+      if (init.method === "PATCH" && url.endsWith("/issues/45")) {
+        expect(init.body).toContain('"milestone":9');
+        return makeResponse({ status: 200, body: {} });
+      }
+      if (init.method === "GET" && url.endsWith("/issues/45")) {
+        return makeResponse({ status: 200, body: { number: 45, id: 8004 } });
+      }
+      return makeResponse({ status: 500 });
+    });
+    const handler = await getIssueHandler("issue_open");
+    const res = await handler({ repo: "octo/repo", title: "Ship v3", milestone: "v3" });
+    expect(res.isError).toBeFalsy();
+    expect(JSON.parse(res.content[0].text).milestone_created).toBe(true);
   });
 
   it("nests the new issue under a parent via sub_issues, using the new issue's id", async () => {
