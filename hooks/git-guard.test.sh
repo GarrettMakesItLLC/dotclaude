@@ -263,6 +263,76 @@ git -C "$discard_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty 
 ) || fail=1
 rm -rf "$(dirname "$discard_repo")"
 
+# --- #411: a worktree-stealing branch operation. Plain `checkout <branch>` /
+# `switch <branch>` already refuse this; the forcing/renaming forms accept it
+# with no warning and rewrite the OTHER worktree's HEAD out from under it.
+#
+# Purpose-built repo, like the stash section: the rule keys on
+# `git worktree list`, so it must not depend on wherever the suite is invoked.
+wt_repo="$(mktemp -d)/wt"
+git init -q "$wt_repo"
+git -C "$wt_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git -C "$wt_repo" branch -M main
+git -C "$wt_repo" worktree add -q "$wt_repo/.worktrees/w1" -b integration/w3 2>/dev/null
+git -C "$wt_repo" worktree add -q "$wt_repo/.worktrees/w2" -b feature/other 2>/dev/null
+(
+  cd "$wt_repo/.worktrees/w2" || exit 1
+  # w1 holds integration/w3; every one of these, run from w2, would steal it.
+  check 2 'git checkout -B integration/w3 origin/main'
+  check 2 'git switch -C integration/w3 origin/main'
+  check 2 'git branch -f integration/w3 HEAD'
+  check 2 'git branch -m integration/w3 integration/perf'
+  check 2 'git branch -M integration/w3 integration/perf'
+  check 2 'git update-ref refs/heads/integration/w3 HEAD'
+  # Safe forms: w2's OWN branch, or a brand-new one, is nobody else's tree.
+  check 0 'git checkout -b brand-new-branch'
+  check 0 'git branch -f feature/other HEAD'
+  check 0 'git status'
+) || fail=1
+(
+  cd "$wt_repo" || exit 1
+  # -C names the own tree as w2, not the cwd — still a steal of w1's branch.
+  check 2 'git -C .worktrees/w2 checkout -B integration/w3 origin/main'
+) || fail=1
+(
+  # Run FROM w1 itself: renaming w1's own current branch (the one-arg form,
+  # which names it nowhere in the command) is the tree's own business.
+  cd "$wt_repo/.worktrees/w1" || exit 1
+  check 0 'git branch -m integration/perf'
+) || fail=1
+
+# The one-arg rename form names no branch at all — it renames whatever the
+# OWN tree currently has checked out. Reaching that collision for real needs a
+# branch checked out in two worktrees at once, which is exactly the bug #411
+# fixes: reproduce the incident's actual mechanism, not just its symptom, by
+# force-pointing a THIRD worktree's HEAD at w1's branch the same way a bare
+# `checkout -B`/`switch -C`/`symbolic-ref` from outside this guard would.
+git -C "$wt_repo" worktree add -q "$wt_repo/.worktrees/w3" -b feature/third 2>/dev/null
+git -C "$wt_repo/.worktrees/w3" symbolic-ref HEAD refs/heads/integration/w3
+(
+  cd "$wt_repo/.worktrees/w3" || exit 1
+  check 2 'git branch -m renamed-elsewhere'
+) || fail=1
+# The escape hatch lifts ONLY this block, loudly.
+check_worktree_steal_env() {
+  local want="$1" envval="$2" cmd="$3"
+  local got
+  printf '%s' "$cmd" \
+    | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
+    | GIT_GUARD_ALLOW_WORKTREE_STEAL="$envval" "$GUARD" >/dev/null 2>&1
+  got=$?
+  if [ "$got" != "$want" ]; then
+    echo "FAIL: want exit $want, got $got for (GIT_GUARD_ALLOW_WORKTREE_STEAL=$envval): $cmd"
+    echo x >> "$FAIL_MARKER"
+  fi
+}
+(
+  cd "$wt_repo/.worktrees/w2" || exit 1
+  check_worktree_steal_env 0 1 'git checkout -B integration/w3 origin/main'
+  check_worktree_steal_env 2 '' 'git checkout -B integration/w3 origin/main'
+) || fail=1
+rm -rf "$(dirname "$wt_repo")"
+
 if [ -s "$FAIL_MARKER" ]; then
   echo "git-guard: $(wc -l < "$FAIL_MARKER" | tr -d ' ') case(s) FAILED"
   fail=1

@@ -276,4 +276,134 @@ if [ -n "$discard_paths_trimmed" ]; then
   fi
 fi
 
+# 6) A worktree-stealing branch operation (#411). Plain `git checkout <branch>`
+# / `git switch <branch>` already refuse to check out a branch another
+# worktree has checked out ("already used by worktree"). The FORCING and
+# RENAMING forms accept it anyway, with no warning, and silently rewrite the
+# other worktree's HEAD out from under whatever was running there:
+#   - `git checkout -B <b> …` / `git switch -C <b> …` reset a branch even when
+#     another worktree has it checked out.
+#   - `git branch -f <b> …` force-moves it the same way.
+#   - `git branch -m|-M <b> <new>` renames it (or, given one argument, renames
+#     the CURRENT branch of the tree running the command — a form that steals
+#     exactly the same way but names no branch in the command at all).
+#   - `git update-ref refs/heads/<b> …` moves the ref directly.
+#
+# The command's OWN tree is `-C <dir>` when the invocation names one, else the
+# cwd this hook runs in — matching what the incident actually looked like:
+# `git -C .worktrees/integration-w1 checkout -B integration/2026-09-23-w3
+# origin/dev` stole a branch a DIFFERENT worktree (`.worktrees/integration-w3`)
+# had checked out, with a full validation run in progress there.
+#
+# Delegated to python3 (already required above; nothing past this point runs
+# without it) rather than more shell — parsing "which worktree, if any, holds
+# this exact branch, other than my own" out of `git worktree list --porcelain`
+# is a lookup, not a text scrub, and perl/awk/cut is where the earlier draft of
+# this rule went to parse itself into a five-way pipeline with a subshell that
+# swallowed its own `exit 2`.
+#
+# KNOWN GAP, same class as the rest of this file: only a single leading `-C
+# <dir>` is recognized as the global flag naming the own tree; other global
+# flags before or around it, and `branch --force`/`--move` in place of the
+# short forms, are not modelled. A miss here is silence, not a false block.
+#
+# NARROW ESCAPE: GIT_GUARD_ALLOW_WORKTREE_STEAL=1 lifts ONLY this block, for
+# the deliberate case — always logged loudly, same shape as the escapes above.
+#
+# Extracted from $nq (quotes stripped, content kept): branch names and paths
+# are real arguments here, not message prose to blank out.
+if command -v python3 >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+  wt_hit="$(printf '%s' "$nq" | python3 -c '
+import os, re, subprocess, sys
+
+cmd = sys.stdin.read()
+cwd = os.getcwd()
+
+INV = re.compile(
+    r"(?:^|[;&|]\s*)git\s+(?:-C\s+(\S+)\s+)?"
+    r"(checkout|switch|branch|update-ref)\s+"
+    r"((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)",
+    re.S,
+)
+
+def targets(sub, rest, current_branch):
+    if sub == "checkout":
+        m = re.search(r"(?:^|\s)-B\s+(\S+)", rest)
+        return [m.group(1)] if m else []
+    if sub == "switch":
+        m = re.search(r"(?:^|\s)-C\s+(\S+)", rest)
+        return [m.group(1)] if m else []
+    if sub == "branch":
+        out = []
+        m = re.search(r"(?:^|\s)-f\s+(\S+)", rest)
+        if m:
+            out.append(m.group(1))
+        if re.search(r"(?:^|\s)-[mM]\b", rest):
+            toks = [t for t in rest.split() if not t.startswith("-")]
+            if len(toks) >= 2:
+                out.append(toks[0])
+            elif len(toks) == 1 and current_branch:
+                out.append(current_branch)
+        return out
+    if sub == "update-ref":
+        m = re.search(r"refs/heads/(\S+)", rest)
+        return [m.group(1)] if m else []
+    return []
+
+try:
+    porcelain = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        cwd=cwd, capture_output=True, text=True, timeout=5,
+    ).stdout
+except Exception:
+    porcelain = ""
+
+wt = []
+for line in porcelain.splitlines():
+    if line.startswith("worktree "):
+        wt.append([os.path.realpath(line[len("worktree "):]), None])
+    elif line.startswith("branch ") and wt:
+        b = line[len("branch "):]
+        if b.startswith("refs/heads/"):
+            b = b[len("refs/heads/"):]
+        wt[-1][1] = b
+
+def branch_of(p):
+    for wp, wb in wt:
+        if wp == p:
+            return wb
+    return None
+
+hit = None
+for m in INV.finditer(cmd):
+    cdir, sub, rest = m.group(1), m.group(2), m.group(3)
+    own = os.path.realpath(cdir) if cdir else os.path.realpath(cwd)
+    current_branch = branch_of(own)
+    for t in targets(sub, rest, current_branch):
+        for wp, wb in wt:
+            if wb == t and wp != own:
+                hit = (t, wp)
+                break
+        if hit:
+            break
+    if hit:
+        break
+
+if hit:
+    print(hit[0])
+    print(hit[1])
+'
+  )"
+  if [ -n "$wt_hit" ]; then
+    if [ -n "${GIT_GUARD_ALLOW_WORKTREE_STEAL:-}" ]; then
+      echo "⚠️  dotclaude git-guard: allowing a worktree-branch collision — GIT_GUARD_ALLOW_WORKTREE_STEAL is set." >&2
+      echo "   This can silently rewrite another worktree's HEAD out from under whatever is running there." >&2
+    else
+      hit_branch="$(printf '%s' "$wt_hit" | sed -n 1p)"
+      hit_path="$(printf '%s' "$wt_hit" | sed -n 2p)"
+      block "branch '$hit_branch' is checked out in another worktree ($hit_path) — forcing or renaming it here would silently rewrite that worktree's HEAD out from under whatever is running there (#411). Operate on that worktree directly, or if this is genuinely deliberate, set GIT_GUARD_ALLOW_WORKTREE_STEAL=1 for this one command."
+    fi
+  fi
+fi
+
 exit 0
