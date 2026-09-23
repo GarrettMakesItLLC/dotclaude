@@ -167,6 +167,33 @@ print(" ".join(out))
           || { say "  #$issue: could not remove '$label'"; errors=1; }
       fi
     done
+
+    # #410 option 3: delete #$issue's own lock branch(es) too, if it has one.
+    # A degraded-mode wave folds each batch PR's branch into the integration
+    # branch (`operating-a-fleet`'s degraded-mode procedure), and only the
+    # integration branch merges — so the branch-containment sweep below, which
+    # checks ancestry against THIS PR's merge commit ($sha), never reaches a
+    # lock branch whose commits live under the integration branch's SHA
+    # instead. This step is issue-scoped rather than SHA-scoped: reconciling a
+    # PR that just closed #$issue is itself the evidence the branch's work
+    # landed, whichever SHA it landed under (the same logic claim_release's
+    # content check applies, from the other side).
+    #
+    # `all_closed`/`istate` already reflect this run's own close above, so a
+    # dry run projects the same branches an --apply run would actually delete.
+    if [ "$DO_BRANCHES" = 1 ] && { [ "$istate" = "closed" ] || [ "$APPLY" = 1 ]; }; then
+      while read -r _lsha lref; do
+        [ -n "$lref" ] || continue
+        lbranch="${lref#refs/heads/}"
+        protected_branch "$lbranch" && continue
+        changes=1
+        act "delete lock branch '$lbranch' (issue #$issue closed by #$n)"
+        if [ "$APPLY" = 1 ]; then
+          api -X DELETE "repos/$REPO/git/refs/heads/$lbranch" --silent 2>/dev/null \
+            || { say "  could not delete '$lbranch'"; errors=1; }
+        fi
+      done < <(git ls-remote --heads origin "issue-${issue}-*" "issue-${issue}" 2>/dev/null)
+    fi
   done
 
   # --- branches ------------------------------------------------------------

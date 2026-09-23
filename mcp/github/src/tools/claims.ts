@@ -24,10 +24,23 @@ import {
   structuredError,
 } from "../claim-lock.js";
 
+interface CompareFile {
+  filename: string;
+  status: string;
+  previous_filename?: string;
+}
+
 interface CompareResponse {
   ahead_by: number;
   behind_by: number;
   status: string;
+  files?: CompareFile[];
+}
+
+interface ContentsResponse {
+  content?: string;
+  encoding?: string;
+  type?: string;
 }
 
 interface MatchingRef {
@@ -76,6 +89,87 @@ async function closedByCommit(
     return closed.length > 0 ? (closed[closed.length - 1]!.commit_id ?? undefined) : undefined;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * A file's raw content at a given ref, or `undefined` when it does not exist
+ * there (a 404) and `null` when it exists but this cannot read it as text —
+ * a directory, a submodule, or a blob GitHub declines to inline (too large).
+ * Both `undefined` and `null` are "no evidence", never "matches" or "landed".
+ */
+async function fileContentAt(
+  owner: string,
+  name: string,
+  ref: string,
+  path: string,
+): Promise<string | null | undefined> {
+  try {
+    const res = await ghRequest<ContentsResponse>(
+      `/repos/${owner}/${name}/contents/${path.split("/").map(encodeURIComponent).join("/")}`,
+      { query: { ref } },
+    );
+    if (res.type && res.type !== "file") return null;
+    if (res.encoding !== "base64" || res.content === undefined) return null;
+    return Buffer.from(res.content, "base64").toString("utf8");
+  } catch (err) {
+    if (err instanceof Error && /HTTP 404/.test(err.message)) return undefined;
+    return null;
+  }
+}
+
+/**
+ * Degraded-mode content check (#410 option 2): a lock branch's commits can be
+ * genuinely landed under different SHAs — a wave squashes several batch PRs
+ * into one integration branch and merges only that — so ancestry and
+ * merged-PR membership both miss it. This checks the WORK instead of the
+ * history: every file the lock branch touched since it diverged from the
+ * default branch (the compare endpoint's `files`, which is already a
+ * merge-base diff) is fetched at the lock branch's head and at the default
+ * branch's current head. If every touched file's content agrees — or, for a
+ * file the branch deleted, is likewise absent from the default branch — the
+ * branch's tree is contained in the default branch and the commits landed,
+ * whatever SHA they landed under.
+ *
+ * Conservative by construction: any file this can't read cleanly (network
+ * error, binary, directory-vs-file mismatch), or an empty change list, is
+ * "not proven landed" rather than "landed" — a false negative here just falls
+ * through to requiring `force`, which is the safe direction to be wrong in.
+ */
+const COMPARE_FILES_CAP = 300;
+
+async function contentAlreadyLanded(
+  owner: string,
+  name: string,
+  base: string,
+  target: string,
+): Promise<boolean> {
+  try {
+    const comparison = await ghRequest<CompareResponse>(
+      `/repos/${owner}/${name}/compare/${base}...${target}`,
+    );
+    const files = comparison.files ?? [];
+    // The compare endpoint lists at most COMPARE_FILES_CAP files and truncates
+    // silently, so a list that reaches the cap may be missing the one file
+    // that did not land.
+    if (files.length === 0 || files.length >= COMPARE_FILES_CAP) return false;
+    for (const f of files) {
+      if (f.status === "removed") {
+        const onBase = await fileContentAt(owner, name, base, f.filename);
+        if (onBase !== undefined) return false;
+        continue;
+      }
+      const [onTarget, onBase] = await Promise.all([
+        fileContentAt(owner, name, target, f.filename),
+        fileContentAt(owner, name, base, f.filename),
+      ]);
+      if (onTarget === null || onTarget === undefined) return false;
+      if (onBase === null || onBase === undefined) return false;
+      if (onTarget !== onBase) return false;
+    }
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -190,7 +284,14 @@ async function closedByCommit(
           // using force dozens of times in a row is how it stops meaning
           // anything on the day it would have saved real unpushed work (#382).
           const relanded = !merged ? await closedByCommit(owner, name, number) : undefined;
-          if (!merged && !relanded) {
+          // The commit-closed-the-issue signal above misses a batch PR whose
+          // issue a DIFFERENT commit in the same wave closed (one PR closing
+          // several issues, #310's shape), or a wave that closes issues by
+          // hand rather than by keyword. Fall back to checking the work
+          // itself before requiring force.
+          const contentLanded =
+            !merged && !relanded ? await contentAlreadyLanded(owner, name, base, target) : false;
+          if (!merged && !relanded && !contentLanded) {
             return structuredError({
               released: false,
               reason: "unmerged-commits",

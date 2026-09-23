@@ -8,9 +8,12 @@
 #
 # Fires after every Bash call, cheaply no-ops unless the command was a
 # `git worktree add`, and on a match runs the repo's `bin/setup-worktree.sh`
-# against the new worktree IF that script exists. The trigger is repo-agnostic;
-# the priming logic is per-repo and lives in that script. No script -> no-op, so
-# this hook is inert in every repo that hasn't opted in.
+# against the new worktree IF that script exists, DETACHED (#408) — this is a
+# PostToolUse hook with its own time budget, and the script can queue for
+# minutes behind a check lock on a busy box, so it never runs inline. The
+# trigger is repo-agnostic; the priming logic is per-repo and lives in that
+# script. No script -> no-op, so this hook is inert in every repo that hasn't
+# opted in.
 #
 # Fail-open by design: no python3, unparseable input, no match, or any error
 # exits 0 and stays silent. A bootstrap hook that blocks a shell is far worse
@@ -111,23 +114,41 @@ fi
 script="$owner_repo/bin/setup-worktree.sh"
 [ -x "$script" ] || exit 0
 
-# Surface the script's own output to the user; never fail the hook on its exit.
+# Run it DETACHED (#408). This hook fires as a PostToolUse hook, which has a
+# time budget of its own — and `bin/setup-worktree.sh` can queue for minutes
+# behind `bin/with-check-lock.sh` on a busy box (observed 13+ min behind two
+# typechecks, and 11 min behind another session's `npm ci --writer`). Running
+# it inline meant the hook's OWN budget ended first and killed the script
+# partway, and the comment that used to sit here said the exit was surfaced —
+# but a kill for exceeding the hook's timeout never reaches that branch at
+# all. Three worktrees in one session came out without their Tailwind
+# `@source` mirror this way, and the first sign was the pre-push hook failing
+# `setup-worktree --check` on a push that had queued for two hours.
 #
-# But do NOT swallow the exit code. An install that half-ran leaves a worktree
-# that looks usable and is not: with an empty `node_modules`, Node resolution
-# and `npx` walk UP the real filesystem past the worktree and bind to the main
-# checkout's install instead — so the tree runs, against another checkout's
-# dependencies, and the first sign is a phantom type error or a Prisma client
-# that does not match the schema in front of you (#175). Nothing about that
-# reads as "the install did not happen".
+# The log and rc marker live in the WORKTREE's own git-dir (`--git-dir`, not
+# `--git-common-dir` — the per-worktree admin dir a linked worktree gets, not
+# the shared one), so they travel with the worktree and never collide across
+# concurrent `git worktree add` calls priming different trees at once.
 #
-# Still exit 0 — this hook must never block a shell — but say so.
-if ! "$script" "$target"; then
-  rc=$?
-  echo "⚠ dotclaude worktree-bootstrap: $script exited $rc for $target." >&2
-  echo "  That worktree is primed INCOMPLETELY. An empty node_modules does not fail" >&2
-  echo "  loudly — Node resolves upward to the main checkout and the tree runs against" >&2
-  echo "  another checkout's dependencies. Re-run the script by hand before trusting a" >&2
-  echo "  typecheck, lint or test result from it." >&2
-fi
+# No exit code to check here — that is the whole point of detaching. The
+# repo's own pre-push `--check` (named in the module doc above) already
+# catches an incomplete result; this only has to say where to look.
+wt_git_dir="$(git -C "$target" rev-parse --path-format=absolute --git-dir 2>/dev/null)"
+[ -n "$wt_git_dir" ] || wt_git_dir="$target"
+log="$wt_git_dir/worktree-bootstrap.log"
+rc_file="$wt_git_dir/worktree-bootstrap.rc"
+rm -f "$rc_file" 2>/dev/null || true
+
+# `sh -c '... "$1" "$2" ...' _ "$script" "$target" "$log" "$rc_file"` passes
+# every path as its own argv entry rather than interpolating it into the
+# command string, so a space or quote in any of them can't break the
+# redirection — the usual reason to prefer this form over building a string.
+(
+  nohup sh -c '"$1" "$2" > "$3" 2>&1; echo $? > "$4"' _ \
+    "$script" "$target" "$log" "$rc_file" >/dev/null 2>&1 &
+)
+
+echo "→ dotclaude worktree-bootstrap: priming $target in the background — this hook's own time budget can no longer kill it partway." >&2
+echo "  Log: $log" >&2
+echo "  Done when: cat \"$rc_file\" exists and reads 0. Until then, do not trust a typecheck, lint or test result from that worktree." >&2
 exit 0
