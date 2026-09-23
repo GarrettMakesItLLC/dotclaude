@@ -324,6 +324,109 @@ describe("claim_release", () => {
     });
   });
 
+  /**
+   * #410 option 2: a wave's commit-closed-the-issue signal (above) can itself
+   * miss a re-landed branch — one PR closing several issues, or a wave that
+   * closes by hand — so this checks the WORK: every file the lock branch
+   * touched since it diverged from the default branch, fetched at both heads.
+   */
+  describe("content check when the tree is already contained in the default branch", () => {
+    const releaseWithContent = async (opts: {
+      files: { filename: string; status: string }[];
+      targetContent: Record<string, string>;
+      baseContent: Record<string, string>;
+    }) => {
+      let deleted = false;
+      fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+        if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
+        if (init.method === "GET" && url.endsWith("/repos/octo/repo")) {
+          return makeResponse({ status: 200, body: { default_branch: "main" } });
+        }
+        if (init.method === "GET" && url.includes("/compare/")) {
+          return makeResponse({
+            status: 200,
+            body: { ahead_by: 2, behind_by: 0, status: "ahead", files: opts.files },
+          });
+        }
+        // Closed UNMERGED, exactly as a wave leaves its batch PRs.
+        if (init.method === "GET" && url.includes("/pulls")) {
+          return makeResponse({
+            status: 200,
+            body: [{ number: 91, html_url: "https://gh/pr/91", state: "closed", merged_at: null }],
+          });
+        }
+        if (init.method === "GET" && url.includes("/timeline")) {
+          return makeResponse({ status: 200, body: [] });
+        }
+        if (init.method === "GET" && url.endsWith("/issues/12")) {
+          return makeResponse({ status: 200, body: { number: 12, title: "t", state: "closed", labels: [] } });
+        }
+        if (init.method === "GET" && url.includes("/contents/")) {
+          const path = decodeURIComponent(url.split("/contents/")[1]!.split("?")[0]!);
+          const ref = new URL(url).searchParams.get("ref");
+          const table = ref === "main" ? opts.baseContent : opts.targetContent;
+          const content = table[path];
+          if (content === undefined) return makeResponse({ status: 404, body: { message: "Not Found" } });
+          return makeResponse({
+            status: 200,
+            body: { type: "file", encoding: "base64", content: Buffer.from(content).toString("base64") },
+          });
+        }
+        if (init.method === "DELETE" && url.includes("/git/refs/heads/")) {
+          deleted = true;
+          return makeResponse({ status: 204 });
+        }
+        if (init.method === "DELETE") return makeResponse({ status: 204 });
+        if (init.method === "PUT" && url.endsWith("/labels")) return makeResponse({ status: 200, body: [] });
+        return makeResponse({ status: 500 });
+      });
+      const handler = await getClaimHandler("claim_release");
+      const res = await handler({ repo: "octo/repo", number: 12 });
+      return { out: JSON.parse(res.content[0].text) as Record<string, unknown>, deleted };
+    };
+
+    it("releases without force when every touched file already matches the default branch", async () => {
+      const { out, deleted } = await releaseWithContent({
+        files: [{ filename: "src/a.ts", status: "modified" }],
+        targetContent: { "src/a.ts": "export const a = 1;\n" },
+        baseContent: { "src/a.ts": "export const a = 1;\n" },
+      });
+      expect(out.released).toBe(true);
+      expect(deleted).toBe(true);
+    });
+
+    it("treats a file the branch deleted as landed when it is also absent from the default branch", async () => {
+      const { out, deleted } = await releaseWithContent({
+        files: [{ filename: "src/old.ts", status: "removed" }],
+        targetContent: {},
+        baseContent: {},
+      });
+      expect(out.released).toBe(true);
+      expect(deleted).toBe(true);
+    });
+
+    it("still refuses when a touched file's content diverges from the default branch", async () => {
+      const { out, deleted } = await releaseWithContent({
+        files: [{ filename: "src/a.ts", status: "modified" }],
+        targetContent: { "src/a.ts": "export const a = 1;\n" },
+        baseContent: { "src/a.ts": "export const a = 2;\n" },
+      });
+      expect(out.released).toBe(false);
+      expect(out.reason).toBe("unmerged-commits");
+      expect(deleted).toBe(false);
+    });
+
+    it("still refuses when the compare has no files to check (no evidence either way)", async () => {
+      const { out, deleted } = await releaseWithContent({
+        files: [],
+        targetContent: {},
+        baseContent: {},
+      });
+      expect(out.released).toBe(false);
+      expect(out.reason).toBe("unmerged-commits");
+      expect(deleted).toBe(false);
+    });
+  });
 
   it("deletes the lock ref when the branch is not ahead of the default branch", async () => {
     let deleted = false;
