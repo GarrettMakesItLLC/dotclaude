@@ -5,6 +5,10 @@
 #
 # Fully local: bare repos as remotes, no network, no GitHub.
 # Run:  bash bin/repo-sweep.test.sh
+# The scripts under test are bash, and BASH_ENV (set to ~/.bashrc on agent boxes) makes every
+# bash child re-source it and re-export the real keys this suite unsets. Without this the
+# suite measures the caller's shell, not the script.
+unset BASH_ENV
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -306,7 +306,7 @@ cache_age() {
 read_marker() {
   [ -f "$marker_file" ] || { echo ""; return; }
   python3 -c '
-import json, sys
+import json, os, sys
 try:
     d = json.load(open(sys.argv[1]))
 except Exception:
@@ -317,8 +317,21 @@ mode = str(d.get("mode", "")).lower()
 if mode not in ("normal", "degraded"):
     sys.exit(0)
 ref = d.get("issue") or d.get("coordination_issue") or ""
-print(json.dumps({"mode": mode, "issue": ref, "since": d.get("since", "")}))
-' "$marker_file" 2>/dev/null
+# The verdicts a degraded window left unmeasured, and still owes. A path to a
+# ledger whose `items[]` each carry `paid` (null until repaid). Unreadable, it
+# reports itself rather than reading as nothing owed.
+owed_path = d.get("owedVerdicts") or ""
+owed = []
+if owed_path:
+    try:
+        root = sys.argv[2]
+        ledger = json.load(open(os.path.join(root, owed_path)))
+        owed = [str(i.get("id", "?")) for i in ledger.get("items", []) if i.get("paid") is None]
+    except Exception:
+        owed = ["(ledger %s is unreadable)" % owed_path]
+print(json.dumps({"mode": mode, "issue": ref, "since": d.get("since", ""),
+                  "owedPath": owed_path, "owed": owed}))
+' "$marker_file" "$repo_root" 2>/dev/null
 }
 
 # --- can this box produce the substitute verdict? ---------------------------
@@ -355,6 +368,8 @@ replica = os.environ.get("FLEET_REPLICA", "")
 ci = v.get("ci", "unknown")
 declared = m.get("mode", "")
 issue = m.get("issue", "")
+owed = m.get("owed") or []
+owed_path = m.get("owedPath", "")
 skill = "skills/operating-a-fleet (SKILL.md, then references/degraded-mode.md)"
 
 DO_DEGRADED = (
@@ -368,6 +383,13 @@ DO_DEGRADED = (
     "  - Run `bin/fleet-reconcile.sh --pr <N> --apply` after every merge.\n"
     "Read " + skill + " before acting on any of it."
 )
+
+def owed_line():
+    if not owed:
+        return ""
+    shown = ", ".join(owed[:8]) + (" …" if len(owed) > 8 else "")
+    return ("%d verdict(s) owed for the blind window, unpaid in %s: %s"
+            % (len(owed), owed_path, shown))
 
 def replica_warning():
     """Named remedy, not just a complaint — the fix is one command."""
@@ -401,6 +423,9 @@ if ci == "refused" and declared == "degraded":
         lines.append(warn)
         lines.append("")
     lines.append(DO_DEGRADED)
+    if owed:
+        lines.append("")
+        lines.append(owed_line() + "\nEach is repaid once Actions runs again, before this file goes back to normal.")
 elif ci == "refused":
     lines.append("FLEET MODE: CI IS REFUSING JOBS — %s (degraded mode NOT declared)" % repo)
     lines.append(v.get("reason", ""))
@@ -430,6 +455,13 @@ elif ci == "healthy" and declared == "degraded":
         "goes back to normal. Until it does, every session on every machine reads a mode\n"
         "this repo is no longer in."
     )
+    if owed:
+        lines.append("")
+        lines.append(
+            owed_line() + "\n"
+            "Repay and record each BEFORE declaring normal: the NOT-RUN jobs of a window are debts, and\n"
+            "the first run that can pay them is this one. See references/degraded-mode.md."
+        )
 elif ci == "absent":
     lines.append("FLEET MODE: NO CI — %s" % repo)
     lines.append("This repo declares no workflows and has no Actions runs. Nothing gates a merge\n"
@@ -439,8 +471,14 @@ elif ci == "unknown":
     lines.append(v.get("reason", "could not determine whether CI is answering"))
     lines.append("Treat the gate as unverified rather than assuming either mode: check the PR\n"
                  "checks by hand before merging. Re-check with `bin/fleet-mode.sh probe`.")
+elif ci == "healthy" and owed:
+    # Normal again, but the window has not been paid for. Not silent: the
+    # debt is the one thing a returned gate does not measure on its own.
+    lines.append("FLEET MODE: VERDICTS OWED — %s" % repo)
+    lines.append(owed_line())
+    lines.append("Repay each (the ledger says how) and record it there. See references/degraded-mode.md.")
 else:
-    # healthy + normal (or undeclared): the silent case.
+    # healthy + normal (or undeclared), nothing owed: the silent case.
     pass
 
 print("\n".join(x for x in lines if x is not None).strip())

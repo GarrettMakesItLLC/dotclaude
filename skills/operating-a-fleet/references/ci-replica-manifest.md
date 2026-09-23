@@ -21,6 +21,12 @@ measure.
 | `env` | object | no | Environment applied to every job. Job-level `env` wins on a key collision. |
 | `unset` | array of string | no | Variables removed from every job's environment before it runs. |
 
+**Set `"env": {"CI": "true"}` at the top level.** Actions sets `CI=true` in every job, and tools pick
+their defaults by it: Vitest fails a stray `.only` and an obsolete snapshot only under CI, Playwright
+turns on retries and `forbidOnly`. A replica job without it runs the permissive branch and passes what
+CI fails. If the repo caches task results (turbo), make `CI` part of the cache key too, or a result
+computed without it is replayed for a run with it.
+
 `unset` is load-bearing, not a nicety. On a box where `BASH_ENV` points at a shell profile, a `bash -c`
 step silently re-sources it and gets the ambient value back — so a run can be pointed at the wrong
 database, or the wrong Supabase project, and report a clean pass about the wrong thing. List every
@@ -117,12 +123,52 @@ first path that needed it.
 a job that legitimately writes wants `mutatesTree`, because the flag disables the
 check for every job at once.
 
+## The base a diff is measured against
+
+A PR's diff-scoped checks (a secret scan over `base..HEAD`, a conflict-marker grep, a migration-order
+check) read the PR's base, which a local run does not have. The runner's `--base REF` exports
+`CI_REPLICA_BASE=REF` to every job; a manifest reads it with its own default:
+
+```json
+"commands": [
+  "base=$(git merge-base \"${CI_REPLICA_BASE:-origin/dev}\" HEAD) && n=$(git rev-list --count \"$base..HEAD\") && [ \"$n\" -gt 0 ]",
+  "base=$(git merge-base \"${CI_REPLICA_BASE:-origin/dev}\" HEAD); gitleaks detect --log-opts=\"$base..HEAD\" --exit-code 1"
+]
+```
+
+The first command is the one that matters. A promotion head sits ON its default base, so the range is
+empty, and every scan of an empty range reports clean having read nothing. Refuse a zero count the
+way CI does, and gate a promotion with `--base origin/main`. The runner refuses a `--base` that does
+not resolve, so a missing fetch fails the run rather than every diff check.
+
+## Step-level parity: `$ciSteps`
+
+Matching job names catches a new CI job and misses a new STEP in an existing one, which is how CI grows
+most of the time. The runner ignores every `$`-prefixed key, so a repo can record, per job, how each
+named CI step is replicated:
+
+```json
+"$ciSteps": {
+  "Typecheck": { "by": "turbo run typecheck" },
+  "Upload coverage": { "notRun": "An artifact upload; nothing is judged." }
+}
+```
+
+`by` names a substring of one of the job's commands; `notRun` says why the step has no local twin. A
+repo test then asserts, per runnable job, that the set of named steps in the workflow equals the keys
+of `$ciSteps` in both directions, that every `by` matches a command, and that every repo script the
+CI step's `run:` invokes appears in the job's commands (or in a script they call). MuscleBuddy's
+`scripts/ci/ci-replica-coverage.test.ts` is the worked version, and it reads a reusable workflow
+(`uses: ./.github/workflows/x.yml`) for the job that calls one.
+
 ## Reading the result
 
 `PASS` and `FAIL` mean what they say. **`NOT-RUN` never means PASS** — it means the gate has a hole,
 and the summary names each hole so the validator's report on the coordination issue can carry it.
 A wave merged on a table containing a `NOT-RUN` job is a wave merged with that job unverified, which
-may be entirely fine and must be stated rather than assumed.
+may be entirely fine and must be stated rather than assumed. Stating it does not repay it: a
+window's NOT-RUN jobs are debts, and they are listed in an owed-verdicts ledger (see
+`degraded-mode.md`) so the first run that can pay them does.
 
 An `over budget` flag is ambiguous on its own: over budget when run **alone** is structural, over
 budget only **in-suite** is contention from sibling agents. Re-run the one job with `--job <name>`

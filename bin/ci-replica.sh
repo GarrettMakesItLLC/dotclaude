@@ -18,6 +18,13 @@
 #
 #   ci-replica.sh [--manifest PATH] [--job NAME]... [--data-plane] [--list]
 #                 [--log-dir DIR] [--repo-root DIR] [--no-tree-guard]
+#                 [--base REF]
+#
+# --base REF exports CI_REPLICA_BASE=REF to every job: the ref a manifest's
+# diff-scoped commands measure against in place of a PR's base. A manifest
+# reads it as "${CI_REPLICA_BASE:-origin/dev}" (or its own default). A
+# promotion head sits ON its default base, so its range is empty and a scan of
+# it passes having read nothing; gate one with --base origin/main.
 #
 # Exit 0 when no job FAILed, 1 when any did, 2 on a bad manifest or usage.
 set -uo pipefail
@@ -29,6 +36,7 @@ ROOT=""
 DATA_PLANE=0
 LIST_ONLY=0
 TREE_GUARD=1
+BASE=""
 SELECTED=()
 
 die() { echo "$PROG: $*" >&2; exit 2; }
@@ -41,8 +49,9 @@ while [ $# -gt 0 ]; do
     --repo-root) ROOT="${2:-}"; shift 2 || die "--repo-root needs a path" ;;
     --data-plane) DATA_PLANE=1; shift ;;
     --no-tree-guard) TREE_GUARD=0; shift ;;
+    --base)      BASE="${2:-}"; shift 2 || die "--base needs a ref"; [ -n "$BASE" ] || die "--base needs a ref" ;;
     --list)      LIST_ONLY=1; shift ;;
-    -h|--help)   sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)   sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option '$1'" ;;
   esac
 done
@@ -256,8 +265,17 @@ if [ "$LIST_ONLY" = 1 ]; then
   exit 0
 fi
 
+# A base that does not resolve would make every diff-scoped command fail on
+# `git merge-base`, which reads as a finding about the diff. Refuse it here.
+if [ -n "$BASE" ]; then
+  git -C "$ROOT" rev-parse --verify --quiet "$BASE^{commit}" >/dev/null \
+    || die "--base '$BASE' is not a commit in $ROOT (fetch it first?)"
+  export CI_REPLICA_BASE="$BASE"
+fi
+
 echo "ci-replica: $MANIFEST"
 echo "            root=$ROOT logs=$LOG_DIR"
+[ -n "$BASE" ] && echo "            base=$BASE (CI_REPLICA_BASE)"
 echo ""
 
 RESULTS="$PLAN/results"

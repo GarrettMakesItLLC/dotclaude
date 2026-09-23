@@ -130,6 +130,7 @@ all (macOS runners, CodeQL). `bin/ci-replica.sh` runs it:
 bin/ci-replica.sh --list                   # what this repo declares
 bin/ci-replica.sh                          # run every local job, print the table
 bin/ci-replica.sh --job lint --job test    # re-run only what failed
+bin/ci-replica.sh --base origin/main       # a promotion: diff checks measure against main
 ```
 
 It captures real exit codes, writes a per-job log, never pipes a verification command, and prints

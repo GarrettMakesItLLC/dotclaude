@@ -169,6 +169,21 @@ run '{"version":1,"jobs":[
 run '{"version":1,"jobs":[{"name":"bad","commands":["true"],"mutatesTree":"tracked.txt"}]}'
 [ "$RC" = 2 ] && ok "a non-array mutatesTree is refused" || bad "expected rc=2, got $RC: $OUT"
 
+echo "ci-replica: --base reaches every job as CI_REPLICA_BASE"
+# The repo needs a commit for --base to resolve against.
+git -C "$ROOT" -c user.email=t@t -c user.name=t commit --quiet --allow-empty -m base >/dev/null 2>&1
+BASEJOB='{"version":1,"jobs":[{"name":"base","commands":["test \"${CI_REPLICA_BASE-unset}\" = \"$EXPECT_BASE\""]}]}'
+EXPECT_BASE="unset" run "$BASEJOB"
+[ "$RC" = 0 ] && ok "without --base, CI_REPLICA_BASE is not set" || bad "leaked a base: rc=$RC $OUT"
+EXPECT_BASE=HEAD run "$BASEJOB" --base HEAD
+[ "$RC" = 0 ] && ok "--base HEAD exports CI_REPLICA_BASE=HEAD" || bad "base not exported: rc=$RC $OUT"
+grep -q 'base=HEAD' <<<"$OUT" && ok "and the header names it" || bad "header silent about base: $OUT"
+run "$BASEJOB" --base no-such-ref
+[ "$RC" = 2 ] && ok "an unresolvable --base is refused before any job runs" || bad "expected rc=2, got $RC: $OUT"
+# The empty-range refusal a manifest pairs with it: HEAD..HEAD scans nothing.
+run '{"version":1,"jobs":[{"name":"scan","commands":["n=$(git rev-list --count \"$(git merge-base \"${CI_REPLICA_BASE:-HEAD~0}\" HEAD)..HEAD\"); [ \"$n\" -gt 0 ]"]}]}' --base HEAD
+[ "$RC" = 1 ] && ok "a manifest's empty-range refusal fails the job on a base equal to HEAD" || bad "empty range passed: rc=$RC $OUT"
+
 echo "ci-replica: the shipped example manifest is valid"
 EXAMPLE="$(cd "$HERE/.." && pwd)/skills/operating-a-fleet/references/ci-replica.example.json"
 if [ -f "$EXAMPLE" ]; then

@@ -36,6 +36,29 @@ once, merged once.
 8. **Restore the rules, then reconcile.** `fleet-reconcile.sh --pr <N> --apply`, then release the
    lease. The wave is not over until the tracker matches the code.
 
+## Leaving degraded mode: repay what the window owes
+
+Every `NOT-RUN` in a window's run reports is a verdict CI still owes: a path-filtered job that the
+first post-window PR will skip, a scheduled scan whose next run becomes the new baseline and absorbs the
+window's findings unattributed, a nightly lane that is the only enforcement of something. Keep them in
+a committed ledger while the window is open, and name it from `.claude/fleet-mode.json`:
+
+```json
+{ "mode": "degraded", "issue": "Owner/Repo#N", "owedVerdicts": ".claude/owed-verdicts.json" }
+```
+
+The ledger is `{ "items": [ { "id", "verdict", "howToPay", "paid": null } ] }`; a payment records the
+run that measured it, the SHA and the result (a red result is a payment when it names the issue it
+filed; the debt is the missing measurement, not a pass). `fleet-mode.sh` lists the unpaid ids in the
+degraded banner, in the stale-declaration banner once Actions is back, and, after the file says
+`normal`, in a `VERDICTS OWED` banner that stays until the ledger is settled.
+
+**Do not set `mode` back to `normal` while an item is unpaid.** The first run that can pay a debt is
+the first one after Actions returns, so pay each then (dispatch the lane, record the run), and only
+then declare normal. A repo can also make the debt a gate: MuscleBuddy's
+`scripts/ci/owed-verdicts.test.ts` fails every CI run ON Actions while its ledger has an unpaid item,
+so the first PR after the window is the one that records the payments.
+
 ## Traps
 
 Each of these cost a session the first time. They are listed in the order they bite.
