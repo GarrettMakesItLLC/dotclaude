@@ -20,7 +20,9 @@ make_pair() {
   base="$(mktemp -d -p "$TMP")"
   origin="$base/origin.git"
   clone="$base/clone"
-  git init --quiet --bare "$origin"
+  # Named explicitly: the bare repo's HEAD decides what a later clone checks
+  # out, and `init.defaultBranch` is `master` on a stock runner.
+  git init --quiet --bare --initial-branch=main "$origin"
   git clone --quiet "$origin" "$clone"
   git -C "$clone" config user.email test@example.com
   git -C "$clone" config user.name test
