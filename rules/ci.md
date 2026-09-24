@@ -34,7 +34,7 @@ CI splits into two tiers by trigger, so the PR gate stays fast and the slow suit
 **One required check for both: `CI Success`.** GitHub's merge queue re-validates every check listed in a ruleset's `required_status_checks` against the merge group's synthetic commit — a check whose workflow has no `merge_group` trigger simply never posts there, and the queue entry hangs until `check_response_timeout_minutes` expires it. Rather than carrying a second required-check name (`Queue CI Success`) for the queue lane, every repo runs a **single** `ci-success` job, triggered by both `pull_request` and `merge_group` (`if: always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group')`), that `needs:` the full job list (Tier 1 + `lint-pr-title` + Tier 2). Its "did anything skip that shouldn't have" verification step is event-aware:
 
 - On `pull_request`: Tier 1 jobs (and `lint-pr-title`) must not have skipped when they had real work; Tier 2 jobs are *expected* to be skipped (they only run on `merge_group`).
-- On `merge_group`: Tier 1 jobs (and `lint-pr-title`) are *expected* to be skipped (already validated before the PR could queue); Tier 2 jobs must not have skipped when they had real work.
+- On `merge_group`: Tier 1 jobs (and `lint-pr-title`) are *expected* to be skipped (already validated before the PR could queue); Tier 2 jobs must not have skipped when they had real work. A repo that re-runs Tier 1 on the queue (see the exception under "Nothing runs twice") treats Tier 1 as must-not-skip here too.
 
 One name, one ruleset entry, no second aggregate to keep in sync, no republish tricks for anything that can be pulled into this job's own `needs:` graph.
 
@@ -43,6 +43,20 @@ A PR entering the queue already passed Tier 1 — that's what let it queue. The 
 **`merge_group` is a ref-update trigger, not a PR event.** Jobs it triggers don't see `github.event.pull_request` — anything moved into a Tier 2 job that reads PR context (PR number, labels, diff) needs adjusting to read from the merge-queue ref instead.
 
 **Nothing runs twice.** A suite lives in exactly one tier. A nightly/weekly/post-merge lane that duplicates what the queue now covers should be removed — the queue is faster feedback on the same signal. A lane checking something the queue genuinely can't (real-device smoke, dependency drift, staleness) stays as-is; this is a placement change, not "add more CI everywhere."
+
+**One sanctioned exception: re-running Tier 1 on `merge_group` as the semantic-conflict gate.** A batched queue entry is a tree no PR ever ran: two PRs green on their own can break each other (a renamed export and a new caller of the old name). A repo whose queue batches PRs and has been bitten by that may keep Tier 1 running on `merge_group`, with `ci-success` treating Tier 1 as must-not-skip on both events. It costs one extra Tier 1 run per queue entry — the largest line on MuscleBuddy's bill, and kept there deliberately (MuscleBuddy#5291) — so it is a decision the repo states in its `ci.yml`, not a default. Cut its cost with verdict reuse (below), never by dropping the re-run silently.
+
+## Reuse a verdict on unchanged inputs
+
+A job's verdict depends only on what it reads. When a job declares its inputs, a green verdict can be keyed by the **content hash** of those inputs in the tree the job would check, and a later run over a byte-identical input set can skip the job instead of paying for it again.
+
+- **Key:** content hash of the declared input paths, plus the lockfile and the workflow file itself. On `merge_group` the hash is taken over the combined tree, so a batch that changes any input re-runs — reuse does not weaken the semantic-conflict gate above.
+- **Record and look up:** on success, save a tiny cache entry `verdict-<job>-<hash>`; the cheap gate job does a lookup-only restore and outputs `reuse_<job>`. The heavy job skips on a hit (a skipped job is not billed), and `ci-success` accepts that skip **only** when the lookup output says a verdict exists — every other skip keeps its meaning.
+- **Completeness is the whole risk.** An undeclared input makes reuse unsound. Declare generously, keep the declaration in one module both the workflow and a guard test read, and have the guard fail when a path the job's commands read is not covered.
+- **The promotion is always a full gate.** A `release/* → main` (or equivalent) run never reuses.
+- **A local CI replica never treats reuse as PASS** — it has no verdict cache, and NOT-RUN is not PASS.
+
+Start with the most expensive job whose inputs are easiest to bound (accessibility suites are the usual first win) and extend only where the arithmetic justifies the guard.
 
 Don't wire `merge_group` into `ci-success` until at least one real Tier 2 job exists for it to `needs:` — a job with nothing to need is the same "skipped job satisfies a required check" trap as below, just at the trigger level. Until then, `ci-success` stays `pull_request`-only.
 
