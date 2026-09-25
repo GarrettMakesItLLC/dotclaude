@@ -1314,16 +1314,64 @@ describe("issue_claim", () => {
     expect(out._warnings[0]).toContain("status:in-progress");
   });
 
-  it("uses an explicit branch override instead of deriving one from the title", async () => {
+  it("uses an explicit branch as the WORK branch, but locks the canonical name (#416)", async () => {
     const calls: string[] = [];
     fetchMock.mockImplementation(mockClaim({ refStatus: 201, calls }));
 
     const handler = await getIssueHandler("issue_claim");
-    const res = await handler({ repo: "octo/repo", number: 8, branch: "issue-8-custom" });
+    const res = await handler({ repo: "octo/repo", number: 8, branch: "batch/turf-crews-0924" });
 
     expect(res.isError).toBeFalsy();
-    const out = JSON.parse(res.content[0].text) as { branch: string };
-    expect(out.branch).toBe("issue-8-custom");
+    const out = JSON.parse(res.content[0].text) as {
+      branch: string;
+      lock_branch: string;
+      checkout: string;
+    };
+    // The reported work branch is the caller's custom name...
+    expect(out.branch).toBe("batch/turf-crews-0924");
+    // ...but the ref actually created on the remote — the lock — is always
+    // the canonical name derived from the issue title, never the custom one.
+    expect(out.lock_branch).toBe("issue-8-fix-the-thing");
+    const refCall = calls.find((c) => c === "POST /repos/octo/repo/git/refs");
+    expect(refCall).toBeDefined();
+    expect(out.checkout).toContain("issue-8-fix-the-thing");
+    expect(out.checkout).toContain("batch/turf-crews-0924");
+  });
+
+  it("refuses a second claim under a DIFFERENT custom branch name for the same issue (#416)", async () => {
+    // The bug: two sessions each pass their own `branch`, and because the old
+    // code used the caller's string as the lock identity, the atomic
+    // ref-create for "batch/turf-crews-0924" and "issue-8-fix-the-thing"
+    // never collided — both succeeded. Now both attempts target the same
+    // canonical ref, so the second one gets a 422 and fails loudly.
+    const callsA: string[] = [];
+    fetchMock.mockImplementation(mockClaim({ refStatus: 201, calls: callsA }));
+    const handler = await getIssueHandler("issue_claim");
+    const first = await handler({ repo: "octo/repo", number: 8, branch: "batch/turf-crews-0924" });
+    expect(first.isError).toBeFalsy();
+
+    const callsB: string[] = [];
+    fetchMock.mockImplementation(
+      mockClaim({
+        refStatus: 422,
+        calls: callsB,
+        commentsBody: [
+          {
+            body:
+              "🔒 Claimed by `box-a` (session `abc`) at 2026-09-24T04:48:08.000Z (branch `issue-8-fix-the-thing`)\n" +
+              '<!-- claim-lock: {"branch":"issue-8-fix-the-thing","holder":"box-a","claimed_at":"2026-09-24T04:48:08.000Z","session":"abc"} -->',
+          },
+        ],
+      }),
+    );
+    const second = await handler({
+      repo: "octo/repo",
+      number: 8,
+      branch: "issue-8-fix-the-thing-alt-name",
+    });
+    expect(second.isError).toBe(true);
+    const body = JSON.parse(second.content[0].text) as { holder: { branch: string } };
+    expect(body.holder.branch).toBe("issue-8-fix-the-thing");
   });
 
   it("flags model_mismatch when caller_model is under-provisioned for the issue's Effort field", async () => {

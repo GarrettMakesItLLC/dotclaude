@@ -656,18 +656,23 @@ export function registerIssueTools(server: McpServer): void {
     "issue_claim",
     {
       description:
-        "Claim an issue to begin work, taking a distributed lock first: creates the remote branch " +
-        "`issue-<N>-<slug>` at the default-branch head via an atomic ref create, stamps a claim " +
-        "comment on the issue (holder identity + timestamp), then self-assigns the authenticated " +
-        "user and moves status to in-progress. Refuses on a CLOSED issue — finished work, not " +
-        "available to claim. Refuses on an issue with open sub-issues — an epic is meant to be " +
-        "decomposed, not implemented directly; claim a specific sub-issue instead. If the branch " +
-        "already exists the issue is ALREADY CLAIMED — the call " +
+        "Claim an issue to begin work, taking a distributed lock first: creates the CANONICAL " +
+        "remote branch `issue-<N>-<slug>` at the default-branch head via an atomic ref create, " +
+        "stamps a claim comment on the issue (holder identity + timestamp), then self-assigns the " +
+        "authenticated user and moves status to in-progress. The lock ref is always the canonical " +
+        "name, regardless of `branch` — a caller-chosen name is never the lock identity, only the " +
+        "name of the branch to actually work on (e.g. a shared batch branch), because a lock whose " +
+        "identity depends on a caller-chosen string is no lock at all: two sessions naming different " +
+        "branches for the same issue would both succeed. Refuses on a CLOSED issue — finished work, " +
+        "not available to claim. Refuses on an issue with open sub-issues — an epic is meant to be " +
+        "decomposed, not implemented directly; claim a specific sub-issue instead. If the canonical " +
+        "lock ref already exists the issue is ALREADY CLAIMED — the call " +
         "fails with the holder's branch, last commit, any open PR, and — from the stamp — who holds " +
         "it and when, so you can tell your own earlier session from another machine. Default to " +
         "picking different work unless the stamp identifies THIS machine. Assignee alone cannot " +
         "arbitrate this: every machine authenticates as the same user. Check out the returned " +
-        "branch instead of creating your own. Pass `caller_model` (your own model id, e.g. " +
+        "`branch` (falling back to `lock_branch` when no override was given — they're the same " +
+        "thing) instead of creating your own. Pass `caller_model` (your own model id, e.g. " +
         "\"claude-sonnet-5\") and, when the issue carries an Effort field value calling for a " +
         "stronger model than you're running, the claim still succeeds but reports a " +
         "`model_mismatch` field flagging it — over-provisioned needs no action, under-provisioned " +
@@ -678,7 +683,12 @@ export function registerIssueTools(server: McpServer): void {
         branch: z
           .string()
           .optional()
-          .describe("Override the derived lock branch name (default `issue-<N>-<title-slug>`)."),
+          .describe(
+            "The branch to actually work on (e.g. a shared batch branch), when it should differ " +
+              "from the canonical lock ref `issue-<N>-<title-slug>`. This is NEVER the lock identity " +
+              "— the lock ref created on the remote is always the canonical name — so a caller " +
+              "cannot opt out of the per-issue lock by naming a branch.",
+          ),
         caller_model: z
           .string()
           .optional()
@@ -728,14 +738,20 @@ export function registerIssueTools(server: McpServer): void {
             { open_sub_issues: 0, total_sub_issues: 0 },
           );
         }
-        const target = branch ?? claimBranchName(number, issue.title ?? "");
-        const lock = await acquireClaimLock(owner, name, target, number);
+        // The lock identity is ALWAYS the canonical name, never the caller's
+        // `branch` — see #416: a custom branch used as the lock let two
+        // sessions each create a differently-named ref for the same issue,
+        // and the atomic ref-create never collided because the two names
+        // never matched.
+        const lockBranch = claimBranchName(number, issue.title ?? "");
+        const lock = await acquireClaimLock(owner, name, lockBranch, number);
+        const target = branch ?? lockBranch;
 
         // The ref IS the lock. Once it exists the claim is held, so a failure in
         // any step below is reported as a warning and never rolls the ref back.
         const warnings: string[] = [];
         try {
-          await stampClaim(owner, name, number, target);
+          await stampClaim(owner, name, number, lockBranch);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           warnings.push(`claim stamp not posted (the branch lock is held regardless): ${msg}`);
@@ -786,11 +802,18 @@ export function registerIssueTools(server: McpServer): void {
           claimed: true,
           issue: number,
           branch: target,
+          // Always present, and always the canonical name — the actual lock,
+          // whatever `branch` asked to work under. Equal to `branch` when no
+          // override was given.
+          lock_branch: lockBranch,
           base: lock.base,
           sha: lock.sha,
           assignee,
           status,
-          checkout: `git fetch origin && git checkout ${target}`,
+          checkout:
+            target === lockBranch
+              ? `git fetch origin && git checkout ${lockBranch}`
+              : `git fetch origin ${lockBranch} && git checkout -b ${target} origin/${lockBranch}`,
           model_mismatch: modelMismatch,
         };
         return jsonText(warnings.length ? { ...result, _warnings: warnings } : result);
