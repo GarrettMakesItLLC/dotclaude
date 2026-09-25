@@ -169,6 +169,23 @@ run '{"version":1,"jobs":[
 run '{"version":1,"jobs":[{"name":"bad","commands":["true"],"mutatesTree":"tracked.txt"}]}'
 [ "$RC" = 2 ] && ok "a non-array mutatesTree is refused" || bad "expected rc=2, got $RC: $OUT"
 
+echo "ci-replica: a tree dirty enough to overflow an env var still fails (#415)"
+# #415: the guard used to hand both snapshots to python through the
+# environment. A single env value over MAX_ARG_STRLEN (128 KiB) makes that
+# `exec` fail with 126, and the old code read the empty capture as "no
+# undeclared files" — a fail-open. 8000 untracked files comfortably clears
+# 128 KiB of `git status --porcelain -uall` output (WSL's @lhci/cli left
+# ~6,500 lines behind in the real repro).
+run '{"version":1,"jobs":[
+  {"name":"leaves-a-mess","commands":["mkdir -p bigdirt && seq 1 8000 | xargs -I{} touch bigdirt/f{}"]}
+]}'
+[ "$RC" = 1 ] && ok "an oversized dirty tree still fails the run, not silently PASS" \
+  || bad "fail-open on an oversized status: rc=$RC $OUT"
+grep -q 'tree-guard' <<<"$OUT" && ok "and it's reported as a tree-guard failure" \
+  || bad "no tree-guard mention: $OUT"
+grep -qE 'PASS +leaves-a-mess' <<<"$OUT" && bad "the dirty job must not read PASS" || ok "not reported PASS"
+( cd "$ROOT" && rm -rf bigdirt )
+
 echo "ci-replica: --base reaches every job as CI_REPLICA_BASE"
 # The repo needs a commit for --base to resolve against.
 git -C "$ROOT" -c user.email=t@t -c user.name=t commit --quiet --allow-empty -m base >/dev/null 2>&1

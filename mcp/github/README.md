@@ -238,7 +238,11 @@ mutex, and the pushed branch simultaneously advertises the work.
 
 `issue_claim` therefore, in order:
 
-1. resolves the branch `issue-<N>-<title-slug>` (override with `branch`),
+1. resolves the CANONICAL lock branch `issue-<N>-<title-slug>` — always this
+   name, never the caller's `branch` (#416: a custom branch used AS the lock
+   let two sessions each create a differently-named ref for the same issue,
+   and the atomic ref-create never collided because the names never
+   matched),
 2. creates that ref at the default-branch head — a `422` here means **already
    claimed**, and the call fails with the holder's branch, last commit
    author/date, any open PR, and — when a stamp was posted — who holds it and
@@ -248,7 +252,10 @@ mutex, and the pushed branch simultaneously advertises the work.
    in `_warnings` on failure; the ref is what actually holds the lock,
 4. self-assigns and sets `status:in-progress` — failures there are also
    reported in `_warnings` and never roll back the ref,
-5. returns the branch to `git fetch && git checkout` rather than creating your own.
+5. returns `branch` (the branch to actually work on — `branch` when given,
+   otherwise the canonical name) and `lock_branch` (always the canonical
+   name) with a `checkout` command for whichever shape applies; use it rather
+   than creating your own.
 
 The stamp exists because the ref alone answers "is this claimed?" but not "by
 whom" — every machine authenticates as the same GitHub user, so a conflict
