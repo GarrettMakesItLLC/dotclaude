@@ -215,24 +215,41 @@ gating = [r for r in runs if r.get("event") in GATING_EVENTS]
 # unfiltered feed can give.
 windowed = (gating or runs)[:window]
 
-parsed = []
-for r in windowed:
-    start = ts(r.get("run_started_at") or r.get("created_at"))
-    end = ts(r.get("updated_at"))
-    parsed.append({
-        "name": r.get("name") or r.get("workflow_id"),
-        "conclusion": r.get("conclusion"),
-        "status": r.get("status"),
-        "dur": (end - start) if (start is not None and end is not None) else None,
-        "start": start or 0,
-    })
-parsed.sort(key=lambda p: p["start"], reverse=True)
+def parse_runs(rs):
+    out = []
+    for r in rs:
+        start = ts(r.get("run_started_at") or r.get("created_at"))
+        end = ts(r.get("updated_at"))
+        out.append({
+            "name": r.get("name") or r.get("workflow_id"),
+            "conclusion": r.get("conclusion"),
+            "status": r.get("status"),
+            "dur": (end - start) if (start is not None and end is not None) else None,
+            "start": start or 0,
+        })
+    out.sort(key=lambda p: p["start"], reverse=True)
+    return out
+
+parsed = parse_runs(windowed)
 
 def is_instant_fail(p):
     return p["conclusion"] == "failure" and p["dur"] is not None and p["dur"] <= instant
 
 instant_fails = [p for p in parsed if is_instant_fail(p)]
-names = {p["name"] for p in instant_fails}
+
+# Corroboration ("more than one workflow refused, not just one flaky job")
+# must come from the UNFILTERED feed, not the gating-filtered one. A repo
+# with exactly one gating workflow (#414: RedThreadEvents has only `CI` on a
+# gating event) can never produce >= 2 distinct names from `gating` alone —
+# the other refused workflows (OG image monitor, SEO monitor, ...) exist only
+# in the wider, non-gating feed. Gating stays the filter for CURRENT STATE
+# (`windowed`/`recent`/`executing` below); corroboration reads the whole feed.
+# Not windowed by count: `buried-refusal` (#381) is exactly the shape where a
+# recency-bounded slice of the unfiltered feed is ALSO all noise (25 recent
+# `deployment_status` runs outrank the actual failures), so corroboration
+# looks at every fetched run (already bounded by RUNS_PER_PAGE) rather than
+# re-truncating to `window`.
+all_names = {p["name"] for p in parse_runs(runs) if is_instant_fail(p)}
 
 def is_executing(p):
     return (p["conclusion"] == "success"
@@ -248,14 +265,14 @@ def is_executing(p):
 # can take tens of seconds to record its jobs as refused, and that one slow
 # record used to veto nineteen corroborating ones (#398).
 recent = parsed[:5]
-if (len(instant_fails) >= 3 and len(names) >= 2
+if (len(instant_fails) >= 3 and len(all_names) >= 2
         and not any(is_executing(p) for p in recent)
         and any(is_instant_fail(p) for p in recent)):
     newest = next(p for p in recent if is_instant_fail(p))
-    others = [n for n in sorted(names) if n != newest["name"]][:3]
+    others = [n for n in sorted(all_names) if n != newest["name"]][:3]
     emit("refused",
          "Actions is refusing jobs — %d of the last %d runs failed within %ds of starting, "
-         "across %d workflows" % (len(instant_fails), len(parsed), int(instant), len(names)),
+         "across %d workflows" % (len(instant_fails), len(parsed), int(instant), len(all_names)),
          "most recent: %s%s" % (newest["name"],
                                 "; also " + ", ".join(others) if others else ""))
 
@@ -471,6 +488,18 @@ elif ci == "unknown":
     lines.append(v.get("reason", "could not determine whether CI is answering"))
     lines.append("Treat the gate as unverified rather than assuming either mode: check the PR\n"
                  "checks by hand before merging. Re-check with `bin/fleet-mode.sh probe`.")
+    if declared == "degraded":
+        # The probe could not corroborate the refusal, but the repo already
+        # has degraded mode authorized (#414) — a session should not read
+        # "gate unverified" and miss that a mode is already in effect.
+        lines.append("")
+        lines.append(
+            "NOTE: .claude/fleet-mode.json already declares degraded mode for this repo%s. "
+            "The probe just could not confirm the refusal signature this time — that does not "
+            "mean the declaration is stale. Follow degraded mode (%s) until an integrator "
+            "says otherwise on the coordination issue."
+            % (" (%s)" % issue if issue else "", skill)
+        )
 elif ci == "healthy" and owed:
     # Normal again, but the window has not been paid for. Not silent: the
     # debt is the one thing a returned gate does not measure on its own.

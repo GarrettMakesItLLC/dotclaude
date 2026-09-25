@@ -81,6 +81,17 @@ elif kind == "slow-newest-refusal":
     runs.append(run("Scheduled lane staleness", "failure", 42, 30))
     for i in range(19):
         runs.append(run("workflow-%d" % i, "failure", 3, 60 + i * 60))
+elif kind == "single-gating-refusal":
+    # #414: RedThreadEvents has exactly ONE workflow on a gating event (CI),
+    # so `gating` corroboration alone can never reach >= 2 distinct names —
+    # the OTHER refused workflows (OG image monitor, SEO monitor, Supabase
+    # auth posture, Deploy verification) run on `schedule`, a non-gating
+    # event, and sit only in the unfiltered feed.
+    for i in range(4):
+        runs.append(run("CI", "failure", 2, 30 + i * 60, event="push"))
+    for i, wf in enumerate(["OG image monitor", "SEO monitor", "Supabase auth posture",
+                            "Deploy verification"]):
+        runs.append(run(wf, "failure", 3, 40 + i * 10, event="schedule"))
 elif kind == "schedule-only":
     # The fallback case: a repo whose CI genuinely only runs on a schedule.
     # Filtering to zero gating runs must not make it permanently UNKNOWN.
@@ -98,7 +109,7 @@ print(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
 '
 }
 
-for k in refused healthy one-flaky stale-history buried-refusal slow-newest-refusal schedule-only empty garbage; do
+for k in refused healthy one-flaky stale-history buried-refusal slow-newest-refusal single-gating-refusal schedule-only empty garbage; do
   mkfixture "$k" > "$TMP/$k.json"
 done
 
@@ -145,6 +156,12 @@ wantnot "buried-refusal" "UNKNOWN" "$out"
 out="$(run_probe slow-newest-refusal)"
 want "slow-newest-refusal" "CI IS REFUSING JOBS" "$out"
 wantnot "slow-newest-refusal" "UNKNOWN" "$out"
+
+# --- 1d. A single gating workflow still corroborates from the wider feed (#414)
+fresh; marker -
+out="$(run_probe single-gating-refusal)"
+want "single-gating-refusal" "CI IS REFUSING JOBS" "$out"
+wantnot "single-gating-refusal" "UNKNOWN" "$out"
 
 # --- 1c. A repo whose CI genuinely only runs on a schedule still gets an
 # answer. Filtering to zero gating runs falls back to the whole feed rather
@@ -236,6 +253,16 @@ fresh
 out="$(run_probe garbage)"
 want "garbage" "FLEET MODE: UNKNOWN" "$out"
 want "garbage" "Treat the gate as unverified" "$out"
+
+# --- 8b. UNKNOWN with degraded already declared says so, not just "unverified"
+# (#414): a session must not read "gate unverified" and miss that degraded
+# mode is already authorized for this repo.
+fresh; marker degraded
+out="$(run_probe garbage)"
+want "unknown/degraded" "FLEET MODE: UNKNOWN" "$out"
+want "unknown/degraded" "already declares degraded mode" "$out"
+want "unknown/degraded" "GarrettMakesItLLC/fixture#1" "$out"
+marker -
 
 # --- 9. The hook envelope is valid JSON and carries the banner --------------
 fresh; marker -
