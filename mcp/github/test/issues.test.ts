@@ -1370,8 +1370,9 @@ describe("issue_claim", () => {
       branch: "issue-8-fix-the-thing-alt-name",
     });
     expect(second.isError).toBe(true);
-    const body = JSON.parse(second.content[0].text) as { holder: { branch: string } };
-    expect(body.holder.branch).toBe("issue-8-fix-the-thing");
+    const body = JSON.parse(second.content[0].text) as { branch: string; reason: string };
+    expect(body.reason).toBe("already-claimed");
+    expect(body.branch).toBe("issue-8-fix-the-thing");
   });
 
   it("flags model_mismatch when caller_model is under-provisioned for the issue's Effort field", async () => {
