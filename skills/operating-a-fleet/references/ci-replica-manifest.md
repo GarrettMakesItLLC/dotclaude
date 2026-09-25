@@ -174,6 +174,20 @@ An `over budget` flag is ambiguous on its own: over budget when run **alone** is
 budget only **in-suite** is contention from sibling agents. Re-run the one job with `--job <name>`
 before treating it as a finding.
 
+## A check the workflow delegates to a shared action
+
+When a consumer's workflow runs a check through a `GarrettMakesItLLC/ci` composite action
+(`uses: GarrettMakesItLLC/ci/actions/check-action-pins@v1`) instead of a repo script, the replica
+still has to run that check, or the job reads PASS over nothing. `bin/run-shared-action.sh` runs the
+action locally at the ref the workflow pins, through ci's `scripts/run-composite.py`:
+
+```json
+"commands": ["~/dotclaude/bin/run-shared-action.sh check-action-pins --ref v1 --input workflow-dir=.github/workflows"]
+```
+
+It refuses an action it cannot run faithfully (a nested `uses:`, a step `if:`) before executing any
+step, so an unsupported action fails the job rather than passing it.
+
 ## Where the manifest lives
 
 One per repo, at `.claude/ci-replica.json`, committed. It is config, not scratch — a validator on
