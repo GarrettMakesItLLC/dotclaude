@@ -323,6 +323,11 @@ while IFS="	" read -r idx name; do
   tree_before=""
   if [ "$TREE_GUARD" = 1 ]; then
     tree_before=$(cd "$ROOT" && git status --porcelain -uall 2>/dev/null || true)
+    # Written to a file, not just held in $tree_before: a dirty tree of any
+    # real size (#415 — a job that leaves thousands of files behind) makes
+    # the file the only sound way to hand this to python, since the env-var
+    # form below is capped by MAX_ARG_STRLEN.
+    printf '%s' "$tree_before" > "$d/tree-before"
   fi
 
   # Move `withoutFiles` aside for the duration of this job only.
@@ -368,19 +373,43 @@ while IFS="	" read -r idx name; do
   if [ "$TREE_GUARD" = 1 ]; then
     tree_after=$(cd "$ROOT" && git status --porcelain -uall 2>/dev/null || true)
     if [ "$tree_after" != "$tree_before" ]; then
-      undeclared=$(
-        TREE_BEFORE="$tree_before" TREE_AFTER="$tree_after" DECL="$d/mutates" python3 - <<'TREEPY'
+      # Both snapshots go to FILES under the job dir, not through the
+      # environment (#415): a job that leaves thousands of files dirty (WSL's
+      # `@lhci/cli` chrome profiles, ~6,500 lines of `git status --porcelain`)
+      # makes a single env var over MAX_ARG_STRLEN (128 KiB), which fails
+      # `exec` with exit 126 — silently, since the old code never checked the
+      # comparison's own exit status, so the guard read a failed exec as "no
+      # undeclared files" and passed a dirty tree clean.
+      printf '%s' "$tree_after" > "$d/tree-after"
+      undeclared="$(
+        BEFORE_FILE="$d/tree-before" AFTER_FILE="$d/tree-after" DECL="$d/mutates" python3 - <<'TREEPY'
 import os, fnmatch
-before = {l[3:] for l in os.environ["TREE_BEFORE"].splitlines() if len(l) > 3}
-after = {l[3:] for l in os.environ["TREE_AFTER"].splitlines() if len(l) > 3}
+with open(os.environ["BEFORE_FILE"]) as f:
+    before = {l[3:] for l in f.read().splitlines() if len(l) > 3}
+with open(os.environ["AFTER_FILE"]) as f:
+    after = {l[3:] for l in f.read().splitlines() if len(l) > 3}
 declared = [p.strip() for p in open(os.environ["DECL"]) if p.strip()]
 changed = sorted(after - before)
 for path in changed:
     if not any(fnmatch.fnmatch(path, d) for d in declared):
         print(path)
 TREEPY
-      )
-      if [ -n "$undeclared" ]; then
+      )"
+      compare_rc=$?
+      if [ "$compare_rc" -ne 0 ]; then
+        # A guard that cannot run is not a clean tree. Any non-zero exit from
+        # the comparison itself — however it happened — fails the job rather
+        # than falling through as "$undeclared" being empty.
+        {
+          echo ""
+          echo "### tree-guard: the undeclared-file comparison failed (exit $compare_rc) instead of reporting a result"
+        } >> "$log"
+        printf '    ! tree-guard: comparison for %s failed (exit %s) — refusing to treat an unmeasured tree as clean\n' \
+          "$name" "$compare_rc"
+        echo "        Re-run with a smaller diff, or investigate the comparison directly:"
+        echo "        BEFORE_FILE=$d/tree-before AFTER_FILE=$d/tree-after DECL=$d/mutates"
+        if [ "$rc" -eq 0 ]; then rc=91; failed_cmd="tree-guard: comparison failed for $name"; fi
+      elif [ -n "$undeclared" ]; then
         {
           echo ""
           echo "### tree-guard: this job changed files it did not declare:"
