@@ -330,8 +330,9 @@ your shell. Never in the symlinked `settings.json`.
 | Env var | Used by | Where to get it |
 |---------|---------|-----------------|
 | `UPLOAD_POST_API_KEY` | `upload-post` MCP | Upload-Post dashboard → API key / JWT (<https://app.upload-post.com/>) |
+| `GEMINI_API_KEY` | content-studio's `generate-image` CLI (image generation, called directly from a Claude Code session — not a product-repo integration) | Google AI Studio (<https://aistudio.google.com/apikey>) |
 
 ```jsonc
 // ~/.claude/settings.local.json
-{ "env": { "UPLOAD_POST_API_KEY": "eyJ…" } }
+{ "env": { "UPLOAD_POST_API_KEY": "eyJ…", "GEMINI_API_KEY": "AIza…" } }
 ```
