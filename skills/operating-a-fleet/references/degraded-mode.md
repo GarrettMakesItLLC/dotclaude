@@ -30,11 +30,18 @@ once, merged once.
    re-runs what failed plus anything the fix could plausibly touch — and always the full suite on the
    final SHA, because a targeted re-run has never been the thing that catches the interaction.
 
-7. **`ALL GREEN @ <sha>`.** Only now does the integrator merge, and **only that SHA** — see the pin
-   rule below.
+7. **`ALL GREEN @ <sha>`, then `fleet-merge.sh`.** The authorization is the `verdict.json` that
+   `ci-replica.sh` writes into its log dir, not the comment. The comment reports it: quote the
+   verdict's path and the `sha256=` line the run printed. Merge with
+   `fleet-merge.sh <PR> --verdict <logdir>/verdict.json`. It refuses unless the verdict is for the
+   PR's current head, came from a full run (no `--job`), measured a clean tree against the head's own
+   manifest, and every local job PASSed. It then lifts every merge-gating ruleset on the base
+   (repo and org), merges pinned to that SHA, and restores and reads back each ruleset's
+   `bypass_actors`, restoring even when the merge fails. A job carried over from an earlier SHA is
+   not a verdict. Re-run the full suite on the final SHA.
 
-8. **Restore the rules, then reconcile.** `fleet-reconcile.sh --pr <N> --apply`, then release the
-   lease. The wave is not over until the tracker matches the code.
+8. **Reconcile.** `fleet-reconcile.sh --pr <N> --apply`, then release the lease. The wave is not
+   over until the tracker matches the code.
 
 ## Leaving degraded mode: repay what the window owes
 

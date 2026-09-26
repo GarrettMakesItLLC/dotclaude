@@ -282,8 +282,22 @@ RESULTS="$PLAN/results"
 : > "$RESULTS"
 any_fail=0
 
+# The tree and HEAD the run STARTS from: what `verdict.json` describes. A tree
+# that is dirty here is measured as-is, so the verdict says so rather than
+# naming a commit it did not test.
+RUN_SHA=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo "")
+RUN_TREE_CLEAN=1
+[ -z "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ] || RUN_TREE_CLEAN=0
+
 while IFS="	" read -r idx name; do
-  selected_wanted "$name" || continue
+  # A deselected job is a row, not an absence. Skipping it silently made a
+  # `--job lint --job test` run print "N passed, 0 failed, 0 not run" — a partial
+  # run reading as a whole one (MuscleBuddy#8958).
+  if ! selected_wanted "$name"; then
+    printf 'NOT-RUN  %-22s not selected (--job)\n' "$name"
+    printf 'NOT-RUN\t%s\t0\tnot selected (--job)\n' "$name" >> "$RESULTS"
+    continue
+  fi
   d="$PLAN/jobs/$idx"
   log="$LOG_DIR/$name.log"
   budget="$(meta_get "$d" budget)"
@@ -446,10 +460,65 @@ while IFS="	" read -r status name secs detail; do
 done < "$RESULTS"
 echo "──────────────────────────────────────────────────────────────"
 
+# The verdict as an artifact, not prose (MuscleBuddy#8955). `fleet-merge.sh`
+# refuses to lift branch protection unless a verdict for the exact head SHA
+# exists, came from a FULL run (no --job), measured a clean tree against the
+# head's own manifest, and failed nothing. A hand-written `ALL GREEN` comment
+# is a report of this file, never a substitute for it.
+VERDICT="$LOG_DIR/verdict.json"
+RESULTS="$RESULTS" PLAN="$PLAN" VERDICT="$VERDICT" RUN_SHA="$RUN_SHA" \
+RUN_TREE_CLEAN="$RUN_TREE_CLEAN" MANIFEST="$MANIFEST" BASE="${BASE:-}" \
+DATA_PLANE="$DATA_PLANE" FULL="$([ ${#SELECTED[@]} -eq 0 ] && echo 1 || echo 0)" \
+ANY_FAIL="$any_fail" python3 - <<'VERDICTPY' || die "could not write $VERDICT"
+import hashlib, json, os, datetime
+meta = {}
+for line in open(os.path.join(os.environ["PLAN"], "order")):
+    line = line.rstrip("\n")
+    if not line:
+        continue
+    idx, name = line.split("\t", 1)
+    kv = dict(l.rstrip("\n").split("=", 1) for l in open(os.path.join(os.environ["PLAN"], "jobs", idx, "meta")) if "=" in l)
+    meta[name] = kv
+jobs = []
+for line in open(os.environ["RESULTS"]):
+    parts = line.rstrip("\n").split("\t")
+    if len(parts) < 3:
+        continue
+    status, name, secs = parts[0], parts[1], parts[2]
+    detail = parts[3] if len(parts) > 3 else ""
+    m = meta.get(name, {})
+    jobs.append({
+        "name": name,
+        "result": status,
+        "seconds": int(secs) if secs.isdigit() else 0,
+        "detail": detail,
+        "local": m.get("local") == "1",
+        "needsDataPlane": m.get("needs_data_plane") == "1",
+    })
+with open(os.environ["MANIFEST"], "rb") as fh:
+    manifest_sha = hashlib.sha256(fh.read()).hexdigest()
+verdict = {
+    "schema": 1,
+    "sha": os.environ["RUN_SHA"],
+    "treeClean": os.environ["RUN_TREE_CLEAN"] == "1",
+    "full": os.environ["FULL"] == "1",
+    "dataPlane": os.environ["DATA_PLANE"] == "1",
+    "base": os.environ["BASE"] or None,
+    "manifestSha256": manifest_sha,
+    "finishedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "jobs": jobs,
+    "exit": 1 if os.environ["ANY_FAIL"] == "1" else 0,
+}
+with open(os.environ["VERDICT"], "w") as fh:
+    json.dump(verdict, fh, indent=2)
+    fh.write("\n")
+VERDICTPY
+
 pass=$(grep -c '^PASS'    "$RESULTS" || true)
 failn=$(grep -c '^FAIL'   "$RESULTS" || true)
 notrun=$(grep -c '^NOT-RUN' "$RESULTS" || true)
 echo "$pass passed, $failn failed, $notrun not run.  Logs: $LOG_DIR"
+echo "verdict: $VERDICT  sha256=$(sha256sum "$VERDICT" | cut -d' ' -f1)"
 if [ "$notrun" -gt 0 ]; then
   echo ""
   echo "NOT-RUN is not PASS. $notrun job(s) above were not measured here — carry them"

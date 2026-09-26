@@ -96,6 +96,28 @@ run '{"version":1,"jobs":[{"name":"a","commands":["touch '"$TMP"'/sel-a"]},{"nam
 run '{"version":1,"jobs":[{"name":"a","commands":["true"]}]}' --job typo
 [ "$RC" = 2 ] && ok "an unknown --job is refused, not silently an empty green run" || bad "typo accepted: rc=$RC $OUT"
 
+echo "ci-replica: a --job run names every job it left out"
+run '{"version":1,"jobs":[{"name":"a","commands":["true"]},{"name":"b","commands":["true"]},{"name":"c","commands":["true"]}]}' --job b
+grep -q 'NOT-RUN.*a .*not selected' <<<"$OUT" && grep -q 'NOT-RUN.*c .*not selected' <<<"$OUT" \
+  && ok "deselected jobs read NOT-RUN (not selected)" || bad "deselected jobs silent: $OUT"
+grep -q '1 passed, 0 failed, 2 not run' <<<"$OUT" \
+  && ok "and are counted, so the summary cannot read as a whole run" || bad "summary miscounts: $OUT"
+grep -q 'NOT-RUN is not PASS' <<<"$OUT" && ok "the NOT-RUN banner fires for a partial run" || bad "no banner: $OUT"
+
+echo "ci-replica: every run writes verdict.json"
+V="$TMP/logs/verdict.json"
+[ -f "$V" ] && ok "verdict.json is written" || bad "no verdict at $V: $OUT"
+[ "$(jq -r .full "$V")" = false ] && ok "a --job run is recorded as full=false" || bad "partial run marked full: $(cat "$V")"
+run '{"version":1,"jobs":[{"name":"a","commands":["true"]},{"name":"r","commands":["exit 4"]},{"name":"m","local":false,"localReason":"mac","commands":[]}]}'
+[ "$(jq -r .full "$V")" = true ] && ok "a run with no --job is full=true" || bad "full run not marked: $(cat "$V")"
+[ "$(jq -r .exit "$V")" = 1 ] && ok "a failing run records exit 1" || bad "exit not recorded: $(cat "$V")"
+[ "$(jq -r '[.jobs[]|.name+":"+.result]|join(",")' "$V")" = "a:PASS,r:FAIL,m:NOT-RUN" ] \
+  && ok "each job's result is recorded in manifest order" || bad "jobs wrong: $(cat "$V")"
+[ "$(jq -r '.jobs[2].local' "$V")" = false ] && ok "a job's local flag rides along" || bad "local flag missing"
+[ "$(jq -r .manifestSha256 "$V")" = "$(sha256sum "$ROOT/.claude/ci-replica.json" | cut -d' ' -f1)" ] \
+  && ok "the manifest's sha256 is recorded" || bad "manifest hash wrong"
+grep -q "verdict: $V  sha256=" <<<"$OUT" && ok "the run prints the verdict path and its hash" || bad "verdict not announced: $OUT"
+
 echo "ci-replica: --list"
 run '{"version":1,"jobs":[{"name":"a","commands":["false"]},{"name":"m","local":false,"localReason":"macOS","commands":[]}]}' --list
 [ "$RC" = 0 ] && ok "--list exits 0" || bad "--list rc=$RC"
