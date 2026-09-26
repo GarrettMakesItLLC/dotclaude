@@ -1,7 +1,7 @@
 ---
 name: operating-a-fleet
 description: Use when more than one machine, or more than a couple of agent sessions, are working one repo at the same time — deciding who implements, who validates and who merges, taking the single fleet-wide integrator lease, batching related issues into one PR, and running a local CI replica when GitHub Actions is unavailable or too expensive to be the gate. Covers the degraded-mode wave procedure and the reconcile pass that runs after every merge.
-allowed-tools: Bash(bin/fleet-lease.sh:*), Bash(bin/fleet-reconcile.sh:*), Bash(bin/ci-replica.sh:*), Bash(bin/fleet-mode.sh:*), Bash(gh api:*), Bash(git:*), mcp__github-rest__issue_open, mcp__github-rest__issue_comment, mcp__github-rest__pr_create, mcp__github-rest__pr_auto_merge
+allowed-tools: Bash(bin/fleet-lease.sh:*), Bash(bin/fleet-reconcile.sh:*), Bash(bin/ci-replica.sh:*), Bash(bin/fleet-mode.sh:*), Bash(bin/fleet-merge.sh:*), Bash(gh api:*), Bash(git:*), mcp__github-rest__issue_open, mcp__github-rest__issue_comment, mcp__github-rest__pr_create, mcp__github-rest__pr_auto_merge
 ---
 
 # Operating a fleet
@@ -62,7 +62,9 @@ It carries, in comments:
 - `READY <sha>` from the integrator — this exact tree is frozen and wants a gate run.
 - `## Run N` from a validator — a PASS/FAIL/NOT-RUN table, and for each failure the command, the exit
   code, a log excerpt, and the **owning batch**, so the fix has an address.
-- `ALL GREEN @ <sha>` when a full run passes. Merge authorization is that line, for that SHA.
+- `ALL GREEN @ <sha>` when a full run passes, quoting the run's `verdict.json` sha256. Merge
+  authorization is that verdict file, for that SHA, checked by `bin/fleet-merge.sh` before it lifts
+  anything. The comment reports the verdict and never substitutes for it.
 
 MuscleBuddy#8137 (standing) and MuscleBuddy#8132 (one wave) are the worked examples — read both before
 writing a new one. #8132 shows the per-wave shape; #8137 shows it generalized into a standing gate.
