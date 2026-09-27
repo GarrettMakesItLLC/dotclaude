@@ -51,9 +51,13 @@
 # command text (#7995): a command that merely QUOTES the pattern —
 # `echo 'open("docs/x.py", "w")'`, a printf assembling a script string — never
 # invokes python and writes nothing, so scanning the whole command reported a
-# false positive on prose. A relative target is resolved against the nearest
-# leading `cd <dir> &&`/`cd <dir>;` on the SAME line as the heredoc's own
-# invocation, not the hook's own cwd or the repo root.
+# false positive on prose. A relative target is resolved against the `cd`
+# base tracked for the segment that owns the heredoc, not the hook's own cwd
+# or the repo root.
+#
+# Quoting is read by one lexical pass that understands nested command
+# substitution and only treats an UNQUOTED `<<` as a heredoc (#429), and a
+# `cd` inside `( … )`/`$( … )` is scoped to that subshell.
 #
 # KNOWN GAPS (by design — backstop, not a sandbox):
 #   - Cannot distinguish a subagent from the main session (no such flag in hook
@@ -231,90 +235,164 @@ QUOTES = "\"'"
 if tool == "Bash":
     cmd = ti.get("command") or ""
 
-    # A quoted (or unquoted) heredoc body is data, passed through verbatim with
-    # no shell interpretation — a `>` at the start of a markdown blockquote
-    # line, or any other shell-metacharacter-looking prose, is not a redirect.
-    # Blank out heredoc body lines before scanning for write patterns so prose
-    # can't be mistaken for one; `blanked` is used for every pattern EXCEPT the
-    # open()-in-heredoc scan below, which deliberately reads heredoc bodies —
-    # that's the python3-heredoc escape hatch #92 was filed for.
-    def blank_heredoc_bodies(text):
-        lines = text.split("\n")
-        start_re = re.compile(r"<<-?\s*([\"']?)(\w+)\1")
-        i = 0
-        while i < len(lines):
-            m = start_re.search(lines[i])
-            if not m:
-                i += 1
-                continue
-            delim = m.group(2)
-            j = i + 1
-            while j < len(lines) and lines[j].strip() != delim:
-                lines[j] = ""
-                j += 1
-            i = j + 1
-        return "\n".join(lines)
+    # One lexical pass over the command decides what is DATA and what is shell:
+    # quoted runs, heredoc bodies and `# …` comments. Every write-pattern scan
+    # below consults it, so they all agree on where a quote begins and ends.
+    #
+    # It has to understand command substitution. `"$(python3 -c '…{"k":1}…')"`
+    # is ONE double-quoted word, but a scanner that pairs each `"` with the next
+    # `"` closes it at the `"` inside the JSON and inverts every quote after
+    # that — the quoted text of a later argument then reads as bare shell, and
+    # its `&&`, `sed`, `|`, `cd` are reported as write-targets (#429). A heredoc
+    # start is also only a heredoc when it is itself unquoted: `c="cat <<'EOF'
+    # …"` is a string, and its "body" is part of that string.
+    #
+    # Returns (spans, bodies, heredocs, comments):
+    #   spans     (start, end) of each quoted run; `end` is the closing quote.
+    #             Nested substitutions record their own inner spans too, which
+    #             is harmless for every "is this offset quoted?" test.
+    #   bodies    (start, end) of each heredoc body, delimiter line excluded.
+    #   heredocs  (op_offset, body_start, body_end) per unquoted `<<DELIM`.
+    #   comments  (start, end) of each unquoted `# …` tail.
+    # An unterminated quote ends the analysis where it opens rather than
+    # swallowing the rest of the text, so a stray apostrophe cannot blind the
+    # scan to a real redirect after it.
+    HEREDOC_OP = re.compile(
+        r"<<(-?)[ \t]*(?:'([^'\n]*)'|\"([^\"\n]*)\"|\\?([A-Za-z0-9_.-]+))"
+    )
 
-    def quoted_spans(text):
-        """(start, end) of every single- or double-quoted run, backslash-aware.
+    class _Unterminated(Exception):
+        pass
 
-        Used only to decide whether a `>` is an operator or data. Unterminated
-        quotes yield no span rather than swallowing the rest of the line, so a
-        stray apostrophe cannot blind the scan to a real redirect after it.
-        """
-        spans = []
-        i = 0
+    def analyse(text):
         n = len(text)
-        while i < n:
-            c = text[i]
-            if c == "\\":
-                i += 2
-                continue
-            if c in ("'", '"'):
-                j = i + 1
-                while j < n and text[j] != c:
-                    if c == '"' and text[j] == "\\":
-                        j += 2
-                        continue
-                    j += 1
-                if j < n:
+        spans, bodies, heredocs, comments, pending = [], [], [], [], []
+
+        def consume_bodies(i):
+            for op_at, delim, dash in pending:
+                start = i
+                while i < n:
+                    e = text.find("\n", i)
+                    e = n if e == -1 else e
+                    line = text[i:e]
+                    if (line.lstrip("\t") if dash else line).strip() == delim:
+                        bodies.append((start, i))
+                        heredocs.append((op_at, start, i))
+                        i = e + 1
+                        break
+                    i = e + 1
+                else:
+                    bodies.append((start, n))
+                    heredocs.append((op_at, start, n))
+            del pending[:]
+            return i
+
+        def scan_dq(i):
+            """Index of the `"` closing a double-quoted run opened before i."""
+            while i < n:
+                c = text[i]
+                if c == "\\":
+                    i += 2
+                    continue
+                if c == '"':
+                    return i
+                if c == "$" and text[i + 1 : i + 2] == "(":
+                    i = scan(i + 2, ")", arith=text[i + 2 : i + 3] == "(")
+                    continue
+                if c == "`":
+                    i = scan(i + 1, "`")
+                    continue
+                i += 1
+            raise _Unterminated()
+
+        def scan(i, closer=None, arith=False):
+            depth = 0
+            while i < n:
+                c = text[i]
+                if c == "\\":
+                    i += 2
+                    continue
+                if closer == "`" and c == "`":
+                    return i + 1
+                if closer == ")" and c == "(":
+                    depth += 1
+                elif closer == ")" and c == ")":
+                    if depth == 0:
+                        return i + 1
+                    depth -= 1
+                if c == "'":
+                    ansi = i > 0 and text[i - 1] == "$"
+                    j = i + 1
+                    while j < n and text[j] != "'":
+                        j += 2 if (ansi and text[j] == "\\") else 1
+                    if j >= n:
+                        raise _Unterminated()
                     spans.append((i, j))
                     i = j + 1
                     continue
-                return spans
-            i += 1
-        return spans
-
-    def strip_comments(text):
-        """Blank an unquoted `# …` comment tail, preserving length.
-
-        A comment is prose, and prose contains arrows: `# curl -> stdin ->
-        Railway` yielded `stdin` and `Railway` as write targets and blocked a
-        command that touches no file (#289).
-
-        `#` only opens a comment at the start of a token — start of line, or
-        after whitespace. That is what keeps `s#a#b#` (a sed script), a URL
-        fragment and `--color=always#x` intact, since none of those has
-        whitespace before the `#`. Blanked rather than cut so every span and
-        offset computed elsewhere still lines up.
-        """
-        spans = quoted_spans(text)
-        out_chars = list(text)
-        i = 0
-        n = len(text)
-        while i < n:
-            if text[i] == "#" and not any(lo <= i < hi for lo, hi in spans):
-                if i == 0 or text[i - 1] in " \t\n":
-                    j = text.find("\n", i)
-                    j = n if j == -1 else j
-                    for k in range(i, j):
-                        out_chars[k] = " "
-                    i = j
+                if c == '"':
+                    j = scan_dq(i + 1)
+                    spans.append((i, j))
+                    i = j + 1
                     continue
-            i += 1
-        return "".join(out_chars)
+                if c == "$" and text[i + 1 : i + 2] == "(":
+                    i = scan(i + 2, ")", arith=text[i + 2 : i + 3] == "(")
+                    continue
+                if c == "`":
+                    i = scan(i + 1, "`")
+                    continue
+                # `#` opens a comment only at the start of a token — start of
+                # line or after whitespace. That keeps `s#a#b#` (a sed script),
+                # a URL fragment and `${#var}` intact (#289).
+                if c == "#" and (i == 0 or text[i - 1] in " \t\n"):
+                    e = text.find("\n", i)
+                    e = n if e == -1 else e
+                    comments.append((i, e))
+                    i = e
+                    continue
+                if c == "<" and not arith and text.startswith("<<", i) and not text.startswith("<<<", i):
+                    m = HEREDOC_OP.match(text, i)
+                    if m:
+                        delim = m.group(2) if m.group(2) is not None else (
+                            m.group(3) if m.group(3) is not None else m.group(4)
+                        )
+                        pending.append((i, delim, m.group(1) == "-"))
+                        i = m.end()
+                        continue
+                if c == "\n":
+                    i += 1
+                    if pending:
+                        i = consume_bodies(i)
+                    continue
+                i += 1
+            return n
 
-    blanked = strip_comments(blank_heredoc_bodies(cmd))
+        try:
+            scan(0)
+        except _Unterminated:
+            pass
+        return spans, bodies, heredocs, comments
+
+    def quoted_spans(text):
+        return analyse(text)[0]
+
+    def blank(text, ranges):
+        """Blank each range, preserving length and newlines, so every offset
+        computed on the original still lines up."""
+        chars = list(text)
+        for lo, hi in ranges:
+            for k in range(lo, hi):
+                if chars[k] != "\n":
+                    chars[k] = " "
+        return "".join(chars)
+
+    # Heredoc bodies are data (#140): a `>` opening a markdown blockquote line
+    # is not a redirect. A comment is prose, and prose contains arrows: `# curl
+    # -> stdin` yielded `stdin` as a write target (#289). Both are blanked for
+    # every pattern EXCEPT the open()-in-heredoc scan below, which deliberately
+    # reads python heredoc bodies — the escape hatch #92 was filed for.
+    _spans, _bodies, heredocs, _comments = analyse(cmd)
+    blanked = blank(cmd, _bodies + _comments)
 
     # Track a leading `cd <dir>` chain (`cd a && cd b && write relfile`) so a
     # RELATIVE write-target is resolved against the directory the shell would
@@ -325,7 +403,7 @@ if tool == "Bash":
     # command left-to-right and update the effective directory as we go.
     # have_base flips false (stop tracking, judge nothing relative from here
     # on — refuse to guess rather than guess wrong) the moment a `cd` target
-    # isn't staticaly resolvable (`cd -`, `cd` with no args, a `$VAR`).
+    # isn't statically resolvable (`cd -`, `cd` with no args, a `$VAR`).
     effective = ""
     have_base = False
 
@@ -341,27 +419,29 @@ if tool == "Bash":
     # (`.[]|select(...)`), an awk program, a sed script — and cutting there
     # split a quoted run in half, which broke the quote pairing the redirect
     # scan below depends on and turned a quoted `>` into a phantom redirect.
+    # Each part keeps its offset into `text`, so a heredoc operator found by
+    # `analyse` can be matched to the segment that owns it.
     def split_unquoted(text):
         spans = quoted_spans(text)
-        inside = lambda k: any(lo <= k < hi for lo, hi in spans)
-        parts, buf, i, n = [], [], 0, len(text)
+        inside = lambda k: any(lo <= k <= hi for lo, hi in spans)
+        parts, buf, start, i, n = [], [], 0, 0, len(text)
         while i < n:
             if not inside(i):
                 two = text[i : i + 2]
                 if two in ("&&", "||"):
-                    parts.append("".join(buf))
-                    buf = []
-                    i += 2
+                    parts.append((start, "".join(buf)))
+                    buf, i = [], i + 2
+                    start = i
                     continue
                 if text[i] in ("|", ";", "\n"):
-                    parts.append("".join(buf))
-                    buf = []
-                    i += 1
+                    parts.append((start, "".join(buf)))
+                    buf, i = [], i + 1
+                    start = i
                     continue
             buf.append(text[i])
             i += 1
-        parts.append("".join(buf))
-        return [p for p in parts if p.strip()]
+        parts.append((start, "".join(buf)))
+        return [(o, p) for o, p in parts if p.strip()]
 
     # Literal assignments made earlier in the same command (`W=/abs/wt`, then
     # `cd "$W"` on a later line) are as static as a literal `cd /abs/wt`, and
@@ -393,23 +473,60 @@ if tool == "Bash":
             return None
         return t
 
-    segs_ordered = split_unquoted(blanked)
-    per_seg = []  # (base_or_None, segment_text)
-    for seg in segs_ordered:
-        if note_assignment(seg):
-            continue
-        toks = seg.split()
-        if toks and toks[0] == "cd":
-            target = cd_target(toks[1]) if len(toks) == 2 else None
-            resolved = join(effective, target) if target is not None else None
-            if resolved is not None:
-                effective, have_base = resolved, True
-            else:
-                have_base = False
-            continue
-        per_seg.append((effective if have_base else None, seg))
+    def paren_moves(seg):
+        """Unquoted `(` and `)` in seg, in order — `$(` counts as a `(`."""
+        spans = quoted_spans(seg)
+        return [
+            (k, ch)
+            for k, ch in enumerate(seg)
+            if ch in "()" and not any(lo <= k <= hi for lo, hi in spans)
+        ]
 
-    for base, seg in per_seg:
+    # A `cd` inside `( … )` or `$( … )` changes directory for that subshell
+    # only. Each unquoted `(` saves the tracked directory and its `)` restores
+    # it, so `(cd /wt && make) ; echo x > rel` still judges `rel` against the
+    # directory the parent shell is actually in — not the subshell's.
+    saved = []
+    segs_ordered = split_unquoted(blanked)
+    per_seg = []  # (offset, base_or_None, segment_text)
+    for off, seg in segs_ordered:
+        body = seg.lstrip()
+        lead = len(seg) - len(body)
+        # Leading group openers: `(` opens a subshell, `{` a group in THIS shell.
+        while body[:1] in ("(", "{"):
+            if body[0] == "(":
+                saved.append((effective, have_base))
+            body = body[1:].lstrip()
+        consumed = len(seg) - len(body)
+        seg_base = effective if have_base else None
+        if note_assignment(body):
+            pass
+        else:
+            toks = body.split()
+            if toks and toks[0] == "cd":
+                # A trailing `)`/`}` closing a group belongs to the group, not
+                # to cd's operand: `(cd /wt)` enters /wt.
+                args = [t for t in (tok.rstrip(")}") for tok in toks[1:]) if t]
+                target = cd_target(args[0]) if len(args) == 1 else None
+                resolved = join(effective, target) if target is not None else None
+                if resolved is not None:
+                    effective, have_base = resolved, True
+                else:
+                    have_base = False
+                    # Not a bare `cd DIR` — it may still carry a write
+                    # (`cd /x > /abs/log`), so it is scanned, unjudged-relative.
+                    if len(toks) > 2:
+                        per_seg.append((off + consumed, None, body))
+            else:
+                per_seg.append((off + consumed, seg_base, body))
+        # Groups opened and closed within the rest of this segment.
+        for _, ch in paren_moves(body):
+            if ch == "(":
+                saved.append((effective, have_base))
+            elif saved:
+                effective, have_base = saved.pop()
+
+    for _off, base, seg in per_seg:
         # Redirection: `> path` / `>> path`, not `2>&1`, `&>`, `>=`, or a
         # `[ a > b ]` test operator (single `>` inside `[ ... ]` is a string
         # comparison, not a redirect — excluded by requiring the target look
@@ -510,42 +627,23 @@ if tool == "Bash":
     # this rule exists for (#92). Scoped to a heredoc whose OWN command word is
     # `python`/`python3` (#7995): the whole-command scan this replaced matched
     # `open(...)` text anywhere, including inside a quoted `echo`/`printf`
-    # argument that writes nothing. Deliberately reads the ORIGINAL (unblanked)
-    # heredoc body — that is the one span this extractor is meant to see
-    # inside, since `blank_heredoc_bodies` above erases it for every other
-    # pattern.
-    heredoc_start_re = re.compile(r"<<-?\s*([\"']?)(\w+)\1")
+    # argument that writes nothing. Only heredocs `analyse` found UNQUOTED
+    # count — `c="python3 - <<'EOF' …"` is a string, not a heredoc (#429).
+    # Deliberately reads the ORIGINAL (unblanked) heredoc body — that is the
+    # one span this extractor is meant to see inside. A relative target
+    # resolves against the directory tracked for the segment that owns the
+    # heredoc operator, the same base every other pattern above uses.
     py_cmd_re = re.compile(r"^python3?(\.\d+)?$")
 
-    def joined_walk(base, target, have):
-        if target.startswith("/"):
-            return target
-        if not have:
-            return None
-        return base.rstrip("/") + "/" + target if base else "/" + target
-
-    raw_lines = cmd.split("\n")
-    walk_effective, walk_have_base = "", False
-    li = 0
-    while li < len(raw_lines):
-        line = raw_lines[li]
-        # Track a leading `cd <dir> &&`/`cd <dir>;` at the start of this line —
-        # line-granular, best-effort, the same rule the segment loop above
-        # applies per shell-separated segment.
-        cd_m = re.match(r"\s*cd\s+(\S+)\s*(?:&&|;)", line)
-        cd_t = cd_target(cd_m.group(1)) if cd_m else None
-        if cd_t is not None:
-            resolved = joined_walk(walk_effective, cd_t, walk_have_base)
-            if resolved is not None:
-                walk_effective, walk_have_base = resolved, True
-            else:
-                walk_have_base = False
-        hd_m = heredoc_start_re.search(line)
-        if not hd_m:
-            li += 1
+    for op_at, body_start, body_end in heredocs:
+        owner = None
+        for off, base, seg in per_seg:
+            if off <= op_at < off + len(seg):
+                owner = (off, base, seg)
+        if owner is None:
             continue
-        delim = hd_m.group(2)
-        head_toks = line[: hd_m.start()].split()
+        off, base, seg = owner
+        head_toks = seg[: op_at - off].split()
         cmd_word = ""
         for t in reversed(head_toks):
             cand = t.rsplit("/", 1)[-1].strip(QUOTES)
@@ -554,18 +652,12 @@ if tool == "Bash":
             if cand and cand != "-" and not cand.startswith("-"):
                 cmd_word = cand
                 break
-        j = li + 1
-        body_lines = []
-        while j < len(raw_lines) and raw_lines[j].strip() != delim:
-            body_lines.append(raw_lines[j])
-            j += 1
-        if py_cmd_re.match(cmd_word):
-            body = "\n".join(body_lines)
-            base = walk_effective if walk_have_base else None
-            for m in re.finditer(r"open\(\s*[\"']([^\"']+)[\"']\s*,\s*[\"'][wax]", body):
-                tgt = m.group(1)
-                out.append(f"{base}\t{tgt}" if base else tgt)
-        li = j + 1
+        if not py_cmd_re.match(cmd_word):
+            continue
+        body = cmd[body_start:body_end]
+        for m in re.finditer(r"open\(\s*[\"']([^\"']+)[\"']\s*,\s*[\"'][wax]", body):
+            tgt = m.group(1)
+            out.append(f"{base}\t{tgt}" if base else tgt)
 else:
     p = ti.get("file_path") or ti.get("notebook_path") or ""
     if p:
