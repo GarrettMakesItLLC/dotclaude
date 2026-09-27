@@ -427,6 +427,83 @@ check 0 Bash command "echo 'ln -s x node_modules is a bad idea'"
 # A real copy is a real install, and stays allowed.
 check 0 Bash command "cp -r /a/b/node_modules /tmp/node_modules"
 
+# --- #429: a static `cd` governs compound, heredoc and subshell shapes, and a
+# quoted argument is data however deeply its quotes nest. All run from the
+# untrusted cwd (a linked worktree), where a lost `cd` base is a block.
+(
+  cd "$CONV/.worktrees/wt" || exit 1
+  WT="$CONV/.worktrees/wt"
+
+  # Should ALLOW — relative targets after a static `cd` in long `&&` chains,
+  # with a pipeline and a subshell writing to an absolute log.
+  check 0 Bash command "cd $WT && sed -i 's/x/y/' rel/file"
+  check 0 Bash command "cd $WT && sed -i 's/^export interface X/interface X/' scripts/a.ts && sed -i 's/b/c/' scripts/b.ts && grep -rn \"X\\|Y\" scripts | grep -v \"^scripts/a.ts\"; (timeout 540 npx knip > /tmp/wg-429.log 2>&1; echo \"KNIP=\$?\" >> /tmp/wg-429.log)"
+
+  # Should ALLOW — a heredoc append, then a python heredoc writing relative
+  # paths, all after one static `cd`.
+  check 0 Bash command "cd $WT && cat >> rel/f.ts <<'EOF'
+export const a = 'it''s';
+const b = x > y ? \"q\" : 'z';
+EOF
+python3 - <<'EOF'
+s = open('rel/g.ts').read()
+open('rel/g.ts','w').write(s.replace(\"a\", 'b'))
+EOF"
+
+  # Should still BLOCK — the same two shapes with NO `cd`: the cwd is a linked
+  # worktree this command never entered (#166).
+  check 2 Bash command "sed -i 's/^export interface X/interface X/' scripts/a.ts && grep -rn X scripts | grep -v a.ts"
+  check 2 Bash command "python3 - <<'EOF'
+open('rel/g.ts','w').write('x')
+EOF"
+
+  # Should ALLOW — a command that builds a hook payload: every `&&`, `sed`, `|`
+  # and heredoc sits inside a quoted argument, and the JSON inside the
+  # `\$(python3 -c '…')` nests double quotes inside a double-quoted word.
+  c429="W=$WT; for c in \"cd \$W && sed -i 's/^export interface P/interface P/' scripts/a.ts && grep -rn x scripts | head\" \"cd \$W && cat >> scripts/a.ts <<'EOF'
+x
+EOF
+python3 - <<'EOF'
+open('scripts/b.ts','w')
+EOF\"; do printf '%s' \"\$(python3 -c 'import json,sys;print(json.dumps({\"tool_name\":\"Bash\",\"tool_input\":{\"command\":sys.argv[1]}}))' \"\$c\")\" | bash hooks/worktree-guard.sh >/dev/null 2>/tmp/wg.err; echo \"rc=\$? \$(grep -o \"Reason: '[^']*'\" /tmp/wg.err | tr '\\n' ' ')\"; done"
+  check 0 Bash command "$c429"
+  # …and nothing inside those quotes is even reported as a candidate.
+  msg=$(python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$c429" \
+    | "$GUARD" 2>&1 >/dev/null)
+  if [ -n "$msg" ]; then
+    echo "FAIL: #429 payload-builder command produced guard output: $msg"
+    echo x >> "$FAIL_MARKER"
+  fi
+  check 0 Bash command "python3 -c 'import json,sys; print(json.dumps({\"command\": sys.argv[1]}))' \"cd /x && sed -i s/a/b/ f.ts && grep a | head > out.txt\""
+  check 0 Bash command "c=\"python3 - <<'EOF'
+open('rel.ts','w')
+EOF\"; echo \"\$c\""
+
+  # Should still BLOCK — a real redirect AFTER a nested-quote substitution, and
+  # after a substitution whose heredoc body carries an apostrophe.
+  check 2 Bash command "echo \"\$(printf '{\"a\":1}')\" > $CONV/src/nested.ts"
+  check 2 Bash command "x=\"\$(cat <<'EOF'
+it's > here
+EOF
+)\"; echo hi > $CONV/src/after-subst.ts"
+
+  # A `cd` inside `( … )` or `\$( … )` is scoped to that subshell.
+  check 0 Bash command "(cd $WT && echo hi > rel.md)"
+  check 0 Bash command "(cd $WT) && cd $WT && echo hi > rel.md"
+  check 2 Bash command "(cd $WT && make); echo hi > rel.md"
+  check 2 Bash command "x=\$(cd $WT && pwd); echo hi > rel.md"
+  # A python heredoc takes the base of the segment that owns it.
+  check 0 Bash command "cd $WT && python3 - <<'EOF'
+open('rel.ts','w')
+EOF"
+
+  # Should still BLOCK — unresolvable `cd` forms.
+  check 2 Bash command "cd \$VAR && echo x > rel"
+  check 2 Bash command "cd - && echo x > rel"
+  check 2 Bash command "cd && echo x > rel"
+  exit 0
+) || fail=1
+
 if [ -s "$FAIL_MARKER" ]; then
   echo "worktree-guard: $(wc -l < "$FAIL_MARKER" | tr -d ' ') case(s) FAILED"
   fail=1
