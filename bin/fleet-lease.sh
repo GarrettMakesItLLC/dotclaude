@@ -22,13 +22,23 @@
 #
 # Common: --repo owner/repo | --remote NAME (default: origin) | --ref-prefix P
 #
+# `take` and a forced `release` REQUIRE the repo to be named — `--repo
+# OWNER/NAME`, or `FLEET_LEASE_REPO` in the environment. Every lease is per
+# repo, and a cwd is not a statement of intent: a caller merging one repo from
+# another repo's checkout took and force-released the second repo's lease
+# (dotclaude#426). Naming the repo also makes the target the repo named, not
+# whatever `origin` the cwd happens to have. `--repo` takes a URL or path too,
+# for a remote that is not on GitHub. Every action prints the repo it acted on.
+#
 # Exit codes: 0 ok / 1 usage or error / 3 lease is held by someone else.
 set -uo pipefail
 
 PROG="$(basename "$0")"
 REF_PREFIX="${FLEET_LEASE_REF_PREFIX:-refs/fleet-lease}"
 REMOTE="origin"
-REPO=""
+REPO="${FLEET_LEASE_REPO:-}"
+REPO_EXPLICIT=0
+[ -n "$REPO" ] && REPO_EXPLICIT=1
 TTL="${FLEET_LEASE_TTL:-5400}"
 NOTE=""
 REASON=""
@@ -86,7 +96,7 @@ while [ $# -gt 0 ]; do
     --note)       NOTE="${2:-}";   shift 2 || die "--note needs a value" ;;
     --holder)     HOLDER="${2:-}"; shift 2 || die "--holder needs a value" ;;
     --reason)     REASON="${2:-}"; shift 2 || die "--reason needs a value" ;;
-    --repo)       REPO="${2:-}";   shift 2 || die "--repo needs a value" ;;
+    --repo)       REPO="${2:-}";   REPO_EXPLICIT=1; shift 2 || die "--repo needs a value" ;;
     --remote)     REMOTE="${2:-}"; shift 2 || die "--remote needs a value" ;;
     --ref-prefix) REF_PREFIX="${2:-}"; shift 2 || die "--ref-prefix needs a value" ;;
     --force)      FORCE=1; shift ;;
@@ -106,8 +116,30 @@ esac
 git rev-parse --git-dir >/dev/null 2>&1 \
   || die "must run inside a git repository (objects are created locally, then pushed)"
 
+# `owner/name` for a GitHub URL, the URL itself for anything else.
+repo_identity() {
+  printf '%s' "$1" | sed -E 's#^(https://|ssh://)?(git@)?github\.com[:/]##; s#\.git$##'
+}
+
 TARGET="$REMOTE"
-[ -n "$REPO" ] && TARGET="https://github.com/${REPO}.git"
+case "$REPO" in
+  '') ;;
+  */*://*|*://*|/*|./*|../*) TARGET="$REPO" ;;
+  *) TARGET="https://github.com/${REPO}.git" ;;
+esac
+CWD_REPO="$(repo_identity "$(git remote get-url "$REMOTE" 2>/dev/null || echo "$REMOTE")")"
+TARGET_REPO="$CWD_REPO"
+[ -n "$REPO" ] && TARGET_REPO="$(repo_identity "$TARGET")"
+
+# Mutations that can take or evict a lease must name their repo.
+if [ "$REPO_EXPLICIT" != 1 ] && { [ "$ACTION" = take ] || { [ "$ACTION" = release ] && [ "$FORCE" = 1 ]; }; }; then
+  die "$ACTION needs the repo named explicitly: --repo OWNER/NAME (or FLEET_LEASE_REPO).
+  This checkout's origin is '$CWD_REPO'. Leases are per repo, and running from the
+  wrong checkout takes or evicts the wrong repo's lease (dotclaude#426)."
+fi
+if [ "$REPO_EXPLICIT" = 1 ] && [ "$TARGET_REPO" != "$CWD_REPO" ]; then
+  echo "note: acting on '$TARGET_REPO', not this checkout's '$CWD_REPO'" >&2
+fi
 
 REF="$REF_PREFIX/$NAME"
 
@@ -136,6 +168,7 @@ make_lease_commit() {
   epoch="$(date -u +%s)"
   [ -n "$EMPTY_TREE" ] || EMPTY_TREE="$(git hash-object -w -t tree /dev/null)"
   msg="fleet-lease: $NAME
+repo: $TARGET_REPO
 holder: $HOLDER
 taken-at: $now
 epoch: $epoch
@@ -154,8 +187,8 @@ report_holder() {
     ''|*[!0-9]*) ;;
     *) age=$(( $(date -u +%s) - epoch )) ;;
   esac
-  printf 'lease   : %s\nref     : %s\nholder  : %s\ntaken-at: %s\nttl     : %ss\nage     : %ss\nnote    : %s\n' \
-    "$NAME" "$REF" "$(field "$body" holder)" "$(field "$body" taken-at)" \
+  printf 'lease   : %s\nrepo    : %s\nref     : %s\nholder  : %s\ntaken-at: %s\nttl     : %ss\nage     : %ss\nnote    : %s\n' \
+    "$NAME" "$TARGET_REPO" "$REF" "$(field "$body" holder)" "$(field "$body" taken-at)" \
     "$(field "$body" ttl)" "$age" "$(field "$body" note)"
   local ttl; ttl="$(field "$body" ttl)"
   case "$age$ttl" in
@@ -174,7 +207,7 @@ case "$ACTION" in
   status)
     sha="$(remote_sha)"
     if [ -z "$sha" ]; then
-      printf 'lease   : %s\nref     : %s\nstate   : FREE\n' "$NAME" "$REF"
+      printf 'lease   : %s\nrepo    : %s\nref     : %s\nstate   : FREE\n' "$NAME" "$TARGET_REPO" "$REF"
       exit 0
     fi
     report_holder "$sha"
@@ -193,7 +226,7 @@ case "$ACTION" in
       if [ -z "$sha" ]; then
         die "push of $REF reported success but the ref is not on '$TARGET' — the lease was NOT taken"
       fi
-      printf 'took %s as %s (ttl %ss)\n' "$NAME" "$HOLDER" "$TTL"
+      printf 'took %s on %s as %s (ttl %ss)\n' "$NAME" "$TARGET_REPO" "$HOLDER" "$TTL"
       exit 0
     fi
     sha="$(remote_sha)"
@@ -204,7 +237,7 @@ case "$ACTION" in
     report_holder "$sha" >&2
     echo "" >&2
     echo "If it is genuinely stale, release it with evidence:" >&2
-    echo "  $PROG release $NAME --force --reason \"<what you checked>\"" >&2
+    echo "  $PROG release $NAME --repo $TARGET_REPO --force --reason \"<what you checked>\"" >&2
     exit 3
     ;;
 
@@ -221,7 +254,7 @@ case "$ACTION" in
     commit="$(make_lease_commit)" || die "could not create the lease commit"
     lease_push --force-with-lease="$REF:$sha" "$TARGET" "$commit:$REF" \
       || die "renew lost the race — someone changed $REF; re-read it with 'status'"
-    printf 'renewed %s as %s (ttl %ss)\n' "$NAME" "$HOLDER" "$TTL"
+    printf 'renewed %s on %s as %s (ttl %ss)\n' "$NAME" "$TARGET_REPO" "$HOLDER" "$TTL"
     ;;
 
   release)
@@ -242,11 +275,11 @@ case "$ACTION" in
         exit 3
       fi
       [ -n "$REASON" ] || die "--force needs --reason naming the evidence that the holder is gone"
-      echo "force-releasing $NAME held by '$current'" >&2
+      echo "force-releasing $NAME on $TARGET_REPO, evicting '$current' (note: $(field "$body" note))" >&2
       echo "reason: $REASON" >&2
     fi
     lease_push --force-with-lease="$REF:$sha" "$TARGET" ":$REF" \
       || die "release lost the race — someone changed $REF; re-read it with 'status'"
-    printf 'released %s\n' "$NAME"
+    printf 'released %s on %s\n' "$NAME" "$TARGET_REPO"
     ;;
 esac
