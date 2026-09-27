@@ -8,7 +8,7 @@ once, merged once.
 
 ## The loop
 
-1. **Integrator takes the lease.** `fleet-lease.sh take integrator --ttl 5400 --note "wave N"`.
+1. **Integrator takes the lease.** `fleet-lease.sh take integrator --repo OWNER/NAME --ttl 5400 --note "wave N"`.
    No lease, no merging. If the take fails, you are an implementer or a validator this wave.
 
 2. **Integrator builds the integration branch.** `integration/<date>-wN`, cut from the trunk, with each
