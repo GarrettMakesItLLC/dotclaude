@@ -394,7 +394,7 @@ DO_DEGRADED = (
     "  - Batch 3-8 related issues into ONE PR. A PR is not a unit of work here, a wave is.\n"
     "  - Validate locally: `bin/ci-replica.sh` against this repo, per its `.claude/ci-replica.json`.\n"
     "    NOT-RUN is not PASS.\n"
-    "  - Take the integrator lease before building a wave: `bin/fleet-lease.sh take integrator`.\n"
+    "  - Take the integrator lease before building a wave: `bin/fleet-lease.sh take integrator --repo <owner/repo>`.\n"
     "  - Never merge without a full local verdict. `ALL GREEN @ <sha>` on the coordination issue\n"
     "    is the authorization, and it authorizes that SHA and no other.\n"
     "  - Run `bin/fleet-reconcile.sh --pr <N> --apply` after every merge.\n"

@@ -25,9 +25,15 @@ for m in alpha beta; do
 done
 
 # machine, args...  -> stdout+stderr in $OUT, status in $RC
+# Every run names its repo the way a real caller must (dotclaude#426); `run_bare`
+# drops that, to test the refusal.
 run() {
   local m="$1"; shift
-  OUT="$(cd "$TMP/$m" && "$LEASE" "$@" 2>&1)"; RC=$?
+  OUT="$(cd "$TMP/$m" && FLEET_LEASE_REPO="$TMP/remote.git" "$LEASE" "$@" 2>&1)"; RC=$?
+}
+run_bare() {
+  local m="$1"; shift
+  OUT="$(cd "$TMP/$m" && env -u FLEET_LEASE_REPO "$LEASE" "$@" 2>&1)"; RC=$?
 }
 
 # A target repo whose pre-push hook REFUSES. The lease must still be takeable:
@@ -135,6 +141,43 @@ run alpha take
 run alpha take integrator --holder alpha; [ "$RC" = 0 ] || bad "setup take failed: $OUT"
 run beta  take release-driver --holder beta; [ "$RC" = 0 ] \
   && ok "a differently-named lease is independent" || bad "name collision: rc=$RC $OUT"
+
+echo "fleet-lease: the repo must be named for take and force-release (dotclaude#426)"
+run_bare alpha take guarded --holder alpha
+[ "$RC" != 0 ] && grep -q -- '--repo OWNER/NAME' <<<"$OUT" \
+  && ok "a take with no named repo is refused, pointing at --repo" \
+  || bad "take with no repo was accepted, rc=$RC: $OUT"
+run alpha status guarded
+grep -q 'state   : FREE' <<<"$OUT" && ok "and nothing was taken" || bad "a refused take left a lease: $OUT"
+
+run alpha take guarded --holder alpha; [ "$RC" = 0 ] || bad "setup take failed: $OUT"
+run_bare beta release guarded --holder beta --force --reason "looks idle"
+[ "$RC" != 0 ] && grep -q -- '--repo OWNER/NAME' <<<"$OUT" \
+  && ok "a force-release with no named repo is refused" \
+  || bad "force-release with no repo was accepted, rc=$RC: $OUT"
+run alpha status guarded
+grep -q 'holder  : alpha' <<<"$OUT" && ok "and the holder was not evicted" || bad "evicted anyway: $OUT"
+run_bare alpha release guarded --holder alpha
+[ "$RC" = 0 ] && ok "a holder's own plain release needs no --repo" || bad "own release refused rc=$RC: $OUT"
+
+echo "fleet-lease: --repo acts on the repo named, not the cwd's origin"
+git init --quiet --bare "$TMP/other.git"
+OUT="$(cd "$TMP/alpha" && "$LEASE" take crossrepo --repo "$TMP/other.git" --holder alpha --note "other wave" 2>&1)"; RC=$?
+[ "$RC" = 0 ] && ok "take on another repo from this checkout succeeds" || bad "cross-repo take failed rc=$RC: $OUT"
+grep -q "note: acting on '$TMP/other'" <<<"$OUT" && ok "and says it is not this checkout's repo" \
+  || bad "no cross-repo note: $OUT"
+grep -q "took crossrepo on $TMP/other as alpha" <<<"$OUT" && ok "the take output names the repo" \
+  || bad "take output does not name the repo: $OUT"
+git ls-remote "$TMP/other.git" refs/fleet-lease/crossrepo | grep -q . \
+  && ok "the lease landed on the named repo" || bad "no lease on the named repo"
+run alpha status crossrepo
+grep -q 'state   : FREE' <<<"$OUT" && ok "and the checkout's own repo is untouched" \
+  || bad "the cwd repo's lease moved: $OUT"
+OUT="$(cd "$TMP/alpha" && "$LEASE" status crossrepo --repo "$TMP/other.git" 2>&1)"
+grep -q "repo    : $TMP/other" <<<"$OUT" && ok "status prints the repo" || bad "status has no repo line: $OUT"
+git -C "$TMP/alpha" fetch --quiet "$TMP/other.git" "+refs/fleet-lease/crossrepo:refs/check/other"
+git -C "$TMP/alpha" log -1 --format=%B refs/check/other | grep -q "^repo: $TMP/other" \
+  && ok "the lease commit records its repo" || bad "lease commit has no repo field"
 
 [ "$fail" = 0 ] && echo "fleet-lease: all cases passed"
 exit "$fail"

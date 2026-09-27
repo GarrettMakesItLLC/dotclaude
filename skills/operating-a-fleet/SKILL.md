@@ -34,17 +34,21 @@ The integrator holds a lease. The other two roles do not need one — they need 
 `issue_claim` creates a claim ref, so a second machine's attempt fails loudly instead of racing:
 
 ```bash
-bin/fleet-lease.sh take integrator --ttl 5400 --note "wave 3 integration"
+bin/fleet-lease.sh take integrator --repo OWNER/NAME --ttl 5400 --note "wave 3 integration"
 bin/fleet-lease.sh renew integrator          # before the TTL expires, if still working
 bin/fleet-lease.sh release integrator        # the moment the wave is merged
 bin/fleet-lease.sh status integrator         # who holds it, since when, stale or not
 ```
 
+`take` and a forced `release` refuse unless the repo is named: a lease is per repo, and a cwd is
+not a statement of intent. An agent merging one repo from another repo's checkout once force-released
+and took the wrong repo's live lease. Every action prints the repo it acted on.
+
 The ref carries the holder identity and a timestamp, so `status` can say *stale* rather than only
 *held*. A stale lease is force-releasable **with evidence** — a reason naming what you checked:
 
 ```bash
-bin/fleet-lease.sh release integrator --force \
+bin/fleet-lease.sh release integrator --repo OWNER/NAME --force \
   --reason "holder laptop/garrett idle 3h, no push to any batch/* since <sha>, #8137 last comment 4h ago"
 ```
 
