@@ -28,6 +28,7 @@ The method is here. The realm checklists are in `references/` — load only the 
 | Answer-engine visibility (GEO) | `references/answer-engine-visibility.md` |
 | Growth, ads & conversion instrumentation | `references/growth-ads-conversion.md` |
 | Email & sending-domain deliverability | `references/email-deliverability.md` |
+| Off-site presence (social accounts, ad accounts, analytics property, listings) | `references/offsite-presence.md` |
 | Visual anti-slop (product/design counterpart to `avoiding-ai-slop`) | `references/visual-anti-slop.md` |
 | Architecture & code health (boundaries, duplication, docs drift) | `references/architecture-code-health.md` |
 | Test & CI gate integrity (which green checks can go red) | `references/test-ci-gate-integrity.md` |
@@ -43,7 +44,7 @@ The method is here. The realm checklists are in `references/` — load only the 
 
 A realm not listed still runs on this method — write the checklist as you go and add the reference file in the same PR. **The table is the index: a file in `references/` missing from it, or a row pointing at no file, is drift and gets fixed in the PR that finds it.**
 
-Several realms deliberately share a surface and must not each re-derive it. Where two files name the same finding, file it once in the more severe realm and tag the other — the pairs that recur are client-rendered marketing pages (`web-delivery-performance` / `seo-metadata` / `answer-engine-visibility`), consent-gated tags (`growth-ads-conversion` / `privacy-data-processing`), fabricated proof and metrics (`visual-anti-slop` / `legal-compliance` / `data-integrity-safety`), and icon-button naming (`accessibility` / `ux-coherence`).
+Several realms deliberately share a surface and must not each re-derive it. Where two files name the same finding, file it once in the more severe realm and tag the other — the pairs that recur are client-rendered marketing pages (`web-delivery-performance` / `seo-metadata` / `answer-engine-visibility`), consent-gated tags (`growth-ads-conversion` / `privacy-data-processing`), conversion events defined on-site and keyed/bid on in the ad and analytics accounts (`growth-ads-conversion` / `offsite-presence`), fabricated proof and metrics (`visual-anti-slop` / `legal-compliance` / `data-integrity-safety`), and icon-button naming (`accessibility` / `ux-coherence`).
 
 ## The two laws
 
