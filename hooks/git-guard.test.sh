@@ -71,6 +71,15 @@ check 2 'rm -r --force /'
 check 2 'rm -f -r /'
 check 2 'rm -rf -- /'
 
+# A multi-line quoted -m message must not hide a hook bypass that follows it (#436).
+NL=$'\n'
+check 2 "git commit -q -m \"subject${NL}${NL}body\" --no-verify"
+check 2 "git commit -q -m \"subject${NL}${NL}body\" -n"
+check 2 "cd /x && git add -A && git commit -q -m \"subject${NL}${NL}Co-Authored-By: A\" --no-verify && git log --oneline -1"
+check 2 "git commit -m 'subject${NL}body' --no-verify"
+# ...and the message body itself still can't trip it.
+check 0 "git commit -m \"subject${NL}${NL}stop using --no-verify and -n${NL}and .env\""
+
 # Should ALLOW — flag/path tokens that appear only inside a -m MESSAGE body.
 check 0 'git commit -m "fix: load .env before init"'
 check 0 'git commit -am "chore: add .env to gitignore"'
