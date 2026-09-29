@@ -71,6 +71,10 @@ block() {
 # text by construction: nothing that decides what a git command DOES can live
 # inside a heredoc body.
 #
+# A quoted span is scrubbed across newlines: a multi-line `-m` message is one span,
+# and a line-oriented scrub left its opening line unmatched, so the `-n` / `--no-verify`
+# after the closing quote sat on a line the commit-args scan below never reached (#436).
+#
 # (Trade-off, unchanged: a deliberately quoted branch name could slip a
 # force-push past — acceptable for a backstop, since quoted branch names are
 # rare while quoted messages are universal.)
@@ -82,7 +86,7 @@ block() {
 # `.env.local` mentioned in prose — survives the scrub, and rule 3 blocks the
 # commit on its own message text (#363).
 scrubbed="$(printf '%s' "$cmd" | perl -0777 -pe "s/<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1.*?^[ \t]*\2[ \t]*\$/ /gms" \
-  | sed -E "s/'[^']*'/ /g; s/\"[^\"]*\"/ /g")"
+  | perl -0777 -pe "s/'[^']*'/ /gs; s/\"[^\"]*\"/ /gs")"
 
 # 0) Reckless recursive delete of a root / home / system / parent path. The one
 # non-git rule, so it runs before the git-only gate below. Matched against a

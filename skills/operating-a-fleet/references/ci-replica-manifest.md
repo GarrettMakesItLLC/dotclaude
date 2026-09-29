@@ -47,6 +47,8 @@ variable that must not leak in.
 | `budgetSeconds` | integer | no | Wall-clock expectation. Over it, the job is still PASS but is flagged `over budget`. |
 | `mutatesTree` | array of glob | no | Paths this job is ALLOWED to leave changed in the working tree. Anything else it changes fails it — see below. |
 | `withoutFiles` | array of path | no | Paths that must be ABSENT while this job runs. The runner moves each aside before the job's commands and puts it back afterwards, including when the job fails or the run is interrupted. Repo-relative; an absolute path or one escaping the root is refused. |
+| `requiresEnv` | array of string | no | Variables the job cannot measure anything without, such as an ops-channel API key. Absent or empty in the runner's environment, the job is NOT-RUN with `not run: <VAR> is unset`, never a PASS. Source the key before running; the check reads the runner's own environment. |
+| `unmeasuredExitCodes` | array of integer | no | Exit codes a command uses to mean "could not read the thing" rather than "read it and it is wrong" (an unreachable API). A command exiting with one makes the job NOT-RUN (`unmeasured: exit N`), which `fleet-merge.sh` refuses unless `--allow-not-run` names it. Every other non-zero exit stays a FAIL. |
 
 A command containing a newline is rejected at load: the plan is one command per line, and a multi-line
 entry would silently run only its first line. Put a multi-step sequence in a repo script and name the

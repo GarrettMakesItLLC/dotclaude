@@ -325,6 +325,123 @@ describe("claim_release", () => {
   });
 
   /**
+   * #424: a wave closes its batch PRs unmerged and comments "Landed on `dev` via
+   * wave …" citing the integration PR and its squash SHA. That survives both a
+   * hand-closed issue and later trunk edits to the same files.
+   */
+  describe("a closed batch PR whose comment cites the wave that landed it", () => {
+    const releaseWithComment = async (opts: {
+      comment: string;
+      mergedPulls?: Record<string, { merged_at: string | null; base: { ref: string } }>;
+      ancestorStatus?: Record<string, string>;
+    }) => {
+      let deleted = false;
+      fetchMock.mockImplementation(async (url: string, init: { method?: string }) => {
+        if (url.endsWith("/user")) return makeResponse({ status: 200, body: { login: "GarrettMakesIt" } });
+        if (init.method === "GET" && url.endsWith("/repos/octo/repo")) {
+          return makeResponse({ status: 200, body: { default_branch: "main" } });
+        }
+        if (init.method === "GET" && url.includes("/issues/91/comments")) {
+          return makeResponse({ status: 200, body: [{ body: opts.comment }] });
+        }
+        const pr = /\/pulls\/(\d+)$/.exec(url);
+        if (init.method === "GET" && pr) {
+          const found = opts.mergedPulls?.[pr[1]!];
+          return found ? makeResponse({ status: 200, body: found }) : makeResponse({ status: 404, body: {} });
+        }
+        const cmp = /\/compare\/([0-9a-f]{7,40})\.\.\.main$/.exec(url);
+        if (init.method === "GET" && cmp) {
+          const status = opts.ancestorStatus?.[cmp[1]!];
+          return status
+            ? makeResponse({ status: 200, body: { ahead_by: 0, behind_by: 0, status } })
+            : makeResponse({ status: 404, body: {} });
+        }
+        if (init.method === "GET" && url.includes("/compare/")) {
+          // The lock branch is ahead, and the trunk has since edited the same files.
+          return makeResponse({
+            status: 200,
+            body: { ahead_by: 1, behind_by: 0, status: "ahead", files: [{ filename: "f.ts", status: "modified" }] },
+          });
+        }
+        if (init.method === "GET" && url.includes("/contents/")) {
+          const ref = new URL(url).searchParams.get("ref");
+          return makeResponse({
+            status: 200,
+            body: { type: "file", encoding: "base64", content: Buffer.from(ref === "main" ? "b" : "a").toString("base64") },
+          });
+        }
+        if (init.method === "GET" && url.includes("/pulls")) {
+          return makeResponse({
+            status: 200,
+            body: [{ number: 91, html_url: "https://gh/pr/91", state: "closed", merged_at: null }],
+          });
+        }
+        // Closed by hand: no commit on the closing event.
+        if (init.method === "GET" && url.includes("/timeline")) {
+          return makeResponse({ status: 200, body: [{ event: "closed", commit_id: null }] });
+        }
+        if (init.method === "GET" && url.endsWith("/issues/12")) {
+          return makeResponse({ status: 200, body: { number: 12, title: "t", state: "closed", labels: [] } });
+        }
+        if (init.method === "DELETE" && url.includes("/git/refs/heads/")) {
+          deleted = true;
+          return makeResponse({ status: 204 });
+        }
+        if (init.method === "DELETE") return makeResponse({ status: 204 });
+        if (init.method === "PUT" && url.endsWith("/labels")) return makeResponse({ status: 200, body: [] });
+        return makeResponse({ status: 500 });
+      });
+      const handler = await getClaimHandler("claim_release");
+      const res = await handler({ repo: "octo/repo", number: 12 });
+      return { out: JSON.parse(res.content[0].text) as Record<string, unknown>, deleted };
+    };
+
+    it("releases when the comment names a PR merged into the default branch", async () => {
+      const { out, deleted } = await releaseWithComment({
+        comment: "Landed on `main` via wave e8 (#8919).",
+        mergedPulls: { "8919": { merged_at: "2026-09-25T00:00:00Z", base: { ref: "main" } } },
+      });
+      expect(out.released).toBe(true);
+      expect(deleted).toBe(true);
+    });
+
+    it("releases when the comment cites a squash SHA that is an ancestor of the default branch", async () => {
+      const { out, deleted } = await releaseWithComment({
+        comment: "Landed via wave e8, squash 2bac06394.",
+        ancestorStatus: { "2bac06394": "ahead" },
+      });
+      expect(out.released).toBe(true);
+      expect(deleted).toBe(true);
+    });
+
+    it("still refuses when the cited PR merged somewhere other than the default branch", async () => {
+      const { out, deleted } = await releaseWithComment({
+        comment: "Landed via wave e8 (#8919).",
+        mergedPulls: { "8919": { merged_at: "2026-09-25T00:00:00Z", base: { ref: "release" } } },
+      });
+      expect(out.reason).toBe("unmerged-commits");
+      expect(deleted).toBe(false);
+    });
+
+    it("ignores a comment that merely mentions a merged PR without saying it landed", async () => {
+      const { out, deleted } = await releaseWithComment({
+        comment: "Superseded, see #8919.",
+        mergedPulls: { "8919": { merged_at: "2026-09-25T00:00:00Z", base: { ref: "main" } } },
+      });
+      expect(out.reason).toBe("unmerged-commits");
+      expect(deleted).toBe(false);
+    });
+
+    it("still refuses when the cited SHA is not on the default branch", async () => {
+      const { out } = await releaseWithComment({
+        comment: "Landed, squash 2bac06394.",
+        ancestorStatus: { "2bac06394": "diverged" },
+      });
+      expect(out.reason).toBe("unmerged-commits");
+    });
+  });
+
+  /**
    * #410 option 2: a wave's commit-closed-the-issue signal (above) can itself
    * miss a re-landed branch — one PR closing several issues, or a wave that
    * closes by hand — so this checks the WORK: every file the lock branch

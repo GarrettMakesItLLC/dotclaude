@@ -206,10 +206,10 @@ doctor() {
   done
   # Soft: these gate one tool each, not the whole config, so they are reported
   # rather than failed — a machine can be legitimately set up without them.
-  for cmd in gh node npm rsync; do
+  for cmd in gh jq node npm rsync; do
     command -v "$cmd" >/dev/null 2>&1 \
       && echo "    ✓ $cmd" \
-      || echo "    · $cmd — absent (gh: fleet tools; node/npm: github MCP build; rsync: bin/kb-sync.sh)"
+      || echo "    · $cmd — absent (gh: fleet tools; jq: bin/fleet-merge.sh, apt install jq; node/npm: github MCP build; rsync: bin/kb-sync.sh)"
   done
   if command -v gh >/dev/null 2>&1 && ! gh auth status >/dev/null 2>&1; then
     echo "    · gh is installed but not authenticated — \`gh auth login\`"
