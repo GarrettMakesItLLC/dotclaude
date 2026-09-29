@@ -173,6 +173,58 @@ async function contentAlreadyLanded(
   }
 }
 
+/**
+ * Wave-landing check: a wave closes each batch PR UNMERGED and leaves a comment
+ * on it ("Landed on `dev` via wave …") citing the integration PR it merged
+ * through, and/or that PR's squash SHA. Either is evidence the branch's work is
+ * on the default branch — a merged PR into the default branch that the comment
+ * names, or a cited commit that is an ancestor of the default branch. Unlike
+ * the content check, it survives later edits to the same files and an issue the
+ * wave closed by hand.
+ *
+ * Only comments that say "landed" count, so an incidental `#N` reference to
+ * some unrelated merged PR is not evidence. Anything unreadable is "not proven".
+ */
+const WAVE_REFS_CAP = 5;
+
+async function landedViaWave(
+  owner: string,
+  name: string,
+  base: string,
+  closedPulls: { number: number }[],
+): Promise<boolean> {
+  try {
+    for (const pr of closedPulls) {
+      const comments = await ghPaginate<{ body?: string | null }>(
+        `/repos/${owner}/${name}/issues/${pr.number}/comments`,
+        { limit: 100 },
+      );
+      for (const c of comments) {
+        const body = c.body ?? "";
+        if (!/\blanded\b/i.test(body)) continue;
+        const prRefs = [...body.matchAll(/#(\d+)/g)].map((m) => m[1]!).slice(0, WAVE_REFS_CAP);
+        for (const ref of prRefs) {
+          const other = await ghRequest<{ merged_at?: string | null; base?: { ref: string } }>(
+            `/repos/${owner}/${name}/pulls/${ref}`,
+          ).catch(() => undefined);
+          if (other?.merged_at && other.base?.ref === base) return true;
+        }
+        const shas = [...body.matchAll(/\b[0-9a-f]{7,40}\b/g)].map((m) => m[0]).slice(0, WAVE_REFS_CAP);
+        for (const sha of shas) {
+          const cmp = await ghRequest<CompareResponse>(
+            `/repos/${owner}/${name}/compare/${sha}...${base}`,
+          ).catch(() => undefined);
+          // `base` ahead of (or equal to) the cited commit: it is an ancestor.
+          if (cmp && (cmp.status === "ahead" || cmp.status === "identical")) return true;
+        }
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
   server.registerTool(
     "claim_release",
     {
@@ -289,9 +341,26 @@ async function contentAlreadyLanded(
           // several issues, #310's shape), or a wave that closes issues by
           // hand rather than by keyword. Fall back to checking the work
           // itself before requiring force.
+          //
+          // Those two both fail on the normal wave shape once the trunk has
+          // edited the same files or the wave closed the issue by hand (#424),
+          // so a closed batch PR whose "landed" comment cites a merged
+          // integration PR or a squash SHA on the default branch is checked
+          // first: it is one comment fetch, against a per-file content diff.
+          const waveLanded =
+            !merged && !relanded
+              ? await landedViaWave(
+                  owner,
+                  name,
+                  base,
+                  pulls.filter((p) => !p.merged_at && p.state === "closed"),
+                )
+              : false;
           const contentLanded =
-            !merged && !relanded ? await contentAlreadyLanded(owner, name, base, target) : false;
-          if (!merged && !relanded && !contentLanded) {
+            !merged && !relanded && !waveLanded
+              ? await contentAlreadyLanded(owner, name, base, target)
+              : false;
+          if (!merged && !relanded && !waveLanded && !contentLanded) {
             return structuredError({
               released: false,
               reason: "unmerged-commits",
