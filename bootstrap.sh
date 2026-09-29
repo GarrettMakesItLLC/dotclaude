@@ -209,7 +209,7 @@ doctor() {
   for cmd in gh jq node npm rsync; do
     command -v "$cmd" >/dev/null 2>&1 \
       && echo "    ✓ $cmd" \
-      || echo "    · $cmd — absent (gh: fleet tools; jq: bin/fleet-merge.sh, `sudo apt install jq`; node/npm: github MCP build; rsync: bin/kb-sync.sh)"
+      || echo "    · $cmd — absent (gh: fleet tools; jq: bin/fleet-merge.sh, apt install jq; node/npm: github MCP build; rsync: bin/kb-sync.sh)"
   done
   if command -v gh >/dev/null 2>&1 && ! gh auth status >/dev/null 2>&1; then
     echo "    · gh is installed but not authenticated — \`gh auth login\`"
