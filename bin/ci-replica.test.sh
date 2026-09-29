@@ -63,6 +63,28 @@ grep -q 'NOT-RUN' <<<"$OUT" && ok "and reports it NOT-RUN" || bad "silently skip
 run "$DP" --data-plane
 [ -e "$TMP/dp-ran" ] && ok "--data-plane runs it" || bad "--data-plane did not run it: $OUT"
 
+echo "ci-replica: requiresEnv reports NOT-RUN, naming the variable, instead of running"
+RQ='{"version":1,"jobs":[{"name":"monitor","requiresEnv":["CIR_TEST_KEY"],"commands":["touch '"$TMP"'/rq-ran"]}]}'
+unset CIR_TEST_KEY
+run "$RQ"
+[ -e "$TMP/rq-ran" ] && bad "ran a requiresEnv job with the variable unset" || ok "skipped with the variable unset"
+grep -q 'NOT-RUN.*monitor.*CIR_TEST_KEY is unset' <<<"$OUT" && ok "NOT-RUN names the missing variable" || bad "no named NOT-RUN: $OUT"
+CIR_TEST_KEY="" run "$RQ"
+[ -e "$TMP/rq-ran" ] && bad "an empty variable counts as set" || ok "an empty variable counts as unset"
+CIR_TEST_KEY=x run "$RQ"
+[ -e "$TMP/rq-ran" ] && ok "runs once the variable is set" || bad "did not run with the variable set: $OUT"
+
+echo "ci-replica: unmeasuredExitCodes are NOT-RUN, every other non-zero exit stays FAIL"
+UM='{"version":1,"jobs":[{"name":"probe","unmeasuredExitCodes":[2],"commands":["exit CODE"]}]}'
+run "${UM/CODE/2}"
+grep -q 'NOT-RUN.*probe.*unmeasured: exit 2' <<<"$OUT" && ok "exit 2 reads NOT-RUN" || bad "exit 2 not unmeasured: $OUT"
+grep -q '^PASS.*probe' <<<"$OUT" && bad "an unmeasured job read PASS" || ok "and never PASS"
+[ "$RC" = 0 ] && ok "an unmeasured job alone does not fail the run" || bad "unmeasured made the run fail: rc=$RC"
+run "${UM/CODE/1}"
+grep -q '^FAIL.*probe' <<<"$OUT" && [ "$RC" = 1 ] && ok "exit 1 is still a FAIL" || bad "exit 1 not FAIL: rc=$RC $OUT"
+run "${UM/CODE/0}"
+grep -q '^PASS.*probe' <<<"$OUT" && ok "exit 0 is still PASS" || bad "exit 0 not PASS: $OUT"
+
 echo "ci-replica: env and unset reach the child"
 export CIR_TEST_LEAK="ambient"
 run '{"version":1,"env":{"CIR_TEST_SET":"from-manifest"},"unset":["CIR_TEST_LEAK"],"jobs":[
@@ -134,6 +156,8 @@ for bad_manifest in \
   '{"version":1,"jobs":[{"name":"a","local":false,"commands":[]}]}' \
   '{"version":1,"jobs":[{"name":"a","needsDataPlane":true,"commands":["true"]}]}' \
   '{"version":1,"jobs":[{"name":"a","commands":[]}]}' \
+  '{"version":1,"jobs":[{"name":"a","requiresEnv":["not a name"],"commands":["true"]}]}' \
+  '{"version":1,"jobs":[{"name":"a","unmeasuredExitCodes":[0],"commands":["true"]}]}' \
   'not json at all'
 do
   run "$bad_manifest"

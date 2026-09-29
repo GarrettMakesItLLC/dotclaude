@@ -159,6 +159,23 @@ for i, job in enumerate(jobs):
     if needs_dp and not dp_reason:
         bail(f"job {name}: `needsDataPlane` requires `dataPlaneReason`")
 
+    # `requiresEnv`: variables the job cannot measure anything without (an
+    # ops-channel API key). Absent or empty in the runner's environment, the job
+    # is NOT-RUN naming the variable, never a PASS on a check that did not run.
+    # `unmeasuredExitCodes`: exit codes a command uses to say "I could not read
+    # the thing" (an unreachable API) as distinct from "I read it and it is
+    # wrong". Those are NOT-RUN too; every other non-zero exit is still a FAIL.
+    requires_env = job.get("requiresEnv") or []
+    if not isinstance(requires_env, list) or any(
+        not isinstance(x, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x) for x in requires_env
+    ):
+        bail(f"job {name}: `requiresEnv` must be an array of variable names")
+    unmeasured = job.get("unmeasuredExitCodes") or []
+    if not isinstance(unmeasured, list) or any(
+        not isinstance(x, int) or isinstance(x, bool) or not 1 <= x <= 255 for x in unmeasured
+    ):
+        bail(f"job {name}: `unmeasuredExitCodes` must be an array of integers 1-255")
+
     budget = job.get("budgetSeconds", 0)
     if not isinstance(budget, int) or isinstance(budget, bool) or budget < 0:
         bail(f"job {name}: `budgetSeconds` must be a non-negative integer")
@@ -204,6 +221,8 @@ for i, job in enumerate(jobs):
         fh.write(f"needs_data_plane={'1' if needs_dp else '0'}\n")
         fh.write(f"data_plane_reason={dp_reason}\n")
         fh.write(f"budget={budget}\n")
+        fh.write("requires_env=" + " ".join(requires_env) + "\n")
+        fh.write("unmeasured_codes=" + " ".join(str(x) for x in unmeasured) + "\n")
     with open(os.path.join(d, "mutates"), "w") as fh:
         fh.write("".join(x + "\n" for x in mutates))
     with open(os.path.join(d, "without"), "w") as fh:
@@ -311,6 +330,16 @@ while IFS="	" read -r idx name; do
     printf 'NOT-RUN  %-22s needs a data plane; re-run with --data-plane (%s)\n' \
       "$name" "$(meta_get "$d" data_plane_reason)"
     printf 'NOT-RUN\t%s\t0\tneeds --data-plane: %s\n' "$name" "$(meta_get "$d" data_plane_reason)" >> "$RESULTS"
+    continue
+  fi
+
+  missing_env=""
+  for var in $(meta_get "$d" requires_env); do
+    [ -n "${!var:-}" ] || missing_env="$missing_env${missing_env:+, }$var"
+  done
+  if [ -n "$missing_env" ]; then
+    printf 'NOT-RUN  %-22s not run: %s is unset\n' "$name" "$missing_env"
+    printf 'NOT-RUN\t%s\t0\tnot run: %s is unset\n' "$name" "$missing_env" >> "$RESULTS"
     continue
   fi
 
@@ -438,7 +467,15 @@ TREEPY
     fi
   fi
 
-  if [ "$rc" -eq 0 ]; then
+  unmeasured=0
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 91 ]; then
+    for code in $(meta_get "$d" unmeasured_codes); do [ "$rc" = "$code" ] && unmeasured=1; done
+  fi
+
+  if [ "$unmeasured" = 1 ]; then
+    printf 'NOT-RUN  %-22s unmeasured: exit %s on: %s (log: %s)\n' "$name" "$rc" "$failed_cmd" "$log"
+    printf 'NOT-RUN\t%s\t%s\tunmeasured: exit %s on: %s (log: %s)\n' "$name" "$elapsed" "$rc" "$failed_cmd" "$log" >> "$RESULTS"
+  elif [ "$rc" -eq 0 ]; then
     flag=""
     if [ "$budget" -gt 0 ] && [ "$elapsed" -gt "$budget" ]; then
       flag=" [over budget: ${elapsed}s > ${budget}s]"
