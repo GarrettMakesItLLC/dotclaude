@@ -59,7 +59,7 @@ done
 [[ "$PR" =~ ^[0-9]+$ ]] || usage
 [ -n "$VERDICT" ] || die "--verdict <verdict.json> is required: the verdict is the authorization"
 [ -f "$VERDICT" ] || refuse "no verdict file at $VERDICT"
-command -v jq >/dev/null || die "jq is required"
+command -v jq >/dev/null || die "jq is required (verdict, ruleset and merge JSON are all read with it) — install it: sudo apt install jq"
 [ -n "${FLEET_MERGE_GH_TOKEN:-}" ] && export GH_TOKEN="$FLEET_MERGE_GH_TOKEN"
 
 if [ -z "$REPO" ]; then
@@ -110,6 +110,21 @@ mapfile -t targets < <(jq -r '
   [.[] | select(.type=="required_status_checks" or .type=="merge_queue" or .type=="pull_request")
        | "\(.ruleset_source_type)\t\(.ruleset_id)"] | unique | .[]' <<<"$rules")
 
+# Organization rulesets need `admin:org`. An agent shell exports GH_TOKEN, which
+# does not carry it, while the stored gh credential does. So an org call that
+# fails under an ambient token is retried once without it, which makes gh fall
+# back to the keyring. Repo rulesets go straight through.
+gh_ruleset() {
+  local a org=0 out
+  for a in "$@"; do case "$a" in orgs/*) org=1 ;; esac; done
+  [ "$org" = 1 ] || { gh api "$@"; return; }
+  # Captured, not streamed: a refused call still prints its error body on stdout,
+  # and that must not precede the retry's real answer.
+  if out="$(gh api "$@" 2>/dev/null)"; then printf '%s\n' "$out"; return 0; fi
+  [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] || return 1
+  env -u GH_TOKEN -u GITHUB_TOKEN gh api "$@"
+}
+
 ruleset_path() {
   if [ "$1" = Organization ]; then echo "orgs/$OWNER/rulesets/$2"; else echo "repos/$REPO/rulesets/$2"; fi
 }
@@ -125,11 +140,11 @@ restore() {
     p="$(ruleset_path "${t%%	*}" "${t##*	}")"
     want="$WORK/${t##*	}.bypass.json"
     jq -c '{bypass_actors: .bypass_actors}' "$WORK/${t##*	}.before.json" > "$want"
-    if ! gh api -X PUT "$p" --input "$want" >/dev/null; then
+    if ! gh_ruleset -X PUT "$p" --input "$want" >/dev/null; then
       echo "fleet-merge: RESTORE FAILED for $p — restore its bypass_actors by hand from $want" >&2
       rc=3; continue
     fi
-    got="$(gh api "$p" | jq -c '.bypass_actors')"
+    got="$(gh_ruleset "$p" | jq -c '.bypass_actors')"
     if [ "$got" = "$(jq -c .bypass_actors "$want")" ]; then
       echo "fleet-merge: restored $p (bypass_actors read back: $(jq 'length' <<<"$got"))"
     else
@@ -143,11 +158,11 @@ trap 'restore; rm -rf "$WORK"' EXIT
 
 for t in "${targets[@]+"${targets[@]}"}"; do
   p="$(ruleset_path "${t%%	*}" "${t##*	}")"
-  gh api "$p" > "$WORK/${t##*	}.before.json" || die "cannot read $p"
+  gh_ruleset "$p" > "$WORK/${t##*	}.before.json" || die "cannot read $p"
   jq -c '{bypass_actors: (.bypass_actors + [{"actor_id":1,"actor_type":"OrganizationAdmin","bypass_mode":"always"}])}' \
     "$WORK/${t##*	}.before.json" > "$WORK/${t##*	}.lift.json"
   LIFTED+=("$t")
-  gh api -X PUT "$p" --input "$WORK/${t##*	}.lift.json" >/dev/null || { echo "fleet-merge: cannot lift $p" >&2; exit 3; }
+  gh_ruleset -X PUT "$p" --input "$WORK/${t##*	}.lift.json" >/dev/null || { echo "fleet-merge: cannot lift $p" >&2; exit 3; }
   echo "fleet-merge: lifted $p"
 done
 

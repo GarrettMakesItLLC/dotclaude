@@ -28,6 +28,13 @@ for a in "$@"; do
   [ "$prev" = --input ] && input="$a"
   prev="$a"
 done
+# (The tests run with BASH_ENV=/dev/null: a bash stub would otherwise re-source the
+# user's profile and get GH_TOKEN back, which the real gh binary never does.)
+# An org ruleset is unreadable/unwritable under an ambient GH_TOKEN (no admin:org);
+# only the keyring credential, i.e. GH_TOKEN unset, has it.
+if [ "${STUB_ORG_KEYRING_ONLY:-0}" = 1 ] && [ -n "${GH_TOKEN:-}" ]; then
+  case "$path" in orgs/*) echo '{"message":"Not Found"}'; echo "gh: needs admin:org" >&2; exit 1 ;; esac
+fi
 if [ "$put" = 1 ]; then
   case "$path" in
     */merge) [ "${STUB_MERGE_FAIL:-0}" = 1 ] && { echo '{"message":"nope"}'; exit 1; }
@@ -87,6 +94,16 @@ order="$(grep -n -- '-X PUT' "$TMP/calls" | sed 's/:.*-X PUT / /' | awk '{print 
 [[ "$order" == *rulesets/11*rulesets/22*pulls/7/merge*rulesets/11*rulesets/22* ]] || [[ "$order" == *rulesets/*rulesets/*merge*rulesets/*rulesets/* ]] \
   && ok "lift, merge, restore happen in that order" || bad "order: $order"
 [ "$(jq -c .bypass_actors "$TMP/state-22.json")" = '[]' ] && ok "the org ruleset's bypass_actors are restored to []" || bad "not restored: $(cat "$TMP/state-22.json")"
+
+echo "fleet-merge: an org ruleset an ambient GH_TOKEN cannot reach is retried on the keyring credential"
+verdict '.'; : > "$TMP/calls"; rm -f "$TMP"/state-*.json
+OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" STUB_ORG_KEYRING_ONLY=1 \
+  BASH_ENV=/dev/null GH_TOKEN=ambient GITHUB_TOKEN=ambient "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" 2>&1)"; RC=$?
+[ "$RC" = 0 ] && ok "merges although the ambient token lacks admin:org" || bad "rc=$RC $OUT"
+[ "$(jq -c .bypass_actors "$TMP/state-22.json")" = '[]' ] && ok "and the org ruleset is restored" || bad "not restored: $(cat "$TMP"/state-22.json 2>&1)"
+OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" STUB_ORG_KEYRING_ONLY=1 \
+  "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" --dry-run 2>&1)"; RC=$?
+[ "$RC" = 0 ] && ok "no ambient token still works" || bad "rc=$RC $OUT"
 
 echo "fleet-merge: a failed merge still restores"
 verdict '.'; : > "$TMP/calls"; rm -f "$TMP"/state-*.json

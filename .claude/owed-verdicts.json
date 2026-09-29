@@ -1,0 +1,14 @@
+{
+  "$comment": "Verdicts GitHub Actions owes dotclaude for the window it refused every job (GarrettMakesItLLC/platform#998). A `paid` records the run, the main SHA and the result. Keep `.claude/fleet-mode.json` on `degraded` until every item is paid.",
+  "window": { "from": "2026-09-16T09:01:05Z", "issue": "GarrettMakesItLLC/dotclaude#437" },
+  "items": [
+    {
+      "id": "ci-on-main",
+      "verdict": "One validate.yml run of main on Actions, including the shellcheck install and the CI Success aggregate as the runner executes them.",
+      "why": "The replica runs validate's steps on a dev box with a local shellcheck (the apt install line is dropped) and treats the `CI Success` aggregate as the replica table itself.",
+      "owedFor": ["main during the window"],
+      "howToPay": "Actions → validate → Run workflow on main, or the first PR after the window. Record the run URL, SHA and conclusion.",
+      "paid": null
+    }
+  ]
+}

@@ -25,3 +25,4 @@ telemetry/
 # OS noise
 .DS_Store
 Thumbs.db
+.ci-replica/
