@@ -1,7 +1,7 @@
 ---
 name: aligning-repo-config
 description: Use when a project repo's CLAUDE.md, .claude/ config, or .github/ templates need to be brought back in line with the global dotclaude config — after a dotclaude refit or rule change, when adopting a repo that has no config yet, or when repo instructions have drifted from what the code actually does.
-allowed-tools: Bash(git -C ~/dotclaude:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(rg:*), Bash(ls:*), Read, Edit, Write, Glob, Grep
+allowed-tools: Bash(git -C ~/dotclaude:*), Bash(diff:*), Bash(git status:*), Bash(git diff:*), Bash(git log:*), Bash(rg:*), Bash(ls:*), Read, Edit, Write, Glob, Grep
 ---
 
 # Aligning repo config
