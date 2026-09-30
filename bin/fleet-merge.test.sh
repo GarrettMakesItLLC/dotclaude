@@ -9,6 +9,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FM="$HERE/fleet-merge.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+# Lift records are durable state; the tests must never touch the real one.
+export FLEET_MERGE_STATE_DIR="$TMP/state"
 fail=0
 ok()  { echo "  ok: $1"; }
 bad() { echo "  FAIL: $1"; fail=1; }
@@ -41,7 +43,8 @@ case "$*" in *"-X POST"*/comments*)
 esac
 if [ "$put" = 1 ]; then
   case "$path" in
-    */merge) [ "${STUB_MERGE_FAIL:-0}" = 1 ] && { echo '{"message":"nope"}'; exit 1; }
+    */merge) [ "${STUB_MERGE_HANG:-0}" = 1 ] && { echo $$ > "$STUB_DIR/hang.pid"; exec sleep 60; }
+             [ "${STUB_MERGE_FAIL:-0}" = 1 ] && { echo '{"message":"nope"}'; exit 1; }
              echo '{"merged":true,"sha":"mmmm"}' ;;
     *) if [ -n "$input" ] && [ "$input" != - ]; then cat "$input"; else cat; fi > "$STUB_DIR/last-put.json"; cp "$STUB_DIR/last-put.json" "$STUB_DIR/state-$(basename "$path").json"; echo '{}' ;;
   esac
@@ -133,6 +136,54 @@ OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$H
 echo "fleet-merge: --dry-run changes nothing"
 verdict '.'; run --dry-run
 [ "$RC" = 0 ] && [ "$(writes)" = 0 ] && ! grep -q -- '-X POST' "$TMP/calls" && ok "dry run writes nothing" || bad "dry run: rc=$RC writes=$(writes)"
+
+echo "fleet-merge: a SIGKILL between lift and restore leaves a record, and the next run restores"
+SEED11='[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"pull_request"}]'
+kill_between_lift_and_restore() {
+  rm -rf "$TMP/state" "$TMP/hang.pid"; : > "$TMP/calls"; rm -f "$TMP"/state-*.json
+  printf '{"bypass_actors":%s}\n' "$SEED11" > "$TMP/state-11.json"
+  echo '{"bypass_actors":[]}' > "$TMP/state-22.json"
+  verdict '.'
+  PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" STUB_MERGE_HANG=1 \
+    "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" >"$TMP/killed.out" 2>&1 &
+  FMPID=$!
+  for _ in $(seq 1 100); do [ -f "$TMP/hang.pid" ] && break; sleep 0.1; done
+  kill -9 "$FMPID" 2>/dev/null; wait "$FMPID" 2>/dev/null
+  [ -f "$TMP/hang.pid" ] && kill "$(cat "$TMP/hang.pid")" 2>/dev/null
+  return 0
+}
+kill_between_lift_and_restore
+[ -f "$TMP/hang.pid" ] && ok "the merge was in flight when the process was killed" || bad "never reached the merge: $(cat "$TMP/killed.out")"
+jq -e '.bypass_actors|any(.actor_type=="OrganizationAdmin")' "$TMP/state-22.json" >/dev/null \
+  && ok "the org ruleset is left lifted (the trap could not fire)" || bad "not lifted: $(cat "$TMP/state-22.json")"
+[ "$(ls "$TMP"/state/o-r/*.json 2>/dev/null | wc -l)" = 2 ] && ok "one durable record per lifted ruleset" || bad "records: $(ls "$TMP"/state/o-r 2>&1)"
+[ "$(jq -c .before "$TMP/state/o-r/repo-11.json")" = "$SEED11" ] && ok "the record holds the before-state" || bad "record: $(cat "$TMP/state/o-r/repo-11.json")"
+LISTED="$("$FM" --list-pending)"
+grep -q 'ruleset 22 still LIFTED' <<<"$LISTED" && grep -q 'ruleset 11 still LIFTED' <<<"$LISTED" && ok "--list-pending names both" || bad "list: $LISTED"
+
+: > "$TMP/calls"
+OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" "$FM" --restore-pending 2>&1)"; RC=$?
+[ "$RC" = 0 ] && ok "--restore-pending exits 0" || bad "rc=$RC $OUT"
+[ "$(jq -c .bypass_actors "$TMP/state-11.json")" = "$SEED11" ] && [ "$(jq -c .bypass_actors "$TMP/state-22.json")" = '[]' ] \
+  && ok "both rulesets are back to their before-state" || bad "state: $(cat "$TMP"/state-11.json "$TMP"/state-22.json)"
+[ -z "$(ls "$TMP"/state/o-r/*.json 2>/dev/null)" ] && ok "records are removed after a verified restore" || bad "records remain"
+[ -z "$("$FM" --list-pending)" ] && ok "--list-pending is silent when nothing is pending" || bad "still listing"
+
+kill_between_lift_and_restore
+verdict '.'; run --dry-run
+[ -n "$(ls "$TMP"/state/o-r/*.json 2>/dev/null)" ] && ok "--dry-run does not self-heal" || bad "dry-run restored"
+verdict '.'
+OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" 2>&1)"; RC=$?
+grep -q 'found an orphaned lift' <<<"$OUT" && ok "the next merge restores the orphan first" || bad "no self-heal: $OUT"
+[ "$RC" = 0 ] && [ -z "$(ls "$TMP"/state/o-r/*.json 2>/dev/null)" ] && ok "and completes with no record left" || bad "rc=$RC $OUT"
+
+echo "fleet-merge: a record whose pid is alive is another merge in flight"
+mkdir -p "$TMP/state/o-r"
+jq -n --argjson pid "$$" '{repo:"o/r",source:"Repository",id:11,pid:$pid,pr:9,ts:"now",before:[]}' > "$TMP/state/o-r/repo-11.json"
+[ -z "$("$FM" --list-pending)" ] && ok "a live owner is not reported as pending" || bad "live owner listed"
+verdict '.'; run
+[ "$RC" = 3 ] && [ "$(writes)" = 0 ] && ok "a second lift of the same ruleset is refused with no write" || bad "rc=$RC writes=$(writes) $OUT"
+rm -rf "$TMP/state"
 
 [ "$fail" = 0 ] && echo "fleet-merge: all cases passed"
 exit "$fail"

@@ -37,7 +37,11 @@ once, merged once.
    PR's current head, came from a full run (no `--job`), measured a clean tree against the head's own
    manifest, and every local job PASSed. It then lifts every merge-gating ruleset on the base
    (repo and org), merges pinned to that SHA, and restores and reads back each ruleset's
-   `bypass_actors`, restoring even when the merge fails. A job carried over from an earlier SHA is
+   `bypass_actors`, restoring even when the merge fails. Each lift is also a durable record under
+   `${XDG_STATE_HOME:-~/.local/state}/fleet-merge/<owner>-<repo>/` (before-state, pid, PR, time), because
+   a SIGKILL skips the restore trap. The next `fleet-merge.sh` restores any record whose pid is dead
+   before it does anything else; `fleet-merge.sh --restore-pending [--repo OWNER/NAME]` does it
+   explicitly, and the SessionStart banner names any lift still pending. A job carried over from an earlier SHA is
    not a verdict. Re-run the full suite on the final SHA.
 
 8. **Reconcile.** `fleet-reconcile.sh --pr <N> --apply`, then release the lease. The wave is not
