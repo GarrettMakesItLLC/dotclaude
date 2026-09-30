@@ -3,7 +3,9 @@
 # (no npm, no network): the install strategy (hook shims, env files, install
 # under the lock, retry, scope verification, prisma/post steps, the sweep lock,
 # --check) and the mirror strategy (nested copies, .bin links, workspace links,
-# drift detection and refresh, a stale main tree refused).
+# drift detection and refresh, a stale main tree refused, .bin links re-pointed
+# once the worktree has its own package, packages a branch moved left out of the
+# nest, lock timeouts, the envPrefix-named stamp and the state postSteps see).
 #   bash bin/setup-worktree.test.sh
 set -uo pipefail
 
@@ -121,6 +123,100 @@ run --check "$V"
 sleep 1; touch "$M/package-lock.json"
 run "$V"
 [ "$RC" = 1 ] && grep -q 'predate its own package-lock.json' <<<"$OUT" && ok "a main tree older than its lockfile is refused as a source" || bad "stale main: rc=$RC $OUT"
+
+# --------------------------------------------------------------------------
+# A fresh mirror fixture: main tree with one nested dep (apps/web: foo@1), a root
+# tool with a .bin link, the install stamp, and one worktree. $1 = dir, $2 = the
+# manifest JSON.
+mk_mirror() {
+  local m="$1"
+  git init -q -b main "$m"
+  mkdir -p "$m/.claude" "$m/apps/web"
+  printf '%s\n' "$2" >"$m/.claude/repo.json"
+  echo '{ "name": "@demo/web", "version": "0.0.0" }' >"$m/apps/web/package.json"
+  echo '{ "lockfileVersion": 3, "packages": { "apps/web/node_modules/foo": { "version": "1.0.0" }, "apps/web/node_modules/bar": { "version": "1.0.0" } } }' >"$m/package-lock.json"
+  git -C "$m" add . && git -C "$m" commit -q -m init
+  mkdir -p "$m/apps/web/node_modules/foo" "$m/apps/web/node_modules/bar/bin" "$m/apps/web/node_modules/.bin" "$m/node_modules/tool/bin" "$m/node_modules/.bin"
+  echo '{ "name": "foo", "version": "1.0.0" }' >"$m/apps/web/node_modules/foo/package.json"
+  echo '{ "name": "bar", "version": "1.0.0" }' >"$m/apps/web/node_modules/bar/package.json"
+  echo '#!/bin/sh' >"$m/apps/web/node_modules/bar/bin/bar.js"
+  ln -s ../bar/bin/bar.js "$m/apps/web/node_modules/.bin/bar"
+  echo '#!/bin/sh' >"$m/node_modules/tool/bin/t.js"
+  ln -s ../tool/bin/t.js "$m/node_modules/.bin/tool"
+  touch -d '2000-01-01' "$m/package-lock.json"
+  echo '{}' >"$m/node_modules/.package-lock.json"
+  git -C "$m" worktree add -q "$m/.worktrees/w" -b w
+}
+
+echo "setup-worktree: mirror — a worktree with packages of its own"
+P="$TMP/own"
+mk_mirror "$P" '{ "envPrefix": "DEMO", "worktree": { "strategy": "mirror", "linkRootBin": true,
+  "postSteps": ["env | grep ^SETUP_WORKTREE_ | sort >>\"$WORKTREE/.step-env\"; echo --- >>\"$WORKTREE/.step-env\""] } }'
+X="$P/.worktrees/w"
+run "$X"
+[ "$RC" = 0 ] && ok "exits 0" || bad "rc=$RC $OUT"
+[ -f "$(git -C "$X" rev-parse --path-format=absolute --git-dir)/demo-nested-deps-stamp" ] && ok "the copy stamp is named from envPrefix" || bad "no demo-nested-deps-stamp"
+grep -q '^SETUP_WORKTREE_STALE=1$' "$X/.step-env" && grep -q '^SETUP_WORKTREE_COPIED_STAMP=$' "$X/.step-env" \
+  && grep -q "^SETUP_WORKTREE_LOCK=.*with-check-lock.sh$" "$X/.step-env" \
+  && ok "postSteps see the state from before the copy (stale, nothing copied yet)" || bad "step env: $(cat "$X/.step-env")"
+: >"$X/.step-env"
+run "$X"
+grep -q '^SETUP_WORKTREE_STALE=0$' "$X/.step-env" && grep -q '^SETUP_WORKTREE_COPIED_STAMP=[0-9]' "$X/.step-env" \
+  && ok "a re-run tells postSteps the copy is current and stamped" || bad "step env: $(cat "$X/.step-env")"
+
+# The worktree gains its own copy of the root tool (an install run here). The
+# .bin link still runs the MAIN tree's copy against this tree's packages.
+mkdir -p "$X/node_modules/tool/bin" && echo '#!/bin/sh' >"$X/node_modules/tool/bin/t.js"
+run --check "$X"
+[ "$RC" = 1 ] && grep -q "main tree's copy of a package this worktree has itself: tool" <<<"$OUT" \
+  && ok "--check names a .bin link that splits one tool across two trees" || bad "split --check: rc=$RC $OUT"
+[ "$(readlink "$X/node_modules/.bin/tool")" = "$P/node_modules/tool/bin/t.js" ] && ok "--check changed nothing" || bad "--check wrote"
+run "$X"
+[ "$RC" = 0 ] && [ "$(readlink "$X/node_modules/.bin/tool")" = "../tool/bin/t.js" ] && grep -q 're-pointed 1 root bin' <<<"$OUT" \
+  && ok "a run re-points it at the worktree's own package, relative" || bad "re-point: rc=$RC $(readlink "$X/node_modules/.bin/tool") $OUT"
+run --check "$X"
+[ "$RC" = 0 ] && ok "--check passes once re-pointed" || bad "--check after re-point: rc=$RC $OUT"
+
+echo "setup-worktree: mirror — a branch that hoisted a nested package"
+H="$TMP/hoist"
+mk_mirror "$H" '{ "worktree": { "strategy": "mirror",
+  "postSteps": ["printf %s \"$SETUP_WORKTREE_EXEMPT\" >\"$WORKTREE/.exempt\""] } }'
+Y="$H/.worktrees/w"
+# The branch moved bar out of apps/web to its own root at 2.0.0 and installed it.
+echo '{ "lockfileVersion": 3, "packages": { "apps/web/node_modules/foo": { "version": "1.0.0" }, "node_modules/bar": { "version": "2.0.0" } } }' >"$Y/package-lock.json"
+mkdir -p "$Y/node_modules/bar" && echo '{ "name": "bar", "version": "2.0.0" }' >"$Y/node_modules/bar/package.json"
+run "$Y"
+[ "$RC" = 0 ] && ok "exits 0" || bad "rc=$RC $OUT"
+[ -f "$Y/apps/web/node_modules/foo/package.json" ] && ok "a package the branch did not move is still copied" || bad "foo not copied"
+[ ! -e "$Y/apps/web/node_modules/bar" ] && ok "the moved package is not copied back into the nest to shadow the branch's own" || bad "bar was copied: $(ls "$Y/apps/web/node_modules")"
+[ ! -e "$Y/apps/web/node_modules/.bin" ] && ok "its now-dangling .bin link is removed" || bad ".bin left: $(ls -la "$Y/apps/web/node_modules/.bin" 2>&1)"
+grep -qx 'bar' "$Y/.exempt" && ok "postSteps are told which packages the branch moved" || bad "exempt: $(cat "$Y/.exempt" 2>&1)"
+
+echo "setup-worktree: mirror — a check-lock timeout is named, not blamed on the source"
+L="$TMP/lock"
+mk_mirror "$L" '{ "worktree": { "strategy": "mirror" } }'
+Z="$L/.worktrees/w"
+printf '#!/bin/sh\nexit 75\n' >"$TMP/lock75" && chmod +x "$TMP/lock75"
+OUT="$(SETUP_WORKTREE_LOCK="$TMP/lock75" "$SW" "$Z" 2>&1)"; RC=$?
+[ "$RC" = 1 ] && grep -q 'timed out before copying: apps/web' <<<"$OUT" && ! grep -q INCOMPLETE <<<"$OUT" \
+  && ok "a freshly written source is not copied past the lock, and says why" || bad "rc=$RC $OUT"
+OUT="$(SETUP_WORKTREE_LOCK="$TMP/lock75" SETUP_WORKTREE_STABLE_SECS=0 "$SW" "$Z" 2>&1)"; RC=$?
+[ "$RC" = 0 ] && grep -q 'retried unlocked' <<<"$OUT" && [ -f "$Z/apps/web/node_modules/foo/package.json" ] \
+  && ok "a quiet source is copied unlocked after a timeout" || bad "rc=$RC $OUT"
+rm -rf "$Z/apps/web/node_modules/foo"
+run --check "$Z"
+[ "$RC" = 1 ] && [ "$(grep -o 'apps/web/foo' <<<"$OUT" | wc -l)" = 1 ] && ok "a missing package is named once" || bad "dup: $OUT"
+
+echo "setup-worktree: credential nudges"
+N="$TMP/nudge"
+mk_mirror "$N" '{ "stateDir": "~/.nudge", "ops": { "channel": true }, "worktree": { "strategy": "mirror" } }'
+mv "$HOME/.config/secrets/gmi.env" "$TMP/gmi.env.away"
+run "$N/.worktrees/w"
+grep -q 'ops secrets not found' <<<"$OUT" && grep -q 'agent shell creds not found' <<<"$OUT" \
+  && grep -q 'no GitHub Packages token' <<<"$OUT" && ok "a fresh machine is told what to build" || bad "nudges: $OUT"
+mv "$TMP/gmi.env.away" "$HOME/.config/secrets/gmi.env"
+run "$N/.worktrees/w"
+! grep -q 'no GitHub Packages token' <<<"$OUT" && ok "gmi.env holding the PAT silences the token nudge" || bad "token nudge: $OUT"
 
 echo "setup-worktree: a repo with no manifest is refused"
 git init -q "$TMP/none"
