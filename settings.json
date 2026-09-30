@@ -144,6 +144,10 @@
           {
             "type": "command",
             "command": "\"$HOME\"/.claude/hooks/worktree-bootstrap.sh"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/credential-output-guard.sh"
           }
         ]
       },
