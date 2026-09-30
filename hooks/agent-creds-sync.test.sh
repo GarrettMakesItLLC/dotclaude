@@ -105,6 +105,23 @@ rc="$(run_hook "$TMP/repo5-wt")"
 [ "$rc" = 0 ] || { echo "FAIL (worktree): exit $rc"; fail=1; }
 [ "$(wc -l < "$WT_BUILD_LOG" 2>/dev/null || echo 0)" = 1 ] || { echo "FAIL (worktree): main tree's build script did not run"; fail=1; }
 
+# --- A repo with .claude/repo.json runs dotclaude's SHARED agent-env-build.sh,
+# not its own copy; no `ops` block means no pull at all. ---
+REPO6="$TMP/repo6"; new_repo "$REPO6"
+mkdir -p "$REPO6/bin" "$REPO6/.claude"
+LOCAL_LOG="$TMP/local.log"
+for s6 in agent-env-build.sh ops-pull.sh; do
+  printf '#!/usr/bin/env bash\necho %s >> "%s"\n' "$s6" "$LOCAL_LOG" > "$REPO6/bin/$s6"
+  chmod +x "$REPO6/bin/$s6"
+done
+echo '{ "stateDir": "~/.six", "credentials": { "sources": [".env"], "direct": ["SIX_KEY"] } }' > "$REPO6/.claude/repo.json"
+echo 'SIX_KEY=v' > "$REPO6/.env"
+mkdir -p "$TMP/home6"
+( unset BASH_ENV; HOME="$TMP/home6" CLAUDE_PROJECT_DIR="$REPO6" "$HOOK" >/dev/null 2>&1 )
+[ -f "$TMP/local.log" ] && { echo "FAIL (manifest): the repo-local copy ran: $(cat "$LOCAL_LOG")"; fail=1; }
+grep -q '^export SIX_KEY=v$' "$TMP/home6/.six/agent.env" 2>/dev/null \
+  || { echo "FAIL (manifest): the shared agent-env-build.sh did not write ~/.six/agent.env"; fail=1; }
+
 # --- Garbage / missing CLAUDE_PROJECT_DIR -> fail open. ---
 rc=0; "$HOOK" >/dev/null 2>&1 || rc=$?
 [ "$rc" = 0 ] || { echo "FAIL (no project dir): exit $rc"; fail=1; }

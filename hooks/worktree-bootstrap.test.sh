@@ -170,7 +170,16 @@ elapsed=$(( $(date +%s) - start ))
 [ "$slow_got" = 0 ] || { echo "FAIL (slow script): hook exited $slow_got"; fail=1; }
 [ "$elapsed" -lt 3 ] \
   || { echo "FAIL (slow script): hook took ${elapsed}s to return — it must never wait on the priming script"; fail=1; }
-log_path="$(printf '%s' "$out" | sed -n 's/^  Log: //p')"
+log_path="$(printf '%s' "$out" | python3 -c '
+import json, sys
+try:
+    ctx = json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]
+except Exception:
+    sys.exit(0)
+for line in ctx.splitlines():
+    if line.startswith("Log: "):
+        print(line[5:])
+')"
 [ -n "$log_path" ] || { echo "FAIL (slow script): hook did not name a log path: $out"; fail=1; }
 rc_path="$(printf '%s' "$log_path" | sed 's/worktree-bootstrap\.log$/worktree-bootstrap.rc/')"
 if [ -n "$log_path" ]; then
@@ -180,6 +189,38 @@ if [ -n "$log_path" ]; then
   grep -q 'done' "$log_path" 2>/dev/null \
     || { echo "FAIL (slow script): the script's own output was not captured in the log"; fail=1; }
 fi
+
+# --- a relative target resolves against the SHELL's cwd from the payload, not
+# the project dir: an agent inside one worktree creating a sibling.
+rm -f "$RECORD"
+mkdir -p "$PROJ/.worktrees/sib"
+CLAUDE_PROJECT_DIR="$PROJ" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))
+' "git worktree add ../sib -b feat/sib" "$PROJ/.worktrees/wt" | CLAUDE_PROJECT_DIR="$PROJ" "$HOOK" >/dev/null 2>&1
+wait_for "$RECORD" && [ "$(cat "$RECORD")" = "$PROJ/.worktrees/wt/../sib" ] \
+  || { echo "FAIL (payload cwd): setup ran with '$(cat "$RECORD" 2>/dev/null)', wanted the sibling"; fail=1; }
+
+# --- a repo with .claude/repo.json is primed by dotclaude's SHARED script,
+# even when it also carries its own bin/setup-worktree.sh.
+MAN="$TMP/manifest-repo"
+mk_repo "$MAN" LOCAL
+mkdir -p "$MAN/.claude"
+echo '{ "worktree": { "strategy": "install", "install": "true" } }' >"$MAN/.claude/repo.json"
+git -C "$MAN" add -A && git -C "$MAN" commit --quiet -m manifest
+git -C "$MAN" worktree add --quiet "$MAN/.worktrees/wt" -b feat/m
+rm -f "$XREPO_RECORD"
+out="$(CHECK_LOCK_DIR="$TMP/locks" CLAUDE_PROJECT_DIR="$MAN" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))
+' "git -C $MAN worktree add $MAN/.worktrees/wt -b feat/m" \
+  | CHECK_LOCK_DIR="$TMP/locks" CLAUDE_PROJECT_DIR="$MAN" "$HOOK" 2>/dev/null)"
+mrc="$(git -C "$MAN/.worktrees/wt" rev-parse --path-format=absolute --git-dir)/worktree-bootstrap.rc"
+wait_for "$mrc" || sleep 3
+[ -f "$XREPO_RECORD" ] && { echo "FAIL (manifest): the repo-local script ran: $(cat "$XREPO_RECORD")"; fail=1; }
+grep -q 'bin/setup-worktree.sh' <<<"$out" && ! grep -q "$MAN/bin" <<<"$out" \
+  || { echo "FAIL (manifest): hook did not name the shared script: $out"; fail=1; }
+[ "$(cat "$mrc" 2>/dev/null)" = 0 ] || { echo "FAIL (manifest): shared script rc=$(cat "$mrc" 2>/dev/null) log=$(cat "${mrc%.rc}.log" 2>/dev/null)"; fail=1; }
 
 if [ "$fail" = 0 ]; then
   echo "worktree-bootstrap: all cases passed"

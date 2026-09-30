@@ -10,8 +10,11 @@
 #   the key.
 #
 # WHAT THIS DOES
-#   Two opt-in, repo-owned scripts, run IF they exist — this hook is inert in any
-#   repo that hasn't opted in:
+#   Two opt-in scripts, run IF the repo opted in — this hook is inert otherwise.
+#   A repo with a `.claude/repo.json` manifest (docs/repo-manifest.md) gets
+#   dotclaude's shared bin/agent-env-build.sh (when the manifest has a
+#   `credentials` block) and bin/ops-pull.sh (when it has an `ops` block). A repo
+#   without one gets its own bin/ copies, if it has them:
 #     • bin/agent-env-build.sh — regenerates the local-cred file from the repo's
 #       own `.env` files. Local + cheap (no network), so it runs every session and
 #       picks up any `.env` edit for free.
@@ -37,13 +40,23 @@ common_dir="$(git -C "$repo_dir" rev-parse --path-format=absolute --git-common-d
 [ -z "$common_dir" ] && exit 0
 main_tree="$(dirname "$common_dir")"
 
-# 1. Regenerate local-cred file every session (cheap, offline, idempotent).
+self_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+shared_bin="$(cd "$self_dir/../bin" 2>/dev/null && pwd || true)"
 build_script="$main_tree/bin/agent-env-build.sh"
-[ -x "$build_script" ] && ( cd "$main_tree" && timeout 30 bash "$build_script" ) >/dev/null 2>&1 || true
+pull_script="$main_tree/bin/ops-pull.sh"
+manifest="$main_tree/.claude/repo.json"
+if [ -f "$manifest" ] && [ -n "$shared_bin" ] && command -v python3 >/dev/null 2>&1; then
+  has() { python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get(sys.argv[2]) else 1)' "$manifest" "$1" 2>/dev/null; }
+  build_script=""; pull_script=""
+  has credentials && build_script="$shared_bin/agent-env-build.sh"
+  has ops && pull_script="$shared_bin/ops-pull.sh"
+fi
+
+# 1. Regenerate local-cred file every session (cheap, offline, idempotent).
+[ -n "$build_script" ] && [ -x "$build_script" ] && ( cd "$main_tree" && timeout 30 bash "$build_script" ) >/dev/null 2>&1 || true
 
 # 2. Refresh cloud-synced ops secrets only when stale or never pulled (network).
-pull_script="$main_tree/bin/ops-pull.sh"
-if [ -x "$pull_script" ]; then
+if [ -n "$pull_script" ] && [ -x "$pull_script" ]; then
   stamp="$common_dir/ops-pull-stamp"
   stale=1
   if [ -f "$stamp" ]; then
