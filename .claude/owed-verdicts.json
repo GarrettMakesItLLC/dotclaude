@@ -8,7 +8,13 @@
       "why": "The replica runs validate's steps on a dev box with a local shellcheck (the apt install line is dropped) and treats the `CI Success` aggregate as the replica table itself.",
       "owedFor": ["main during the window"],
       "howToPay": "Actions → validate → Run workflow on main, or the first PR after the window. Record the run URL, SHA and conclusion.",
-      "paid": null
+      "paid": {
+        "run": "https://github.com/GarrettMakesItLLC/dotclaude/actions/runs/36664076646",
+        "sha": "8e95e7b36a14238a218c3b39deea5bbd6f0b1a55",
+        "result": "success",
+        "note": "validate on push to main: JSON, shellcheck (apt-installed), self-tests and bin/ tool self-tests all success. CI Success runs only on pull_request, so the aggregate is evidenced by the PR run https://github.com/GarrettMakesItLLC/dotclaude/actions/runs/36663770193 (head 95c52e8ab3dbb413066fe1d92395928d264d91a3): all five jobs, CI Success included, succeeded.",
+        "paidOn": "2026-09-30"
+      }
     }
   ]
 }

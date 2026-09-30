@@ -29,6 +29,14 @@
 # bypass_actors — from an EXIT trap, so a failed merge still restores — and reads
 # them back.
 #
+# An EXIT trap cannot fire on SIGKILL (an OOM kill lands exactly there), so each
+# lift is also a durable record, written BEFORE the ruleset is touched:
+#   ${FLEET_MERGE_STATE_DIR:-${XDG_STATE_HOME:-~/.local/state}/fleet-merge}/<owner>-<repo>/<org|repo>-<id>.json
+# holding the before-state bypass_actors, the pid, the PR and a timestamp. A record
+# is removed only after a restore read back equal. Every invocation first restores
+# any record whose pid is dead; a record whose pid is alive is another merge in
+# flight and is left alone (and blocks a second lift of the same ruleset).
+#
 #   fleet-merge.sh <PR> --verdict <verdict.json> [--repo OWNER/NAME]
 #                  [--manifest-path .claude/ci-replica.json]
 #                  [--allow-not-run JOB]... [--method squash|merge] [--title T]
@@ -41,11 +49,11 @@
 # Exit: 0 merged (or dry-run clean), 1 refused, 2 usage, 3 merge or restore failed.
 set -uo pipefail
 
-usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 die() { echo "fleet-merge: $*" >&2; exit 2; }
 refuse() { echo "fleet-merge: REFUSED — $*" >&2; exit 1; }
 
-PR="" VERDICT="" REPO="" MANIFEST_PATH=".claude/ci-replica.json" METHOD="squash" TITLE="" DRY=0
+PR="" VERDICT="" REPO="" MANIFEST_PATH=".claude/ci-replica.json" METHOD="squash" TITLE="" DRY=0 ACTION=merge
 ALLOW=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -57,20 +65,112 @@ while [ $# -gt 0 ]; do
     --method) METHOD="${2:-}"; shift 2 ;;
     --title) TITLE="${2:-}"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
+    --restore-pending) ACTION=restore; shift ;;
+    --list-pending) ACTION=list; shift ;;
     -*) die "unknown option $1" ;;
     *) [ -z "$PR" ] || die "one PR at a time"; PR="$1"; shift ;;
   esac
 done
-[[ "$PR" =~ ^[0-9]+$ ]] || usage
-[ -n "$VERDICT" ] || die "--verdict <verdict.json> is required: the verdict is the authorization"
-[ -f "$VERDICT" ] || refuse "no verdict file at $VERDICT"
+if [ "$ACTION" = merge ]; then
+  [[ "$PR" =~ ^[0-9]+$ ]] || usage
+  [ -n "$VERDICT" ] || die "--verdict <verdict.json> is required: the verdict is the authorization"
+  [ -f "$VERDICT" ] || refuse "no verdict file at $VERDICT"
+fi
 command -v jq >/dev/null || die "jq is required (verdict, ruleset and merge JSON are all read with it) — install it: sudo apt install jq"
 [ -n "${FLEET_MERGE_GH_TOKEN:-}" ] && export GH_TOKEN="$FLEET_MERGE_GH_TOKEN"
 
-if [ -z "$REPO" ]; then
+STATE_ROOT="${FLEET_MERGE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/fleet-merge}"
+
+# Organization rulesets need `admin:org`. An agent shell exports GH_TOKEN, which
+# does not carry it, while the stored gh credential does. So an org call that
+# fails under an ambient token is retried once without it, which makes gh fall
+# back to the keyring. Repo rulesets go straight through.
+gh_ruleset() {
+  local a org=0 out
+  for a in "$@"; do case "$a" in orgs/*) org=1 ;; esac; done
+  [ "$org" = 1 ] || { gh api "$@"; return; }
+  # Captured, not streamed: a refused call still prints its error body on stdout,
+  # and that must not precede the retry's real answer.
+  if out="$(gh api "$@" 2>/dev/null)"; then printf '%s\n' "$out"; return 0; fi
+  [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] || return 1
+  env -u GH_TOKEN -u GITHUB_TOKEN gh api "$@"
+}
+
+# ruleset_path <Organization|Repository> <id> <owner/name>
+ruleset_path() {
+  if [ "$1" = Organization ]; then echo "orgs/${3%%/*}/rulesets/$2"; else echo "repos/$3/rulesets/$2"; fi
+}
+
+# --- durable lift records ---------------------------------------------------
+proc_start() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//'; }
+# A pid is alive only if it is running AND is the process that wrote the record
+# (start time matches), so a recycled pid does not shield a dead lift.
+record_owner_alive() {  # record_owner_alive <record.json>
+  local pid start
+  pid="$(jq -r '.pid // empty' "$1" 2>/dev/null)"; start="$(jq -r '.pidStart // empty' "$1" 2>/dev/null)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  [ -z "$start" ] || [ "$(proc_start "$pid")" = "$start" ]
+}
+record_dir() { echo "$STATE_ROOT/${1//\//-}"; }
+record_file() {  # record_file <owner/name> <Organization|Repository> <id>
+  local kind=repo; [ "$2" = Organization ] && kind=org
+  echo "$(record_dir "$1")/$kind-$3.json"
+}
+# pending_records [owner/name] -> paths of dead-owner records
+pending_records() {
+  local f d
+  if [ -n "${1:-}" ]; then d="$(record_dir "$1")"; else d="$STATE_ROOT/*"; fi
+  # shellcheck disable=SC2086
+  for f in $d/*.json; do
+    [ -f "$f" ] || continue
+    record_owner_alive "$f" || echo "$f"
+  done
+}
+# restore_record <record.json>: PUT the recorded bypass_actors back, read them
+# back, and remove the record only when they match.
+restore_record() {
+  local rec="$1" repo src id p want got
+  repo="$(jq -r .repo "$rec")"; src="$(jq -r .source "$rec")"; id="$(jq -r .id "$rec")"
+  p="$(ruleset_path "$src" "$id" "$repo")"
+  want="$(mktemp)"
+  jq -c '{bypass_actors: .before}' "$rec" > "$want"
+  if ! gh_ruleset -X PUT "$p" --input "$want" >/dev/null; then
+    echo "fleet-merge: RESTORE FAILED for $p — record kept at $rec" >&2; rm -f "$want"; return 3
+  fi
+  got="$(gh_ruleset "$p" | jq -c '.bypass_actors')"
+  if [ "$got" = "$(jq -c .bypass_actors "$want")" ]; then
+    rm -f "$rec" "$want"
+    echo "fleet-merge: restored $p (bypass_actors read back: $(jq 'length' <<<"$got"))"
+  else
+    echo "fleet-merge: RESTORE MISMATCH for $p: $got — record kept at $rec" >&2; rm -f "$want"; return 3
+  fi
+}
+restore_pending() {  # restore_pending [owner/name]
+  local rc=0 rec
+  while IFS= read -r rec; do
+    [ -n "$rec" ] || continue
+    echo "fleet-merge: found an orphaned lift (pid $(jq -r .pid "$rec") is gone, PR #$(jq -r .pr "$rec"), $(jq -r .ts "$rec")); restoring"
+    restore_record "$rec" || rc=3
+  done < <(pending_records "${1:-}")
+  return "$rc"
+}
+
+case "$ACTION" in
+  list)
+    while IFS= read -r rec; do
+      [ -n "$rec" ] || continue
+      echo "$(jq -r '"\(.repo) \(.source) ruleset \(.id) still LIFTED (fleet-merge pid \(.pid) died, PR #\(.pr), \(.ts))"' "$rec")"
+    done < <(pending_records "$REPO")
+    exit 0 ;;
+  restore)
+    restore_pending "$REPO"; exit $? ;;
+esac
+# Self-heal: a previous fleet-merge killed between lift and restore.
+if [ "$DRY" = 0 ]; then restore_pending "" || echo "fleet-merge: WARNING — an orphaned lift could not be restored (see above)" >&2; fi
+
+if [ -z "$REPO" ] && [ "$ACTION" = merge ]; then
   REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || die "cannot infer --repo"
 fi
-OWNER="${REPO%%/*}"
 
 jq -e . "$VERDICT" >/dev/null 2>&1 || refuse "$VERDICT is not valid JSON"
 
@@ -115,27 +215,18 @@ mapfile -t targets < <(jq -r '
   [.[] | select(.type=="required_status_checks" or .type=="merge_queue" or .type=="pull_request")
        | "\(.ruleset_source_type)\t\(.ruleset_id)"] | unique | .[]' <<<"$rules")
 
-# Organization rulesets need `admin:org`. An agent shell exports GH_TOKEN, which
-# does not carry it, while the stored gh credential does. So an org call that
-# fails under an ambient token is retried once without it, which makes gh fall
-# back to the keyring. Repo rulesets go straight through.
-gh_ruleset() {
-  local a org=0 out
-  for a in "$@"; do case "$a" in orgs/*) org=1 ;; esac; done
-  [ "$org" = 1 ] || { gh api "$@"; return; }
-  # Captured, not streamed: a refused call still prints its error body on stdout,
-  # and that must not precede the retry's real answer.
-  if out="$(gh api "$@" 2>/dev/null)"; then printf '%s\n' "$out"; return 0; fi
-  [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] || return 1
-  env -u GH_TOKEN -u GITHUB_TOKEN gh api "$@"
-}
-
-ruleset_path() {
-  if [ "$1" = Organization ]; then echo "orgs/$OWNER/rulesets/$2"; else echo "repos/$REPO/rulesets/$2"; fi
-}
-
-for t in "${targets[@]+"${targets[@]}"}"; do echo "fleet-merge: will lift $(ruleset_path ${t%%	*} ${t##*	})"; done
+for t in "${targets[@]+"${targets[@]}"}"; do echo "fleet-merge: will lift $(ruleset_path "${t%%	*}" "${t##*	}" "$REPO")"; done
 if [ "$DRY" = 1 ]; then echo "fleet-merge: --dry-run, nothing changed"; exit 0; fi
+
+# A live record is another merge holding this ruleset lifted: lifting it again
+# would record the lifted state as "before". Checked for every target up front.
+for t in "${targets[@]+"${targets[@]}"}"; do
+  rec="$(record_file "$REPO" "${t%%	*}" "${t##*	}")"
+  if [ -f "$rec" ] && record_owner_alive "$rec"; then
+    echo "fleet-merge: $(ruleset_path "${t%%	*}" "${t##*	}" "$REPO") is already lifted by another fleet-merge (pid $(jq -r .pid "$rec")); nothing was lifted" >&2
+    exit 3
+  fi
+done
 
 WORK="$(mktemp -d)"
 LIFTED=()
@@ -156,21 +247,9 @@ grep -qF "sha256=$verdict_sha256" <<<"$readback" \
 echo "fleet-merge: verdict published as comment $comment_id on PR #$PR (sha256 $verdict_sha256)"
 
 restore() {
-  local rc=0 t p want got
-  for t in "${LIFTED[@]+"${LIFTED[@]}"}"; do
-    p="$(ruleset_path "${t%%	*}" "${t##*	}")"
-    want="$WORK/${t##*	}.bypass.json"
-    jq -c '{bypass_actors: .bypass_actors}' "$WORK/${t##*	}.before.json" > "$want"
-    if ! gh_ruleset -X PUT "$p" --input "$want" >/dev/null; then
-      echo "fleet-merge: RESTORE FAILED for $p — restore its bypass_actors by hand from $want" >&2
-      rc=3; continue
-    fi
-    got="$(gh_ruleset "$p" | jq -c '.bypass_actors')"
-    if [ "$got" = "$(jq -c .bypass_actors "$want")" ]; then
-      echo "fleet-merge: restored $p (bypass_actors read back: $(jq 'length' <<<"$got"))"
-    else
-      echo "fleet-merge: RESTORE MISMATCH for $p: $got" >&2; rc=3
-    fi
+  local rc=0 rec
+  for rec in "${LIFTED[@]+"${LIFTED[@]}"}"; do
+    restore_record "$rec" || rc=3
   done
   LIFTED=()
   return "$rc"
@@ -178,12 +257,22 @@ restore() {
 trap 'restore; rm -rf "$WORK"' EXIT
 
 for t in "${targets[@]+"${targets[@]}"}"; do
-  p="$(ruleset_path "${t%%	*}" "${t##*	}")"
-  gh_ruleset "$p" > "$WORK/${t##*	}.before.json" || die "cannot read $p"
+  src="${t%%	*}"; id="${t##*	}"
+  p="$(ruleset_path "$src" "$id" "$REPO")"
+  rec="$(record_file "$REPO" "$src" "$id")"
+  gh_ruleset "$p" > "$WORK/$id.before.json" || die "cannot read $p"
+  # The record exists before the ruleset is touched, so a kill at any point
+  # after this line leaves the before-state on disk.
+  mkdir -p "$(dirname "$rec")"
+  jq -n --arg repo "$REPO" --arg source "$src" --argjson id "$id" --argjson pid "$$" \
+    --arg pidStart "$(proc_start $$)" --argjson pr "$PR" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --slurpfile b "$WORK/$id.before.json" \
+    '{repo:$repo, source:$source, id:$id, pid:$pid, pidStart:$pidStart, pr:$pr, ts:$ts, before:$b[0].bypass_actors}' \
+    > "$rec.tmp" && mv "$rec.tmp" "$rec" || die "cannot write the lift record $rec; nothing lifted"
   jq -c '{bypass_actors: (.bypass_actors + [{"actor_id":1,"actor_type":"OrganizationAdmin","bypass_mode":"always"}])}' \
-    "$WORK/${t##*	}.before.json" > "$WORK/${t##*	}.lift.json"
-  LIFTED+=("$t")
-  gh_ruleset -X PUT "$p" --input "$WORK/${t##*	}.lift.json" >/dev/null || { echo "fleet-merge: cannot lift $p" >&2; exit 3; }
+    "$WORK/$id.before.json" > "$WORK/$id.lift.json"
+  LIFTED+=("$rec")
+  gh_ruleset -X PUT "$p" --input "$WORK/$id.lift.json" >/dev/null || { echo "fleet-merge: cannot lift $p" >&2; exit 3; }
   echo "fleet-merge: lifted $p"
 done
 

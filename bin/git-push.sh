@@ -92,6 +92,39 @@ if [ -z "${GIT_SSH_COMMAND:-}" ] && [ -z "$(git config core.sshCommand 2>/dev/nu
   export GIT_SSH_COMMAND='ssh -o ServerAliveInterval=20 -o ServerAliveCountMax=90'
 fi
 
+# with-check-lock.sh leaves `<git-dir>/<prefix>-verification-stale` when HEAD moved
+# while a wrapped check ran: that check described a tree that no longer exists, so
+# nothing it reported may authorize a push. The marker holds the SHA before, the
+# SHA after and the wrapped argv; re-running that argv against a still tree clears
+# it. The prefix is `.claude/repo.json`'s envPrefix, lowercased, as with-check-lock.sh
+# derives it; none means a bare `verification-stale`. A deletion pushes no tree.
+if [ "$skip_reason" != 'a deletion' ]; then
+  stale_name="verification-stale"
+  stale_manifest="$(git rev-parse --show-toplevel 2>/dev/null || true)/.claude/repo.json"
+  if [ -f "$stale_manifest" ] && command -v python3 >/dev/null 2>&1; then
+    stale_prefix="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("envPrefix") or "")' "$stale_manifest" 2>/dev/null || true)"
+    case "$stale_prefix" in
+      '' | *[!A-Za-z0-9_]*) : ;;
+      *) stale_name="$(printf '%s' "$stale_prefix" | tr '[:upper:]' '[:lower:]')-verification-stale" ;;
+    esac
+  fi
+  stale_file="$(git rev-parse --absolute-git-dir 2>/dev/null || true)/$stale_name"
+  if [ -f "$stale_file" ]; then
+    stale_before="$(sed -n 1p "$stale_file")"
+    stale_after="$(sed -n 2p "$stale_file")"
+    stale_cmd="$(sed -n 3p "$stale_file")"
+    say "✗ refusing to push: a check ran while HEAD moved (${stale_before:0:12} → ${stale_after:0:12})."
+    say "  What it reported describes a tree that no longer exists."
+    if [ -n "$stale_cmd" ]; then
+      say "  Re-run it against the tree you are shipping: $stale_cmd"
+    else
+      say "  Re-run the check against the tree you are shipping."
+    fi
+    say "  (Marker: $stale_file; a passing re-run through bin/with-check-lock.sh clears it.)"
+    exit 1
+  fi
+fi
+
 # Where a bare `git push` sends this branch is decided by `push.default`, not by
 # the upstream alone: a branch stacked on a sibling has a different upstream than
 # its own name. Resolved before the push, because the hook's stdin needs the same

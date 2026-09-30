@@ -77,6 +77,30 @@ rc=0; out="$(CLAUDE_PROJECT_DIR="$TMP" "$HOOK" 2>/dev/null)" || rc=$?
 [ "$rc" = 0 ] || { echo "FAIL (non-repo cwd): exit $rc"; fail=1; }
 [ -z "$out" ] || { echo "FAIL (non-repo cwd): expected silence, got: $out"; fail=1; }
 
+# --- A killed fleet-merge.sh's orphaned lift is reported, in normal mode too,
+#     and a live pid's record is not. ---
+STATE="$TMP/merge-state"; mkdir -p "$STATE/o-r"
+jq -n '{repo:"o/r",source:"Organization",id:22,pid:999999,pr:7,ts:"2026-09-30T00:00:00Z",before:[]}' > "$STATE/o-r/org-22.json"
+rm -rf "$FLEET_MODE_CACHE_DIR"
+out="$(FLEET_MERGE_STATE_DIR="$STATE" run_hook "$TMP/healthy.json")"
+echo "$out" | python3 -c '
+import json, sys
+ctx = json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]
+assert "o/r Organization ruleset 22 still LIFTED" in ctx, ctx
+assert "--restore-pending" in ctx, ctx
+' || { echo "FAIL (pending lift): not reported in normal mode: $out"; fail=1; }
+rm -rf "$FLEET_MODE_CACHE_DIR"
+out="$(FLEET_MERGE_STATE_DIR="$STATE" run_hook "$TMP/refused.json")"
+echo "$out" | python3 -c '
+import json, sys
+ctx = json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]
+assert "ruleset 22 still LIFTED" in ctx and "operating-a-fleet" in ctx, ctx
+' || { echo "FAIL (pending lift + degraded): banners not combined"; fail=1; }
+jq -n --argjson pid "$$" '{repo:"o/r",source:"Organization",id:22,pid:$pid,pr:7,ts:"now",before:[]}' > "$STATE/o-r/org-22.json"
+rm -rf "$FLEET_MODE_CACHE_DIR"
+out="$(FLEET_MERGE_STATE_DIR="$STATE" run_hook "$TMP/healthy.json")"
+[ -z "$out" ] || { echo "FAIL (live lift): a merge in flight was reported: $out"; fail=1; }
+
 if [ "$fail" = 0 ]; then
   echo "fleet-mode-report: all cases passed"
 fi
