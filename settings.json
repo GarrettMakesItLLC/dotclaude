@@ -151,7 +151,13 @@
     "chrome-devtools-mcp@claude-plugins-official": false,
     "impeccable@impeccable": true,
     "ui-ux-pro-max@ui-ux-pro-max-skill": true,
-    "marketing-skills@marketingskills": true
+    "marketing-skills@marketingskills": true,
+    "canva@claude-plugins-official": true,
+    "hyperframes@claude-plugins-official": true,
+    "small-business@knowledge-work-plugins": true,
+    "legal@knowledge-work-plugins": true,
+    "operations@knowledge-work-plugins": true,
+    "upload-post@upload-post": true
   },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
@@ -176,6 +182,18 @@
       "source": {
         "source": "github",
         "repo": "coreyhaines31/marketingskills"
+      }
+    },
+    "knowledge-work-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/knowledge-work-plugins"
+      }
+    },
+    "upload-post": {
+      "source": {
+        "source": "github",
+        "repo": "Upload-Post/upload-post-plugin"
       }
     }
   },
