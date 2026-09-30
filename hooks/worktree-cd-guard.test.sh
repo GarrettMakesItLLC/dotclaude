@@ -56,6 +56,19 @@ check 0 "cd - && ls"
 check 0 "git worktree add $GONE -b feat/x && cd $GONE && npm ci"
 check 0 "git -C $TMP/repo worktree add -b feat/y $GONE && cd $GONE"
 check 0 "mkdir -p $GONE && cd $GONE"
+# #457: a worktree the same command creates, by a path relative to the cd
+# before it or to `git -C`, and cd-ed into later — including from a nested sh -c.
+R="$TMP/repo"
+check 0 "cd $R && git worktree add -q --detach .worktrees/val-1 HEAD && (nohup sh -c \"cd $R/.worktrees/val-1 && ls\" &)"
+check 0 "cd $R && git worktree add .worktrees/val-2 -b x && cd $R/.worktrees/val-2"
+check 0 "cd $R; git worktree add .worktrees/val-3; cd $R/.worktrees/val-3"
+check 0 "git -C $R worktree add .worktrees/val-4 && cd $R/.worktrees/val-4"
+check 0 "cd $R && git worktree add -b feat/z .worktrees/val-5 origin/main && sh -c 'cd $R/.worktrees/val-5 && npm ci'"
+check 0 "cd $R && git worktree add .worktrees/val-6 && bash -c \"cd $R/.worktrees/val-6/sub\""
+# ...but only that tree: a different missing worktree in the same command still blocks.
+check 2 "cd $R && git worktree add .worktrees/val-7 && cd $R/.worktrees/other"
+check 2 "cd /elsewhere && git worktree add .worktrees/val-8 && cd $R/.worktrees/val-8"
+check 2 "git worktree add .worktrees/val-9 && cd $R/.worktrees/val-9"
 check 0 "cd /definitely/not/a/worktree && ls"
 check 0 "cd .worktrees/gone && ls"
 check 0 'cd "$WT"/.worktrees/gone && ls'
