@@ -18,6 +18,11 @@
 #   - manifestSha256 == sha256 of the head's own manifest, so a verdict from a
 #                       run whose job list differs from the head's cannot pass
 #
+# It then publishes the verdict as a comment on the PR, reads it back, and refuses to
+# lift if that write fails: the replica's verdict.json lives in the validator's
+# throwaway worktree, so without this a merged head has no file to check afterwards.
+# The comment is the durable record; `#8137`'s ALL GREEN cites it, not a bare hash.
+#
 # Then it lifts every ruleset on the base branch that carries a merge gate
 # (required checks, merge queue, pull request rule) by adding an OrganizationAdmin
 # bypass, merges pinned to the verdict SHA, restores each ruleset's original
@@ -36,7 +41,7 @@
 # Exit: 0 merged (or dry-run clean), 1 refused, 2 usage, 3 merge or restore failed.
 set -uo pipefail
 
-usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 die() { echo "fleet-merge: $*" >&2; exit 2; }
 refuse() { echo "fleet-merge: REFUSED — $*" >&2; exit 1; }
 
@@ -134,6 +139,22 @@ if [ "$DRY" = 1 ]; then echo "fleet-merge: --dry-run, nothing changed"; exit 0; 
 
 WORK="$(mktemp -d)"
 LIFTED=()
+
+# Publish the verdict before anything is lifted. Marker line first so a later
+# fleet-verify can find it by head SHA; the JSON is the whole file, verbatim.
+verdict_sha256="$(sha256sum "$VERDICT" | cut -d' ' -f1)"
+comment_body="$(printf '<!-- fleet-verdict sha=%s sha256=%s -->\nReplica verdict for `%s` (sha256 `%s`), the authorization for this merge:\n\n```json\n%s\n```\n' \
+  "$head_sha" "$verdict_sha256" "$head_sha" "$verdict_sha256" "$(jq . "$VERDICT")")"
+jq -n --arg body "$comment_body" '{body:$body}' > "$WORK/comment.json"
+posted="$(gh api -X POST "repos/$REPO/issues/$PR/comments" --input "$WORK/comment.json" 2>&1)" \
+  || { rm -rf "$WORK"; refuse "cannot publish the verdict to PR #$PR ($posted); nothing was lifted"; }
+comment_id="$(jq -r '.id // empty' <<<"$posted" 2>/dev/null)"
+[ -n "$comment_id" ] || { rm -rf "$WORK"; refuse "the verdict comment on PR #$PR returned no id; nothing was lifted"; }
+readback="$(gh api "repos/$REPO/issues/comments/$comment_id" --jq .body 2>/dev/null)" || readback=""
+grep -qF "sha256=$verdict_sha256" <<<"$readback" \
+  || { rm -rf "$WORK"; refuse "the verdict comment $comment_id did not read back; nothing was lifted"; }
+echo "fleet-merge: verdict published as comment $comment_id on PR #$PR (sha256 $verdict_sha256)"
+
 restore() {
   local rc=0 t p want got
   for t in "${LIFTED[@]+"${LIFTED[@]}"}"; do

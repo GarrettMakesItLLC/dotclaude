@@ -35,6 +35,10 @@ done
 if [ "${STUB_ORG_KEYRING_ONLY:-0}" = 1 ] && [ -n "${GH_TOKEN:-}" ]; then
   case "$path" in orgs/*) echo '{"message":"Not Found"}'; echo "gh: needs admin:org" >&2; exit 1 ;; esac
 fi
+case "$*" in *"-X POST"*/comments*)
+  [ "${STUB_COMMENT_FAIL:-0}" = 1 ] && { echo '{"message":"denied"}'; exit 1; }
+  cat "$input" > "$STUB_DIR/comment.json"; echo '{"id":4242}'; exit 0 ;;
+esac
 if [ "$put" = 1 ]; then
   case "$path" in
     */merge) [ "${STUB_MERGE_FAIL:-0}" = 1 ] && { echo '{"message":"nope"}'; exit 1; }
@@ -44,6 +48,7 @@ if [ "$put" = 1 ]; then
   exit 0
 fi
 case "$path" in
+  */issues/comments/*) jq -r .body "$STUB_DIR/comment.json" ;;
   */pulls/*) printf '{"head":{"sha":"%s"},"base":{"ref":"dev"},"state":"open"}\n' "$STUB_HEAD" ;;
   */contents/*) cat "$STUB_DIR/manifest" ;;
   */rules/branches/*) echo '[{"type":"merge_queue","ruleset_source_type":"Repository","ruleset_id":11},{"type":"required_status_checks","ruleset_source_type":"Organization","ruleset_id":22},{"type":"deletion","ruleset_source_type":"Repository","ruleset_id":33}]' ;;
@@ -105,6 +110,18 @@ OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$H
   "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" --dry-run 2>&1)"; RC=$?
 [ "$RC" = 0 ] && ok "no ambient token still works" || bad "rc=$RC $OUT"
 
+echo "fleet-merge: the verdict is published before the first lift, and a failed publish writes nothing"
+verdict '.'; run
+first_post="$(grep -n -- '-X POST' "$TMP/calls" | head -1 | cut -d: -f1)"
+first_put="$(grep -n -- '-X PUT' "$TMP/calls" | head -1 | cut -d: -f1)"
+[ -n "$first_post" ] && [ "$first_post" -lt "$first_put" ] && ok "the verdict comment precedes the first ruleset PUT" || bad "publish order: post=$first_post put=$first_put"
+grep -q "fleet-verdict sha=$HEAD" "$TMP/comment.json" && jq -e '.body|contains("\"treeClean\": true")' "$TMP/comment.json" >/dev/null \
+  && ok "the comment carries the head SHA marker and the full verdict JSON" || bad "comment body: $(cat "$TMP/comment.json")"
+verdict '.'; : > "$TMP/calls"; rm -f "$TMP"/state-*.json
+OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" STUB_COMMENT_FAIL=1 \
+  "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" 2>&1)"; RC=$?
+[ "$RC" = 1 ] && [ "$(writes)" = 0 ] && ok "a failed publish refuses with zero ruleset writes" || bad "failed publish: rc=$RC writes=$(writes) $OUT"
+
 echo "fleet-merge: a failed merge still restores"
 verdict '.'; : > "$TMP/calls"; rm -f "$TMP"/state-*.json
 OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" STUB_MERGE_FAIL=1 \
@@ -115,7 +132,7 @@ OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$H
 
 echo "fleet-merge: --dry-run changes nothing"
 verdict '.'; run --dry-run
-[ "$RC" = 0 ] && [ "$(writes)" = 0 ] && ok "dry run writes nothing" || bad "dry run: rc=$RC writes=$(writes)"
+[ "$RC" = 0 ] && [ "$(writes)" = 0 ] && ! grep -q -- '-X POST' "$TMP/calls" && ok "dry run writes nothing" || bad "dry run: rc=$RC writes=$(writes)"
 
 [ "$fail" = 0 ] && echo "fleet-merge: all cases passed"
 exit "$fail"

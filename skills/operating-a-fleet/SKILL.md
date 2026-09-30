@@ -66,7 +66,8 @@ It carries, in comments:
 - `READY <sha>` from the integrator — this exact tree is frozen and wants a gate run.
 - `## Run N` from a validator — a PASS/FAIL/NOT-RUN table, and for each failure the command, the exit
   code, a log excerpt, and the **owning batch**, so the fix has an address.
-- `ALL GREEN @ <sha>` when a full run passes, quoting the run's `verdict.json` sha256. Merge
+- `ALL GREEN @ <sha>` when a full run passes, linking the verdict comment `bin/fleet-merge.sh`
+  publishes on the PR (the full `verdict.json`, kept after the validator's worktree is reaped). Merge
   authorization is that verdict file, for that SHA, checked by `bin/fleet-merge.sh` before it lifts
   anything. The comment reports the verdict and never substitutes for it.
 
