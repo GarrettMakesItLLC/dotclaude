@@ -242,7 +242,7 @@ itself — too small and markdown-heavy for either to pay off.
 | Tool | Surface | Tool prefix | Used for |
 |------|---------|-------------|----------|
 | **Serena** | MCP server (`claude mcp add --scope user serena -- serena start-mcp-server --context claude-code --project-from-cwd`) | `mcp__serena__*` | LSP-backed symbol navigation and refactors — `find_symbol`, `find_referencing_symbols`, `rename_symbol` |
-| **Graphify** | Claude Code skill (`graphify install`), not an MCP | `/graphify` | Local tree-sitter knowledge graph — impact analysis, call graphs, shortest path between two symbols |
+| **Graphify** | Claude Code skill at user scope (`~/.claude/skills/graphify`, generated from the CLI by `bin/graphify-skill.sh`), not an MCP | `/graphify` | Local tree-sitter knowledge graph — impact analysis, call graphs, shortest path between two symbols |
 
 **Freshness contract.** Serena self-indexes live via the language server on
 first use — no reindex step, no staleness to track. Graphify is
@@ -251,11 +251,15 @@ run `graphify update` after every pull/checkout, and `.github/workflows/ci.yml`
 re-runs `graphify update` + `graphify export callflow-html` on every push to
 `main`, so the published call-flow view is never more than one push stale.
 `graphify-out/` is gitignored (generated, regenerable) — none of this ever
-requires a manual reindex. Every product repo runs `graphify install --project`
-as part of its scaffold, not as a later manual step — see
-`bootstrapping-a-product-repo`. A repo predating this convention, or bootstrapped
-outside the standard flow, is the only case where the hooks/CI still no-op
-until someone runs `graphify install --project` by hand.
+requires a manual reindex. The skill is user-scope: `bootstrap.sh` upgrades
+the CLI and regenerates `~/.claude/skills/graphify` from it
+(`bin/graphify-skill.sh`; `bootstrap.sh --check` reports a skill older than
+the CLI), so no repo commits a copy. Each product repo runs
+`graphify claude install` as part of its scaffold — see
+`bootstrapping-a-product-repo` — which writes the repo's `CLAUDE.md` section
+and the `graphify hook-guard` PreToolUse hooks; those hooks are also the CI
+job's opt-in marker. A repo without them is the only case where the husky
+hooks and the CI job still no-op.
 
 ## Custom MCPs vendored in this repo
 
@@ -350,3 +354,23 @@ your shell. Never in the symlinked `settings.json`.
 // ~/.claude/settings.local.json
 { "env": { "UPLOAD_POST_API_KEY": "eyJ…", "GEMINI_API_KEY": "AIza…" } }
 ```
+
+## Product-repo credentials and worktree tooling
+
+A product repo opts into dotclaude's shared scripts with a `.claude/repo.json`
+manifest (schema: `docs/repo-manifest.md`); the scripts live in `bin/` and are
+on every machine at `~/.claude/bin/`. The session-start hook
+`agent-creds-sync.sh` runs the credential pair; `worktree-bootstrap.sh` runs
+the worktree bootstrap after every `git worktree add`.
+
+| Script | Does | Reads from the manifest |
+|---|---|---|
+| `bin/agent-env-build.sh` | builds `<stateDir>/agent.env`, sourced from `~/.bashrc` | `credentials` |
+| `bin/ops-pull.sh` | pulls the Vercel `OPS_*` channel into `<stateDir>/ops.env`, and named Vercel/Railway values into the unsourced `<stateDir>/cloud.env` | `ops`, `credentials.railway` |
+| `bin/setup-worktree.sh` | bootstraps a worktree (install or mirror strategy) | `worktree` |
+| `bin/with-check-lock.sh` | the per-repo semaphore for memory-heavy checks | `envPrefix` |
+| `bin/doctor.sh` | "is this box set up for this repo?" | `doctor` |
+| `bin/staging-db-url.sh` | mints the staging Postgres URL from the Supabase Management PAT | `supabase` |
+
+What an agent shell holds and how to fetch the rest: the `agent-credentials`
+skill, plus the repo's own `.claude/credentials.md` appendix.

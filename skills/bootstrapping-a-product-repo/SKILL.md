@@ -174,12 +174,21 @@ failure. The workflow takes `audit-level` (default `high`), `working-directory`,
 supplies those to every repo that does not define its own — a local copy is drift, and it has to be
 updated in five places forever.
 
-**Run `graphify install --project` in this same PR, not later.** The context-tools scaffold
+**Run `graphify claude install` in this same PR, not later.** The context-tools scaffold
 (`.husky/post-merge`/`post-checkout`, the `graphify` CI job — see `rules/context-tools.md`) ships
-inert until a repo has an actual graph; every developer on every repo should have this working from
-day one, not as a manual step someone remembers or forgets. Run it, commit the `.claude/skills/graphify/`
-marker and `graphify-out`'s gitignored build alongside the rest of the scaffold, and verify the hooks
-pick it up (same check as any other scaffold file — see the traps below).
+inert until a repo opts in, and every developer on every repo should have this working from day one.
+It writes the repo's half: a `## graphify` section in `CLAUDE.md` and the `graphify hook-guard`
+PreToolUse hooks in `.claude/settings.json`, which are also the CI job's opt-in marker. The skill
+itself is user-scope — `bootstrap.sh` generates `~/.claude/skills/graphify` from the installed CLI
+(`bin/graphify-skill.sh`) — so do **not** commit a `.claude/skills/graphify/` copy (`--project`
+writes one); a vendored copy drifts from the CLI and from every other repo's copy.
+
+**Write `.claude/repo.json` in this PR too** (`docs/repo-manifest.md`): the env prefix, state dir,
+credential sources and the worktree strategy. That opts the repo into dotclaude's shared
+`setup-worktree.sh`, `agent-env-build.sh`, `ops-pull.sh`, `with-check-lock.sh`, `doctor.sh` and
+`staging-db-url.sh` — the repo carries none of its own. Add its `.claude/credentials.md` appendix
+(`agent-credentials`' `references/appendix-template.md`) once it has credentials worth listing, and
+wire `"doctor": "bash ~/.claude/bin/doctor.sh"` into `package.json` scripts.
 
 ### Traps in this step
 
