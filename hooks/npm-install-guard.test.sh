@@ -77,6 +77,28 @@ echo "export NODE_AUTH_TOKEN='ghp_good'" >"$HOME/.pin/agent.env"
 check 0 "$PINNED" "npm ci"
 rm "$HOME/.pin/agent.env"
 
+echo "npm-install-guard: empty-token spellings and multi-line commands (#451)"
+export NODE_AUTH_TOKEN=ambient-token
+check 2 "$PINNED" 'NODE_AUTH_TOKEN="" npm ci'
+check 2 "$PINNED" "NODE_AUTH_TOKEN='' npm ci"
+check 2 "$PINNED" 'export NODE_AUTH_TOKEN=; npm ci'
+check 2 "$PINNED" 'export NODE_AUTH_TOKEN="" && npm ci'
+check 2 "$PINNED" 'env -u NODE_AUTH_TOKEN npm ci'
+check 2 "$PINNED" 'unset NODE_AUTH_TOKEN; npm ci'
+check 2 "$PINNED" 'NODE_AUTH_TOKEN=tok env --unset=NODE_AUTH_TOKEN npm ci'
+check 2 "$PINNED" "$(printf 'echo hi\nNODE_AUTH_TOKEN="" npm ci')"
+check 0 "$PINNED" 'npm ci'
+check 0 "$PINNED" "$(printf '# refresh deps\nnpm ci')"
+unset NODE_AUTH_TOKEN
+check 0 "$PINNED" 'unset NODE_AUTH_TOKEN; NODE_AUTH_TOKEN=tok npm ci'
+check 2 "$PINNED" "$(printf '# refresh deps\nnpm install left-pad')"
+check 2 "$PINNED" "$(printf 'echo installing\nnpm ci')"
+check 2 "$PINNED" "$(printf '# a comment\n# another\nnpm ci')"
+check 2 "$PINNED" "$(printf 'cd . \n\nnpm ci')"
+check 2 "$PINNED" "$(printf 'echo start && \\\n  npm ci')"
+check 0 "$PINNED" "$(printf "cat > notes.md <<'EOF'\nrun npm ci first\nEOF")"
+check 0 "$PINNED" "$(printf '# npm ci would go here\necho done')"
+
 echo "npm-install-guard: lockfile pin"
 export NODE_AUTH_TOKEN=ghp_good
 check 2 "$PINNED" "npm install lodash"

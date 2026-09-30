@@ -110,9 +110,11 @@ while IFS= read -r target; do
   [ "$made" = 1 ] && continue
   missing+=("$target")
   # `pushd` changes the directory exactly as `cd` does, and fails as quietly.
+  # `builtin`/`command`/`time` before it, and its `-L`/`-P`/`-e`/`-@`/`--`
+  # options before the path, change nothing about where it lands.
 done < <(printf '%s' "$scrubbed" \
-  | grep -oE '(^|[;&|(){]|&&|\|\||[[:space:]](do|then|else|-c)[[:space:]])[[:space:]]*(cd|pushd)[[:space:]]+[^[:space:];&|)]+' \
-  | sed -E 's/.*(cd|pushd)[[:space:]]+//')
+  | grep -oE '(^|[;&|(){]|&&|\|\||[[:space:]](do|then|else|-c)[[:space:]])[[:space:]]*((builtin|command|time)[[:space:]]+)*(cd|pushd)[[:space:]]+((-[LPe@]+|--)[[:space:]]+)*[^[:space:];&|)]+' \
+  | sed -E 's/.*(cd|pushd)[[:space:]]+((-[LPe@]+|--)[[:space:]]+)*//')
 
 ((${#missing[@]})) || exit 0
 
