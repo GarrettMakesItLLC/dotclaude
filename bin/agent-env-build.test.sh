@@ -14,6 +14,7 @@ fail=0
 ok()  { echo "  ok: $1"; }
 bad() { echo "  FAIL: $1"; fail=1; }
 
+unset BASH_ENV
 export HOME="$TMP/home" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 unset RAILWAY_TOKEN REPO_MANIFEST GITHUB_TOKEN

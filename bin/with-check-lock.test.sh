@@ -18,6 +18,7 @@ bad() { echo "  FAIL: $1"; fail=1; }
 
 command -v flock >/dev/null 2>&1 || { echo "  skip: no flock on this box (the wrapper runs unbounded here)"; exit 0; }
 
+unset BASH_ENV
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 unset REPO_MANIFEST CHECK_LOCK_HELD
