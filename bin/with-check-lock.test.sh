@@ -228,8 +228,12 @@ s1="$(slots_for 16 8)" s2="$(slots_for 64 16)" s3="$(slots_for 8 4)" s4="$(slots
 echo "with-check-lock: holder liveness"
 newlock
 now_up="$(awk '{print int($1)}' /proc/uptime)"
-printf '%s\t%s\tnpx turbo\n' "$((now_up - 180432))" "$DEAD_PID" >"$CHECK_LOCK_DIR/check.1.info"
-printf '%s\t%s\tnpm run\n' "$((now_up - 180432))" "$DEAD_PID" >"$CHECK_LOCK_DIR/check.2.info"
+# A stamp's start time is seconds on the wrapper's uptime clock. A fresh CI
+# runner has been up for less than the ages below, so clamp to 1: a negative
+# stamp is "unreadable", not "old".
+ago() { local t=$((now_up - $1)); [ "$t" -gt 0 ] || t=1; echo "$t"; }
+printf '%s\t%s\tnpx turbo\n' "$(ago 180432)" "$DEAD_PID" >"$CHECK_LOCK_DIR/check.1.info"
+printf '%s\t%s\tnpm run\n' "$(ago 180432)" "$DEAD_PID" >"$CHECK_LOCK_DIR/check.2.info"
 out="$(CHECK_TIMEOUT=5 "$LOCK" echo ran 2>&1)"
 grep -q '^ran$' <<<"$out" && ! grep -q 'check slots busy' <<<"$out" && ok "a dead holder's slot is acquired at once" || bad "$out"
 grep -q 'free — last used by' "$LOCK" && ok "a dead holder's stamp is reported as free" || bad "no free wording"
@@ -242,7 +246,7 @@ newlock
 CHECK_SLOTS=1 "$LOCK" sleep 30 >/dev/null 2>&1 & hp=$!
 if wait_stamp "$CHECK_LOCK_DIR/check.1.info" "$hp"; then
   st="$(awk '{print $20}' <<<"$(sed 's/^.*) //' /proc/$$/stat)")"
-  printf '%s\t%s\tnpm run\t%s\n' "$((now_up - 1127))" "$$" "$((st - 999))" >"$CHECK_LOCK_DIR/check.1.info"
+  printf '%s\t%s\tnpm run\t%s\n' "$(ago 1127)" "$$" "$((st + 1))" >"$CHECK_LOCK_DIR/check.1.info"
   out="$(CHECK_SLOTS=1 CHECK_TIMEOUT=4 "$LOCK" true 2>&1)"
   [ "$(grep -c 'slot 1: free — last used by npm run' <<<"$out")" -ge 2 ] && ! grep -Eq 'held [0-9]+m[0-9]+s' <<<"$out" \
     && ok "a recycled pid does not resurrect the slot, cycle after cycle" || bad "$out"
@@ -262,7 +266,7 @@ newlock
 
 echo "with-check-lock: what a waiter is told, and in what order it is admitted"
 newlock
-printf '%s\t%s\tnpx turbo\n' "$((now_up - 180432))" "$DEAD_PID" >"$CHECK_LOCK_DIR/check.2.info"
+printf '%s\t%s\tnpx turbo\n' "$(ago 180432)" "$DEAD_PID" >"$CHECK_LOCK_DIR/check.2.info"
 CHECK_MAX_LOAD=-1 "$LOCK" sleep 30 >/dev/null 2>&1 & hp=$!
 wait_stamp "$CHECK_LOCK_DIR/check.1.info" "$hp"
 out="$(CHECK_MAX_LOAD=-1 CHECK_TIMEOUT=4 CHECK_NARROWED_TIMEOUT=4 "$LOCK" true 2>&1)"
