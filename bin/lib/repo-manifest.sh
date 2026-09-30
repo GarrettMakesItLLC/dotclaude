@@ -91,3 +91,27 @@ main_tree_of() {
   [ -n "$common" ] || return 1
   (cd "$(dirname "$common")" && pwd)
 }
+
+# Make ~/.bashrc source <file>, once. Inserted ABOVE the
+# ~/.config/secrets/gmi.env line when there is one, so gmi.env keeps winning on
+# NODE_AUTH_TOKEN: it holds the PAT with `read:packages`, and a bundle sourced
+# after it that exported a `gh` OAuth token would silently downgrade npm auth.
+# Rewritten through `cat`, not `mv`, so ~/.bashrc keeps its inode and mode.
+bashrc_ensure_sourced() {
+  local file="$1" label="$2" bashrc="$HOME/.bashrc" line gmi tmp
+  line="[ -f \"$file\" ] && . \"$file\""
+  grep -qF "$line" "$bashrc" 2>/dev/null && return 0
+  # shellcheck disable=SC2016 # the literal line as it appears in ~/.bashrc
+  gmi='[ -f "$HOME/.config/secrets/gmi.env" ] && . "$HOME/.config/secrets/gmi.env"'
+  if grep -qF "$gmi" "$bashrc" 2>/dev/null; then
+    tmp="$(mktemp)"
+    awk -v src="$line" -v gmi="$gmi" -v label="# $label" '
+      !done && $0 == gmi { print label; print src; print ""; done = 1 }
+      { print }
+    ' "$bashrc" >"$tmp" && cat "$tmp" >"$bashrc"
+    rm -f "$tmp"
+  else
+    printf '\n# %s\n%s\n' "$label" "$line" >>"$bashrc"
+  fi
+  echo "added the source line for $file to ~/.bashrc — open a new shell to load it."
+}

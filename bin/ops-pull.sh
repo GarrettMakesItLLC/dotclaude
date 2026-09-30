@@ -79,28 +79,6 @@ chmod 700 "$STATE_DIR"
 failed=0
 did_anything=0
 
-# The one source line ~/.bashrc needs per sourced file. Inserted ABOVE the
-# ~/.config/secrets/gmi.env line when there is one, so gmi.env keeps winning on
-# NODE_AUTH_TOKEN: it holds the PAT with `read:packages`, and anything sourced
-# after it that exports a `gh` OAuth token would silently downgrade npm auth.
-ensure_sourced() {
-  local file="$1" label="$2" bashrc="$HOME/.bashrc" line gmi tmp
-  line="[ -f \"$file\" ] && . \"$file\""
-  grep -qF "$line" "$bashrc" 2>/dev/null && return 0
-  gmi='[ -f "$HOME/.config/secrets/gmi.env" ] && . "$HOME/.config/secrets/gmi.env"'
-  if grep -qF "$gmi" "$bashrc" 2>/dev/null; then
-    tmp="$(mktemp)"
-    awk -v src="$line" -v gmi="$gmi" -v label="# $label" '
-      !done && $0 == gmi { print label; print src; print ""; done = 1 }
-      { print }
-    ' "$bashrc" >"$tmp" && cat "$tmp" >"$bashrc"
-    rm -f "$tmp"
-  else
-    printf '\n# %s\n%s\n' "$label" "$line" >>"$bashrc"
-  fi
-  echo "ops-pull: added the source line for $file to ~/.bashrc — open a new shell to load it."
-}
-
 vercel_pull() {
   local env="$1" out="$2"
   if [ ! -f "$main_tree/.vercel/project.json" ]; then
@@ -241,7 +219,7 @@ print(v["name"]); print(v.get("path", "")); print(v.get("mustContain", ""))
         fi
       done
 
-      ensure_sourced "$OPS_FILE" "$name ops secrets"
+      bashrc_ensure_sourced "$OPS_FILE" "$name ops secrets"
       count="$(grep -c '^export ' "$OPS_FILE" || true)"
       echo "ops-pull: wrote ${count} ops secret(s) to $OPS_FILE from Vercel [$ENVIRONMENT]."
 
