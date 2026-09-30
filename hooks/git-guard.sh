@@ -206,77 +206,163 @@ if printf '%s' "$scrubbed" | grep -Eq '(^|[;&|]|^[[:space:]]*)[[:space:]]*git([[
   esac
 fi
 
-# 5) A path-scoped discard (`git checkout -- <path>`, `git checkout HEAD --
-# <path>`, `git restore <path>`) silently overwrites the WORKING TREE from the
-# index/HEAD, taking any uncommitted change to that path with it — no warning,
-# no diff. The standing instruction to verify a guard by deliberately breaking
-# something routes agents straight at this: "undo the break" reads as
-# `git checkout -- <file>`, which reverts to the last commit and can erase
-# UNRELATED uncommitted work in the same file along with the deliberate one.
+# 5) A path-scoped discard (`git checkout -- <path>`, `git checkout <path>`,
+# `git checkout HEAD -- <path>`, `git restore <path>`) silently overwrites the
+# WORKING TREE from the index/HEAD, taking any uncommitted change to that path
+# with it — no warning, no diff, exit 0. The standing instruction to verify a
+# guard by deliberately breaking something routes agents straight at this:
+# "undo the break" reads as `git checkout -- <file>`, which can erase UNRELATED
+# uncommitted work in the same file along with the deliberate one.
 #
-# `git checkout <ref-other-than-HEAD> -- <path>` (obtaining a REAL historical
-# defect, e.g. `git checkout origin/main -- <path>`) is the recommended form
-# and stays unimpeded, as do `--staged`, `--source=<ref>`, branch switches, and
-# a path with no uncommitted changes. Extracted from `$nq` (quotes stripped,
-# content kept), not `$scrubbed` — a quoted path is a real argument here, not
-# message prose to blank out.
+# What is judged, and how:
+#   - The tree it acts on: `git -C <dir>` wins, then a leading `cd <dir>`, then
+#     the session cwd. The status check has to read the tree the discard lands
+#     in, or `git -C <other> checkout -- f` is judged against a clean checkout.
+#   - The `--`-less forms agents actually type (`git checkout f.txt`,
+#     `git checkout .`): git treats the first argument as a path whenever it does
+#     not resolve to a commit, so git is ASKED, not pattern-matched.
+#   - A leading ref that resolves to the commit already checked out (`HEAD`,
+#     `@`, `HEAD~0`) resets index AND worktree, so a staged-only change is at
+#     risk too. Any other ref fetches a different version — the sanctioned way
+#     to restore a real historical defect — and is never blocked.
+#   - A bare checkout / `git restore <path>` restores from the INDEX, so only an
+#     unstaged change is at risk; untracked files never are.
+#   - A path held in a loop variable (`for f in a b; do git checkout -- $f`) is
+#     expanded from the loop's word list; any other expansion is judged as the
+#     whole tree, the widest thing it could discard.
 #
-# NARROW ESCAPE: GIT_GUARD_ALLOW_DISCARD=1 lifts ONLY this block, for the
-# deliberate case — always logged loudly, same shape as #185's escape above.
-#
-# KNOWN GAP: paths are matched on whitespace, so a path containing a space
-# isn't handled — same class of trade-off as the other rules in this file.
-checkout_args="$(printf '%s' "$nq" \
-  | perl -0777 -ne 'while (/git\s+checkout((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)/gs) { print "$1\n" }')"
-restore_args="$(printf '%s' "$nq" \
-  | perl -0777 -ne 'while (/git\s+restore((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)/gs) { print "$1\n" }')"
+# Allowed: a path with nothing at risk, `restore --staged` (unstages only),
+# `restore --source=<ref>`, branch switches (git refuses a lossy one itself),
+# `-b/-B/--orphan/-p`. NARROW ESCAPE: GIT_GUARD_ALLOW_DISCARD=1, in the
+# environment or as a prefix on the command, lifts ONLY this block, loudly.
+discard_report="$(GG_CMD="$nq" GG_INPUT="$input" python3 - <<'PY' 2>/dev/null
+import json, os, re, shlex, subprocess
 
-discard_paths=""
+cmd = os.environ.get("GG_CMD", "")
+try:
+    base = json.loads(os.environ.get("GG_INPUT", "{}")).get("cwd") or os.getcwd()
+except Exception:
+    base = os.getcwd()
 
-if [ -n "$checkout_args" ]; then
-  while IFS= read -r line; do
-    [ -z "$line" ] && continue
-    rest=""
-    if printf '%s' "$line" | grep -Eq '^[[:space:]]*--[[:space:]]+'; then
-      rest="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*--[[:space:]]+//')"
-    elif printf '%s' "$line" | grep -Eq '^[[:space:]]*(HEAD|@)(~0|\^0)?[[:space:]]+--[[:space:]]+'; then
-      # Every spelling that RESOLVES to HEAD, not just the word: `@` is its
-      # documented synonym and `HEAD~0`/`HEAD^0`/`@~0`/`@^0` are the same
-      # commit. The discriminator is what the ref resolves to, and a textual
-      # match on `HEAD` alone let three spellings of it through while blocking
-      # the fourth — `git checkout HEAD~0 -- <path>` discards exactly as much
-      # as `git checkout HEAD -- <path>` (#383).
-      rest="$(printf '%s' "$line" | sed -E 's/^[[:space:]]*(HEAD|@)(~0|\^0)?[[:space:]]+--[[:space:]]+//')"
-    fi
-    [ -n "$rest" ] && discard_paths="$discard_paths $rest"
-  done <<EOF
-$checkout_args
-EOF
-fi
+def git(d, *args):
+    try:
+        r = subprocess.run(["git", "-C", d, *args], capture_output=True, text=True, timeout=10)
+        return r.returncode, r.stdout
+    except Exception:
+        return 1, ""
 
-if [ -n "$restore_args" ]; then
-  while IFS= read -r line; do
-    [ -z "$line" ] && continue
-    printf '%s' "$line" | grep -Eq -- '--staged|--source' && continue
-    rest="$(printf '%s' "$line" | sed -E 's/(^|[[:space:]])--[a-zA-Z-]+(=[^[:space:]]*)?//g')"
-    [ -n "$(printf '%s' "$rest" | tr -d '[:space:]')" ] && discard_paths="$discard_paths $rest"
-  done <<EOF
-$restore_args
-EOF
-fi
+def resolve_dir(cur, d):
+    d = os.path.expanduser(d)
+    return os.path.normpath(d if os.path.isabs(d) else os.path.join(cur, d))
 
-discard_paths_trimmed="$(printf '%s' "$discard_paths" | tr -d '[:space:]')"
-if [ -n "$discard_paths_trimmed" ]; then
-  if [ -n "${GIT_GUARD_ALLOW_DISCARD:-}" ]; then
+# Loop word lists, for `$f`-style paths.
+loops = {}
+for m in re.finditer(r"(?:^|[;&|({\s])for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;&|)]*)", cmd):
+    loops.setdefault(m.group(1), m.group(2).split())
+
+segments = re.split(r"\s*(?:&&|\|\||;|\||\n)\s*", cmd)
+cur = base
+reports = []
+for seg in segments:
+    try:
+        toks = shlex.split(seg, posix=True)
+    except ValueError:
+        toks = seg.split()
+    # Skip leading env assignments and loop/conditional keywords.
+    while toks and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[0]) or toks[0] in ("do", "then", "else", "(", "{", "time")):
+        toks = toks[1:]
+    if not toks:
+        continue
+    if toks[0] in ("cd", "pushd") and len(toks) > 1 and "$" not in toks[1]:
+        cur = resolve_dir(cur, toks[1])
+        continue
+    if toks[0] != "git":
+        continue
+    i, tree = 1, cur
+    while i < len(toks) and toks[i].startswith("-"):
+        if toks[i] == "-C" and i + 1 < len(toks):
+            tree = resolve_dir(tree, toks[i + 1]); i += 2; continue
+        if toks[i] in ("-c", "--git-dir", "--work-tree", "--namespace") and i + 1 < len(toks):
+            i += 2; continue
+        i += 1
+    if i >= len(toks) or toks[i] not in ("checkout", "restore"):
+        continue
+    sub, args = toks[i], toks[i + 1:]
+    if not os.path.isdir(tree):
+        continue
+    flags = [a for a in args if a.startswith("-")]
+    if sub == "checkout" and any(f in ("-b", "-B", "-t", "--track", "--orphan", "--detach", "-p", "--patch") for f in flags):
+        continue
+    resets_index = False
+    if sub == "restore":
+        if any(f.startswith("--source") or f == "-s" or f.startswith("-s=") for f in flags):
+            continue
+        staged = any(f in ("--staged", "-S") for f in flags)
+        worktree = any(f in ("--worktree", "-W") for f in flags)
+        if staged and not worktree:
+            continue
+        resets_index = staged and worktree
+        paths = [a for a in args if not a.startswith("-")]
+    else:
+        # With `--`, whatever precedes it is a tree-ish by definition (an
+        # unresolvable one makes git error out, discarding nothing). Without
+        # it, the first argument is a ref only if git resolves it as one.
+        paths, ref = [], None
+        has_dd = "--" in args
+        seen_dd = False
+        for a in args:
+            if a == "--":
+                seen_dd = True; continue
+            if a.startswith("-"):
+                continue
+            if ref is None and not paths and not seen_dd and (
+                has_dd or git(tree, "rev-parse", "--verify", "--quiet", a + "^{commit}")[0] == 0
+            ):
+                ref = a; continue
+            paths.append(a)
+        if ref is not None:
+            if not paths:
+                continue  # a branch switch
+            rc_ref, ref_sha = git(tree, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
+            _, head_sha = git(tree, "rev-parse", "--verify", "--quiet", "HEAD")
+            if rc_ref != 0 or not head_sha or ref_sha.strip() != head_sha.strip():
+                continue  # a different (or unresolvable) commit: never a discard of this one
+            resets_index = True
+    if not paths:
+        continue
+    expanded = []
+    for pth in paths:
+        if "$" not in pth and "`" not in pth:
+            expanded.append(pth); continue
+        mv = re.match(r"^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$", pth)
+        words = loops.get(mv.group(1)) if mv else None
+        if words and not any(c in w for w in words for c in "$`*?["):
+            expanded.extend(words)
+        else:
+            expanded = ["."]; break
+    rc, status = git(tree, "status", "--porcelain", "--", *expanded)
+    if rc != 0:
+        continue
+    for line in status.splitlines():
+        if len(line) < 4 or line[0] == "?":
+            continue
+        x, y, rest = line[0], line[1], line[3:]
+        if y != " " or resets_index:
+            reports.append(f"{tree}\t{rest}")
+print("\n".join(dict.fromkeys(reports)))
+PY
+)" || discard_report=""
+
+if [ -n "$discard_report" ]; then
+  if [ -n "${GIT_GUARD_ALLOW_DISCARD:-}" ] || printf '%s' "$cmd" | grep -q 'GIT_GUARD_ALLOW_DISCARD=1'; then
     echo "⚠️  dotclaude git-guard: allowing a path-scoped discard — GIT_GUARD_ALLOW_DISCARD is set." >&2
     echo "   This can silently drop uncommitted work in the named path(s). Only legitimate for a" >&2
     echo "   deliberate discard you have already reviewed." >&2
   else
-    for p in $discard_paths; do
-      if [ -n "$(git status --porcelain -- "$p" 2>/dev/null)" ]; then
-        block "git checkout/restore would discard UNCOMMITTED changes in '$p' — silently, with no warning or diff. Commit first (git reset --soft HEAD~1 undoes it), or restore a REAL historical defect with a ref-scoped form instead: git checkout <sha-or-origin/trunk> -- $p (a ref that is NOT HEAD — HEAD, @ and HEAD~0 all resolve to the commit you are already on, so they discard your uncommitted work rather than fetching an older version of it). Genuinely deliberate? cp $p $p.bak && mv it back afterward, or set GIT_GUARD_ALLOW_DISCARD=1 for this one command."
-      fi
-    done
+    at_risk="$(printf '%s\n' "$discard_report" | awk -F'\t' '{print "    " $2 "   (in " $1 ")"}')"
+    block "git checkout/restore would silently discard UNCOMMITTED changes — no warning, no diff, exit 0:
+$at_risk
+This guard cannot tell a deliberate break from real work; you can. Commit first (git reset --soft HEAD~1 undoes it), or restore a REAL historical defect from a known ref instead: git checkout <sha-or-origin/trunk> -- <path> (a ref that is NOT the commit you are on — HEAD, @ and HEAD~0 discard your work rather than fetching an older version). Genuinely deliberate? cp <path> <path>.bak and mv it back afterward, or prefix the command with GIT_GUARD_ALLOW_DISCARD=1."
   fi
 fi
 
