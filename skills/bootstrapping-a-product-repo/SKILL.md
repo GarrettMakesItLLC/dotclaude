@@ -187,7 +187,7 @@ writes one); a vendored copy drifts from the CLI and from every other repo's cop
 credential sources and the worktree strategy. That opts the repo into dotclaude's shared
 `setup-worktree.sh`, `agent-env-build.sh`, `ops-pull.sh`, `with-check-lock.sh`, `doctor.sh` and
 `staging-db-url.sh` — the repo carries none of its own. Add its `.claude/credentials.md` appendix
-(`agent-credentials`' `references/appendix-template.md`) once it has credentials worth listing, and
+(the `agent-credentials` skill's appendix template) once it has credentials worth listing, and
 wire `"doctor": "bash ~/.claude/bin/doctor.sh"` into `package.json` scripts.
 
 ### Traps in this step
