@@ -177,6 +177,47 @@ def grep_is_allowed(flag_tokens):
     return False
 
 
+# grep/rg operands that are patterns, globs or option values rather than file
+# targets. `process.env` and `\.env` end in ".env" but are search patterns.
+GREP_VALUE_FLAGS = {
+    "-e", "--regexp", "-f", "--file", "-m", "--max-count", "-A", "-B", "-C",
+    "--after-context", "--before-context", "--context", "-g", "--glob", "-t",
+    "-T", "--type", "--type-not", "--include", "--exclude", "--exclude-dir",
+    "--color", "--colour", "-d", "--directories", "-D", "--devices",
+}
+GREP_PATTERN_FLAGS = {"-e", "--regexp", "-f", "--file"}
+
+
+def grep_non_path_indexes(toks, cmd_idx):
+    skip = set()
+    have_pattern_flag = False
+    positional_seen = False
+    j = cmd_idx + 1
+    while j < len(toks):
+        t = toks[j]
+        if t == "--":
+            j += 1
+            if not have_pattern_flag and not positional_seen and j < len(toks):
+                skip.add(j)
+            break
+        if t.startswith("-") and t != "-":
+            if t.split("=")[0] in GREP_PATTERN_FLAGS:
+                have_pattern_flag = True
+            if t in GREP_VALUE_FLAGS:
+                j += 1
+                if j < len(toks):
+                    skip.add(j)
+            elif t[:2] in ("-e", "-f") and not t.startswith("--") and len(t) > 2:
+                have_pattern_flag = True
+            j += 1
+            continue
+        if not have_pattern_flag and not positional_seen:
+            skip.add(j)
+        positional_seen = True
+        j += 1
+    return skip
+
+
 hit = None
 for seg in re.split(r"&&|\|\||\||;|\n", cmd):
     seg = seg.strip()
@@ -204,8 +245,9 @@ for seg in re.split(r"&&|\|\||\||;|\n", cmd):
     # always WRITES its file operands).
     read_refs = []
     write_only = cmd_word == "tee"
+    non_paths = grep_non_path_indexes(toks, i) if cmd_word in GREP_LIKE else set()
     for j, t in enumerate(toks):
-        if not is_secret_path(t):
+        if j in non_paths or not is_secret_path(t):
             continue
         prev = toks[j - 1] if j > 0 else ""
         if prev in (">", ">>"):
