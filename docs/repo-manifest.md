@@ -57,8 +57,24 @@ in the environment overrides discovery (the self-tests use it).
 | `lockWorktree` | string | `git worktree lock` reason, so generic sweeps cannot remove a live tree. |
 | `prismaGenerate` | command | Run after dependencies, e.g. `npx prisma generate`. |
 | `graphify` | bool | Build `graphify-out/` best-effort. |
-| `postSteps` | commands | Run last, in the worktree, with `WORKTREE` and `MAIN_TREE` exported. |
-| `checkSteps` | commands | Run by `--check`. |
+| `postSteps` | commands | Run last, in the worktree, with the step environment below exported. |
+| `checkSteps` | commands | Run by `--check`, with the same environment. |
+
+The step environment, for a repo's own mirror step (MuscleBuddy's
+`bin/worktree-tailwind-sources.sh`):
+
+| Variable | Meaning |
+|---|---|
+| `WORKTREE`, `MAIN_TREE` | The worktree and the main checkout. |
+| `SETUP_WORKTREE_STALE` | `1` when the main tree's install moved since the last copy. Read before this run's copy, so a step can refresh its own copy too. |
+| `SETUP_WORKTREE_COPIED_STAMP` | Non-empty when this bootstrap had already copied into the worktree before this run. A step judges completeness only for copies it made; an unstamped tree is the branch's own install. |
+| `SETUP_WORKTREE_EXEMPT` | Packages the branch's lockfile moved, one per line, or `ALL` when the lockfiles cannot be compared. The main tree's copy is the wrong one for those. |
+| `SETUP_WORKTREE_LOCK` | The check-lock wrapper. Read the main tree's `node_modules` under `--light --no-drift`. |
+
+The `mirror` copy stamp lives in the worktree's git dir as
+`<envprefix>-nested-deps-stamp` (`nested-deps-stamp` without an `envPrefix`).
+`<PREFIX>_SETUP_WORKTREE_STABLE_SECS` or `SETUP_WORKTREE_STABLE_SECS` (default 300)
+sets how long a source must be quiet before a copy that timed out on the lock retries unlocked.
 
 ## `supabase` — `bin/staging-db-url.sh`
 

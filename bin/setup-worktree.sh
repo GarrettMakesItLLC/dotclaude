@@ -33,7 +33,8 @@
 #                 `<workspaceDirs>/*/node_modules` (real copies, verified
 #                 name@version and file-for-file against the source, refreshed
 #                 when the source install moves), the root `node_modules/.bin`
-#                 (per-binary symlinks into a real directory), and optionally
+#                 (per-binary symlinks into a real directory, re-pointed at the
+#                 worktree's own package once it has one), and optionally
 #                 `node_modules/<workspaceScope>/*` links to THIS worktree's own
 #                 packages, without which a worktree typechecks against the main
 #                 tree's copy of a package it edited. `node_modules` itself is
@@ -42,8 +43,9 @@
 #   * No generated Prisma client (`worktree.prismaGenerate`).
 #   * No graph for graphify (`worktree.graphify`), built best-effort.
 #
-# `worktree.postSteps` run last, in the worktree, with WORKTREE and MAIN_TREE
-# exported — the place for a repo's own extra step. `--check` writes nothing: it
+# `worktree.postSteps` run last, in the worktree, with WORKTREE, MAIN_TREE and
+# the SETUP_WORKTREE_* state exported (docs/repo-manifest.md) — the place for a
+# repo's own extra step. `--check` writes nothing: it
 # answers "would a build here fail on the bootstrap rather than the code?", runs
 # `worktree.checkSteps`, and exits non-zero naming the repair. A pre-push hook
 # can call it, since the bootstrap runs once and a later dependency change in
