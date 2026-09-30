@@ -54,27 +54,66 @@ scrubbed="$(printf '%s' "$command_str" \
 
 # A tree the same command creates first (`git worktree add <p> && cd <p>`,
 # `mkdir -p <p> && cd <p>`) does not exist yet when this runs, and is not gone.
-created="$(printf '%s' "$scrubbed" | python3 -c '
+# The created path is resolved the way the shell will resolve it: against a
+# `git -C <dir>`, else the directory the last `cd` in the command moved to, else
+# the session cwd — so `cd <repo> && git worktree add .worktrees/x && cd
+# <repo>/.worktrees/x` is recognised, and so is a later `sh -c "cd …"` (#457).
+hook_cwd="$(printf '%s' "$input" | python3 -c '
+import json, sys
+try:
+    sys.stdout.write(json.load(sys.stdin).get("cwd", "") or "")
+except Exception:
+    pass
+' 2>/dev/null)" || hook_cwd=""
+created="$(printf '%s' "$scrubbed" | HOOK_CWD="${hook_cwd:-$PWD}" python3 -c '
 import os, re, shlex, sys
-for seg in re.split(r"\s*(?:&&|\|\||;|\||\n)\s*", sys.stdin.read()):
+
+def resolve(cur, d):
+    d = os.path.expanduser(d)
+    return os.path.normpath(d if os.path.isabs(d) else os.path.join(cur, d))
+
+cur = os.environ.get("HOOK_CWD") or os.getcwd()
+WRAP = {"env", "nohup", "time", "command", "builtin", "exec", "do", "then", "else", "!"}
+for seg in re.split(r"\s*(?:&&|\|\||;;|;|\||&|\n|(?<!\$)\(|\))\s*", sys.stdin.read()):
     try:
         t = shlex.split(seg)
     except ValueError:
         t = seg.split()
-    if "worktree" in t and t.index("worktree") + 1 < len(t) and t[t.index("worktree") + 1] == "add":
-        rest, skip = t[t.index("worktree") + 2:], False
-        for a in rest:
+    while t and (t[0] in WRAP or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t[0])):
+        t = t[1:]
+    # `sh -c <cmd>` (quotes already stripped): judge the command it runs.
+    if t and t[0].split("/")[-1] in ("sh", "bash", "zsh", "dash") and len(t) > 2 and t[1].startswith("-") and "c" in t[1]:
+        t = t[2:]
+    if not t:
+        continue
+    if t[0] in ("cd", "pushd"):
+        args = [a for a in t[1:] if not re.match(r"^-[LPe@]*$", a) and a != "--"]
+        if args and "$" not in args[0] and args[0] != "-":
+            cur = resolve(cur, args[0])
+        continue
+    if t[0] == "git":
+        base, i = cur, 1
+        while i < len(t) and t[i].startswith("-"):
+            if t[i] == "-C" and i + 1 < len(t):
+                base = resolve(base, t[i + 1]); i += 2; continue
+            if t[i] in ("-c", "--git-dir", "--work-tree") and i + 1 < len(t):
+                i += 2; continue
+            i += 1
+        if t[i:i + 2] != ["worktree", "add"]:
+            continue
+        skip = False
+        for a in t[i + 2:]:
             if skip:
                 skip = False; continue
             if a in ("-b", "-B", "--reason"):
                 skip = True; continue
             if a.startswith("-"):
                 continue
-            print(os.path.expanduser(a)); break
-    elif t and t[0] == "mkdir":
+            print(resolve(base, a)); break
+    elif t[0] == "mkdir":
         for a in t[1:]:
             if not a.startswith("-"):
-                print(os.path.expanduser(a))
+                print(resolve(cur, a))
 ' 2>/dev/null)" || created=""
 
 missing=()
@@ -110,9 +149,11 @@ while IFS= read -r target; do
   [ "$made" = 1 ] && continue
   missing+=("$target")
   # `pushd` changes the directory exactly as `cd` does, and fails as quietly.
+  # `builtin`/`command`/`time` before it, and its `-L`/`-P`/`-e`/`-@`/`--`
+  # options before the path, change nothing about where it lands.
 done < <(printf '%s' "$scrubbed" \
-  | grep -oE '(^|[;&|(){]|&&|\|\||[[:space:]](do|then|else|-c)[[:space:]])[[:space:]]*(cd|pushd)[[:space:]]+[^[:space:];&|)]+' \
-  | sed -E 's/.*(cd|pushd)[[:space:]]+//')
+  | grep -oE '(^|[;&|(){]|&&|\|\||[[:space:]](do|then|else|-c)[[:space:]])[[:space:]]*((builtin|command|time)[[:space:]]+)*(cd|pushd)[[:space:]]+((-[LPe@]+|--)[[:space:]]+)*[^[:space:];&|)]+' \
+  | sed -E 's/.*(cd|pushd)[[:space:]]+((-[LPe@]+|--)[[:space:]]+)*//')
 
 ((${#missing[@]})) || exit 0
 

@@ -87,7 +87,7 @@ echo "== argv / stdin handling =="
 
 RC=0
 OUT="$("$SCRIPT" --apply < /dev/null 2>&1)" || RC=$?
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qi 'empty token'; then
+if [ "$RC" -ne 0 ] && grep -qi 'empty token' <<<"$OUT"; then
   ok "refuses an empty token on stdin"
 else
   bad "should refuse empty stdin (rc=$RC): $OUT"
@@ -95,7 +95,7 @@ fi
 
 RC=0
 OUT="$(printf '%s' "$FAKE_TOKEN" | PATH="$FAKE_PATH" "$SCRIPT" --bogus-flag 2>&1)" || RC=$?
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qi 'unknown argument'; then
+if [ "$RC" -ne 0 ] && grep -qi 'unknown argument' <<<"$OUT"; then
   ok "rejects an unrecognized flag"
 else
   bad "should reject unknown flag (rc=$RC): $OUT"
@@ -115,7 +115,7 @@ export STUB_SCOPES="admin:org, repo, read:packages, write:packages"
 RC=0
 run "$FAKE_TOKEN"
 unset STUB_SCOPES
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'expected exactly'; then
+if [ "$RC" -ne 0 ] && grep -q 'expected exactly' <<<"$OUT"; then
   ok "refuses a token with extra scopes beyond read:packages"
 else
   bad "should refuse over-scoped token (rc=$RC): $OUT"
@@ -125,7 +125,7 @@ export STUB_SCOPES="$GOOD_SCOPES"
 RC=0
 run "$FAKE_TOKEN"
 unset STUB_SCOPES
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'scopes OK'; then
+if [ "$RC" -eq 0 ] && grep -q 'scopes OK' <<<"$OUT"; then
   ok "accepts a token scoped to exactly read:packages"
 else
   bad "should accept read:packages-only token (rc=$RC): $OUT"
@@ -148,7 +148,7 @@ export STUB_NPM_FAIL=1
 RC=0
 run "$FAKE_TOKEN"
 unset STUB_SCOPES STUB_NPM_FAIL
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'npm view'; then
+if [ "$RC" -ne 0 ] && grep -q 'npm view' <<<"$OUT"; then
   ok "refuses a token that scopes-checks OK but can't resolve a package"
 else
   bad "should fail when npm view fails (rc=$RC): $OUT"
@@ -175,7 +175,7 @@ OUT="$(printf '%s' "$FAKE_TOKEN" | HOME="$HOME_OVERRIDE" PATH="$FAKE_PATH" "$SCR
 unset STUB_SCOPES
 after_content="$(cat "$HOME_OVERRIDE/.config/secrets/gmi.env")"
 if [ "$RC" -eq 0 ] && [ "$before_content" = "$after_content" ] \
-   && printf '%s' "$OUT" | grep -q 'would update'; then
+   && grep -q 'would update' <<<"$OUT"; then
   ok "dry run (no --apply) reports the plan and writes nothing"
 else
   bad "dry run should not modify files (rc=$RC): $OUT"
@@ -229,7 +229,7 @@ export STUB_RAILWAY_FAIL=1
 RC=0
 OUT="$(printf '%s' "$FAKE_TOKEN" | HOME="$HOME_OVERRIDE" PATH="$FAKE_PATH" "$SCRIPT" --apply 2>&1)"; RC=$?
 unset STUB_SCOPES STUB_RAILWAY_FAIL
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qi 'FAILED'; then
+if [ "$RC" -ne 0 ] && grep -qi 'FAILED' <<<"$OUT"; then
   ok "a failed railway call is surfaced and fails the run"
 else
   bad "should surface a railway failure (rc=$RC): $OUT"
@@ -251,14 +251,14 @@ export STUB_SCOPES="$GOOD_SCOPES"
 RC=0
 OUT="$(printf '%s' "$FAKE_TOKEN" | HOME="$HOME_OVERRIDE" PATH="$NO_CLI_PATH" "$SCRIPT" --apply 2>&1)"; RC=$?
 unset STUB_SCOPES
-if printf '%s' "$OUT" | grep -q 'railway CLI not found on PATH' \
-   && printf '%s' "$OUT" | grep -q 'vercel CLI not found on PATH' \
-   && printf '%s' "$OUT" | grep -q 'gh CLI not found on PATH'; then
+if grep -q 'railway CLI not found on PATH' <<<"$OUT" \
+   && grep -q 'vercel CLI not found on PATH' <<<"$OUT" \
+   && grep -q 'gh CLI not found on PATH' <<<"$OUT"; then
   ok "prints the exact command for each target when a CLI is missing"
 else
   bad "should fall back to printed commands (rc=$RC): $OUT"
 fi
-if printf '%s' "$OUT" | grep -q "$FAKE_TOKEN"; then
+if grep -q "$FAKE_TOKEN" <<<"$OUT"; then
   bad "a printed fallback command must never contain the actual token"
 else
   ok "printed fallback commands reference \$NEW_TOKEN, never the literal value"

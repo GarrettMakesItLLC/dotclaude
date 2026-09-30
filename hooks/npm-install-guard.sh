@@ -54,20 +54,33 @@ set -uo pipefail
 command -v python3 >/dev/null 2>&1 || exit 0
 input="$(cat)"
 
-parsed="$(printf '%s' "$input" | python3 -c '
+# The command and the cwd are extracted by separate calls, each writing its
+# field whole. A multi-line command printed ahead of the cwd would put its
+# second line where the cwd is read, and only the first line would be judged.
+json_field() {
+  printf '%s' "$input" | python3 -c '
 import json, sys
 try:
     d = json.load(sys.stdin)
-    print(d.get("tool_input", {}).get("command", ""))
-    print(d.get("cwd", ""))
+    v = d.get("tool_input", {}).get("command", "") if sys.argv[1] == "command" else d.get("cwd", "")
+    sys.stdout.write(v or "")
 except Exception:
-    print("")
-    print("")
+    pass
+' "$1" 2>/dev/null
+}
+command_str="$(json_field command)" || exit 0
+hook_cwd="$(json_field cwd)" || exit 0
+[ -n "$command_str" ] || exit 0
+
+# Judge every line as ONE line: heredoc bodies (prose) blanked, backslash
+# continuations joined, whole-line comments dropped, and every remaining
+# newline turned into the `;` it means to the shell.
+command_str="$(printf '%s' "$command_str" | perl -0777 -pe '
+  s/<<-?\s*([\x27"]?)([A-Za-z_][A-Za-z0-9_]*)\1.*?^\2$/ /gms;
+  s/\\\n/ /g;
+  s/^[ \t]*#[^\n]*(\n|\z)//gm;
+  s/\n+/;/g;
 ' 2>/dev/null)" || exit 0
-
-command_str="$(printf '%s' "$parsed" | sed -n '1p')"
-hook_cwd="$(printf '%s' "$parsed" | sed -n '2p')"
-
 [ -n "$command_str" ] || exit 0
 
 # npm subcommands that re-resolve the tree and write package-lock.json back out,
@@ -181,6 +194,22 @@ if ((fetches)) && [ -n "$npmrc" ]; then
   # token)"` and `NODE_AUTH_TOKEN="$GITHUB_TOKEN"` must classify as what they
   # wrap. A single quote suppresses expansion, so it IS a literal.
   inline="${inline#\"}"
+  # A quoted empty literal (`""`, `''`) and an assignment that ends its statement
+  # (`export NODE_AUTH_TOKEN=; npm ci`) are the empty prefix in other spellings;
+  # left alone, the first field of what follows would be read as the token. After
+  # the quote strip above, `""` leaves a lone `"`.
+  case "$inline" in
+    '"'|'"'[[:space:]\;\&\|]*|"''"|"''"[[:space:]\;\&\|]*|[\;\&\|]*) inline=' ' ;;
+  esac
+  # `unset` and `env -u` carry no `=`, so the parse above never sees them; they
+  # empty the variable for whatever npm command follows. Only what comes AFTER the
+  # last assignment counts, since a later assignment sets it again.
+  after_assign="$(printf '%s' "$command_str" | sed -n 's/.*NODE_AUTH_TOKEN=//p' | head -1)"
+  [ -n "$after_assign" ] || after_assign="$command_str"
+  unset_re="(${lead}unset[[:space:]]+([^[:space:];&|]+[[:space:]]+)*NODE_AUTH_TOKEN${trail}|${lead}env[[:space:]]+([^[:space:];&|]+[[:space:]]+)*(-u[[:space:]]*|--unset[= ])NODE_AUTH_TOKEN${trail})"
+  if printf '%s' "$after_assign" | grep -qE "$unset_re"; then
+    inline=' '
+  fi
   if [ -n "$inline" ]; then
     case "$inline" in
       '$('*|'`'*)

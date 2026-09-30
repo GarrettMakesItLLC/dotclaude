@@ -103,8 +103,11 @@ if printf '%s' "$nq" | grep -Eq '(^|[^[:alnum:]_./-])rm[[:space:]]+((-[a-zA-Z]+|
   block "recursive delete targeting a root / home / system / parent path. Delete specific project subpaths (relative, or under /tmp) explicitly instead."
 fi
 
-# Only inspect git invocations beyond this point.
-printf '%s' "$scrubbed" | grep -Eq '(^|[^[:alnum:]_./-])git([[:space:]]|$)' || exit 0
+# Only inspect git invocations beyond this point. Gated on the quote-STRIPPED
+# copy, not the message-scrubbed one: `bash -c "git checkout -- f"` and
+# `eval "git checkout -- f"` carry the whole invocation inside quotes, and
+# rules 1-4 still match only against $scrubbed.
+printf '%s' "$nq" | grep -Eq '(^|[^[:alnum:]_./-])git([[:space:]]|$)' || exit 0
 
 # 1) Never bypass git hooks: --no-verify, commit -n, or -c core.hooksPath=...
 #
@@ -230,6 +233,13 @@ fi
 #   - A path held in a loop variable (`for f in a b; do git checkout -- $f`) is
 #     expanded from the loop's word list; any other expansion is judged as the
 #     whole tree, the widest thing it could discard.
+#   - A forced switch (`checkout -f`, `switch --force`/`--discard-changes`,
+#     `-fb`/`-fc`) discards every tracked change in the tree, index included.
+#   - Every line and every command position counts: a `# comment` line, a
+#     backslash continuation, a subshell, a `case` arm, and the wrappers that run
+#     their argument as a command (`env`, `nohup`, `timeout`, `time`, `!`,
+#     `eval`, `command`, `bash -c`, `xargs` — whose paths come from stdin, so the
+#     whole tree is judged).
 #
 # Allowed: a path with nothing at risk, `restore --staged` (unstages only),
 # `restore --source=<ref>`, branch switches (git refuses a lossy one itself),
@@ -260,7 +270,80 @@ loops = {}
 for m in re.finditer(r"(?:^|[;&|({\s])for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;&|)]*)", cmd):
     loops.setdefault(m.group(1), m.group(2).split())
 
-segments = re.split(r"\s*(?:&&|\|\||;|\||\n)\s*", cmd)
+# Every line is judged, not the first: a backslash continuation is one line,
+# a whole-line `# comment` is nothing, and a newline is the `;` it means to the
+# shell. A subshell's `(`/`)` and a `case` arm's closing `)` are command
+# boundaries too, so `(git checkout -- f)` and `case x in x) git restore f;;
+# esac` put `git` at a command position. `$(` is left alone: its contents are an
+# argument of the command around it.
+flat = re.sub(r"\\\n", " ", cmd)
+flat = re.sub(r"(?m)^[ \t]*#[^\n]*$", "", flat)
+segments = re.split(r"\s*(?:&&|\|\||;;|;|\||\n|(?<!\$)\(|\))\s*", flat)
+
+KEYWORDS = ("do", "then", "else", "elif", "if", "while", "until", "(", "{", "!", "eval", "nohup", "exec")
+
+def unwrap(toks):
+    """Strip the words that run the next word as a command — keywords,
+    assignments, and the wrappers `env`, `time`, `timeout`, `nice`, `command`,
+    `builtin`, `xargs`, `sh -c` — so the command they wrap is what gets judged.
+    Returns (toks, reads_stdin): an `xargs` wrapper takes its arguments from
+    stdin, which names no path this hook can see."""
+    reads_stdin = False
+    while toks:
+        t = toks[0]
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", t) or t in KEYWORDS:
+            toks = toks[1:]; continue
+        if t in ("time", "builtin"):
+            toks = toks[1:]
+            while toks and toks[0] in ("-p", "--"):
+                toks = toks[1:]
+            continue
+        if t == "command":
+            if len(toks) > 1 and toks[1] in ("-v", "-V"):
+                return [], False  # a lookup, not an invocation
+            toks = toks[1:]
+            while toks and toks[0] in ("-p", "--"):
+                toks = toks[1:]
+            continue
+        if t == "env":
+            toks = toks[1:]
+            while toks and (toks[0].startswith("-") or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[0])):
+                if toks[0] in ("-u", "--unset", "-C", "--chdir", "-S", "--split-string") and len(toks) > 1:
+                    toks = toks[2:]
+                else:
+                    toks = toks[1:]
+            continue
+        if t in ("nice", "sudo"):
+            toks = toks[1:]
+            while toks and toks[0].startswith("-"):
+                toks = toks[2:] if toks[0] in ("-n", "-u", "-g") and len(toks) > 1 else toks[1:]
+            continue
+        if t == "timeout":
+            toks = toks[1:]
+            while toks and toks[0].startswith("-"):
+                toks = toks[2:] if toks[0] in ("-s", "-k") and len(toks) > 1 else toks[1:]
+            toks = toks[1:]  # the duration
+            continue
+        if t == "xargs":
+            reads_stdin = True
+            toks = toks[1:]
+            while toks and toks[0].startswith("-"):
+                toks = toks[2:] if toks[0] in ("-I", "-n", "-L", "-P", "-d", "-E", "-s", "-a") and len(toks) > 1 else toks[1:]
+            continue
+        if t.split("/")[-1] in ("bash", "sh", "zsh", "dash", "ksh"):
+            rest, found = toks[1:], False
+            while rest and rest[0].startswith("-"):
+                f = rest.pop(0)
+                if not f.startswith("--") and "c" in f[1:]:
+                    found = True
+                    break
+            if not found:
+                return toks, reads_stdin  # runs a script: not a command this hook reads
+            toks = rest
+            continue
+        break
+    return toks, reads_stdin
+
 cur = base
 reports = []
 for seg in segments:
@@ -268,9 +351,7 @@ for seg in segments:
         toks = shlex.split(seg, posix=True)
     except ValueError:
         toks = seg.split()
-    # Skip leading env assignments and loop/conditional keywords.
-    while toks and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[0]) or toks[0] in ("do", "then", "else", "(", "{", "time")):
-        toks = toks[1:]
+    toks, reads_stdin = unwrap(toks)
     if not toks:
         continue
     if toks[0] in ("cd", "pushd") and len(toks) > 1 and "$" not in toks[1]:
@@ -285,16 +366,31 @@ for seg in segments:
         if toks[i] in ("-c", "--git-dir", "--work-tree", "--namespace") and i + 1 < len(toks):
             i += 2; continue
         i += 1
-    if i >= len(toks) or toks[i] not in ("checkout", "restore"):
+    if i >= len(toks) or toks[i] not in ("checkout", "restore", "switch"):
         continue
     sub, args = toks[i], toks[i + 1:]
     if not os.path.isdir(tree):
         continue
     flags = [a for a in args if a.startswith("-")]
-    if sub == "checkout" and any(f in ("-b", "-B", "-t", "--track", "--orphan", "--detach", "-p", "--patch") for f in flags):
-        continue
+    # A FORCED switch (`checkout -f`/`--force`, `switch -f`/`--force`/
+    # `--discard-changes`, and a short cluster carrying `f` such as `-fb`/`-fc`)
+    # throws away every tracked change in the tree — index and worktree — before
+    # it moves, which is exactly the refusal git makes for the unforced form.
+    forced = False
+    if sub in ("checkout", "switch"):
+        for a in args:
+            if a == "--":
+                break
+            if a in ("--force", "--discard-changes") or (re.match(r"^-[A-Za-z]+$", a) and "f" in a[1:]):
+                forced = True
     resets_index = False
-    if sub == "restore":
+    if forced:
+        paths, resets_index = ["."], True
+    elif sub == "switch":
+        continue  # an unforced switch: git refuses a lossy one itself
+    elif sub == "checkout" and any(f in ("-b", "-B", "-t", "--track", "--orphan", "--detach", "-p", "--patch") for f in flags):
+        continue
+    elif sub == "restore":
         if any(f.startswith("--source") or f == "-s" or f.startswith("-s=") for f in flags):
             continue
         staged = any(f in ("--staged", "-S") for f in flags)
@@ -321,13 +417,16 @@ for seg in segments:
                 ref = a; continue
             paths.append(a)
         if ref is not None:
-            if not paths:
+            if not paths and not reads_stdin:
                 continue  # a branch switch
             rc_ref, ref_sha = git(tree, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
             _, head_sha = git(tree, "rev-parse", "--verify", "--quiet", "HEAD")
             if rc_ref != 0 or not head_sha or ref_sha.strip() != head_sha.strip():
                 continue  # a different (or unresolvable) commit: never a discard of this one
             resets_index = True
+    # `xargs git checkout --` takes its paths from stdin: judge the whole tree.
+    if reads_stdin and not paths:
+        paths = ["."]
     if not paths:
         continue
     expanded = []
@@ -360,7 +459,7 @@ if [ -n "$discard_report" ]; then
     echo "   deliberate discard you have already reviewed." >&2
   else
     at_risk="$(printf '%s\n' "$discard_report" | awk -F'\t' '{print "    " $2 "   (in " $1 ")"}')"
-    block "git checkout/restore would silently discard UNCOMMITTED changes — no warning, no diff, exit 0:
+    block "git checkout/switch/restore would silently discard UNCOMMITTED changes — no warning, no diff, exit 0:
 $at_risk
 This guard cannot tell a deliberate break from real work; you can. Commit first (git reset --soft HEAD~1 undoes it), or restore a REAL historical defect from a known ref instead: git checkout <sha-or-origin/trunk> -- <path> (a ref that is NOT the commit you are on — HEAD, @ and HEAD~0 discard your work rather than fetching an older version). Genuinely deliberate? cp <path> <path>.bak and mv it back afterward, or prefix the command with GIT_GUARD_ALLOW_DISCARD=1."
   fi

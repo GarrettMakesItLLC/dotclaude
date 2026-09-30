@@ -116,6 +116,57 @@ check 0 Bash command 'grep TODO src/index.ts'
 check 0 Bash command 'echo "run cat ~/.redthread/agent.env manually" > notes.txt'
 check 0 Bash command 'npm run build'
 
+# --- Bash: commands whose job is to print a credential (#455). ---
+check 2 Bash command 'bin/staging-db-url.sh'
+# shellcheck disable=SC2088 # the literal command text is the input
+check 2 Bash command '~/.claude/bin/staging-db-url.sh'
+check 2 Bash command 'cd ~/workspace/MuscleBuddy && bin/staging-db-url.sh'
+check 2 Bash command 'railway variables --kv'
+check 2 Bash command 'railway variables --service server --json | jq .'
+check 2 Bash command 'vercel env pull --yes /dev/stdout'
+check 2 Bash command 'printenv'
+check 2 Bash command 'env'
+check 2 Bash command 'env | sort'
+check 2 Bash command 'export -p'
+check 2 Bash command 'printenv DATABASE_URL'
+check 2 Bash command 'echo $DATABASE_URL'
+check 2 Bash command 'echo "$NODE_AUTH_TOKEN"'
+check 2 Bash command 'printf "%s\n" "${SUPABASE_SERVICE_ROLE_KEY}"'
+check 2 Bash command 'gh auth token'
+check 2 Bash command 'gh auth status --show-token'
+check 2 Bash command 'echo "$(bin/staging-db-url.sh)"'
+check 2 Bash command 'bin/staging-db-url.sh | tee /tmp/url.txt'
+check 2 Bash command 'bin/staging-db-url.sh >&2'
+check 2 Bash command 'railway variables --kv | grep DATABASE'
+check 2 Bash command 'env FOO=1 bin/staging-db-url.sh'
+check 2 Bash command "$(printf 'cd /tmp\nprintenv GITHUB_TOKEN')"
+
+# --- Bash: the same commands, captured, redirected or piped into a non-printing sink. ---
+check 0 Bash command 'export STAGING_DATABASE_URL="$(~/.claude/bin/staging-db-url.sh)"'
+check 0 Bash command 'psql "$(bin/staging-db-url.sh)" -c "select 1"'
+check 0 Bash command 'DB=`bin/staging-db-url.sh`'
+check 0 Bash command 'bin/staging-db-url.sh > /tmp/url.txt'
+check 0 Bash command 'bin/staging-db-url.sh >/dev/null 2>&1 && echo ok'
+check 0 Bash command "bin/staging-db-url.sh | sed 's/:[^:@]*@/:<redacted>@/'"
+check 0 Bash command 'railway variables --kv > /tmp/vars.env'
+check 0 Bash command 'railway variables --set FOO=bar'
+check 0 Bash command 'vercel env pull .env.local --yes'
+check 0 Bash command 'printenv NODE_AUTH_TOKEN | head -c 4'
+check 0 Bash command 'printenv DATABASE_URL | wc -c'
+check 0 Bash command 'printenv HOME'
+check 0 Bash command 'echo ${#NODE_AUTH_TOKEN}'
+check 0 Bash command 'echo ${NODE_AUTH_TOKEN:0:4}'
+check 0 Bash command 'echo "${GITHUB_TOKEN:+set}"'
+check 0 Bash command 'echo $HOME'
+check 0 Bash command 'NODE_AUTH_TOKEN="$(gh auth token)" npm ci'
+check 0 Bash command 'gh auth status'
+check 0 Bash command 'env | grep -c TOKEN'
+check 0 Bash command 'env FOO=1 npm test'
+check 0 Bash command 'set -euo pipefail'
+check 0 Bash command 'export FOO=bar'
+check 0 Bash command 'bash bin/staging-db-url.test.sh'
+check 0 Bash command "$(printf "cat > notes.md <<'EOF'\nrun printenv to see everything\nEOF")"
+
 if [ -s "$FAIL_MARKER" ]; then
   echo "FAILED: $(wc -l < "$FAIL_MARKER") case(s)."
   exit 1

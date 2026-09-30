@@ -292,6 +292,47 @@ git -C "$discard_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty 
   check 2 'for f in tracked.txt; do git checkout -- "$f"; done'
   check 2 'git checkout -- "$SOME_UNKNOWN_VAR"'
 
+  # #451: spellings ported from MuscleBuddy's hook corpus. A forced switch
+  # discards the whole tree; a plain one is refused by git itself.
+  git branch other HEAD~1
+  for c in 'git checkout -f' 'git checkout --force other' 'git checkout -f other' \
+           'git checkout -fb scratch' 'git checkout -f -b scratch' 'git switch -f other' \
+           'git switch --force other' 'git switch --discard-changes other' \
+           'git switch -fc scratch' "$(printf '# force it\ngit checkout -f other')"; do
+    check 2 "$c"
+  done
+  # Wrappers that run their argument as a command.
+  for c in 'env git checkout -- tracked.txt' 'nohup git checkout -- tracked.txt' \
+           'timeout 30 git checkout -- tracked.txt' '! git checkout -- tracked.txt' \
+           'eval git checkout -- tracked.txt' 'eval "git checkout -- tracked.txt"' \
+           'echo tracked.txt | xargs git checkout --' 'command git checkout -- tracked.txt' \
+           'time git checkout -- tracked.txt' 'FOO=bar BAZ=1 git restore tracked.txt' \
+           'env -u X FOO=1 git checkout -- tracked.txt' 'timeout -s KILL 5 git restore tracked.txt'; do
+    check 2 "$c"
+  done
+  # Lead-ins: a shell -c, a subshell, a case arm, and every line of a
+  # multi-line command.
+  for c in 'bash -c "git checkout -- tracked.txt"' 'sh -lc "git restore tracked.txt"' \
+           '(git checkout -- tracked.txt)' 'case x in x) git checkout -- tracked.txt;; esac' \
+           'case x in x) git restore tracked.txt;; esac' \
+           "$(printf 'echo start\ngit checkout -- tracked.txt')" \
+           "$(printf '# one\n# two\n\ngit restore tracked.txt')" \
+           "$(printf 'echo a && \\\n  git checkout -- tracked.txt')" \
+           "$(printf "cat > notes.md <<'EOF'\nprose\nEOF\ngit checkout -- tracked.txt")" \
+           'git -c a=b -c c=d checkout tracked.txt' 'git checkout @ tracked.txt'; do
+    check 2 "$c"
+  done
+  # Still allowed: plain switches (git guards those itself), a named ref,
+  # prose, and the escape hatch.
+  for c in 'git checkout other' 'git switch other' 'git switch -c scratch' \
+           'git checkout -b scratch' 'git checkout other -- tracked.txt' \
+           'git -c a=b checkout other' "$(printf '# comment\ngit status')" \
+           'echo "git checkout -f is dangerous"' 'command -v git' \
+           'GIT_GUARD_ALLOW_DISCARD=1 git checkout -f other' 'bash scripts/x.sh' \
+           "$(printf "cat > n.md <<'EOF'\nNever run git checkout -- tracked.txt here.\nEOF")"; do
+    check 0 "$c"
+  done
+
   # A staged-only change survives a restore from the index, not a reset from
   # the commit you are on. Untracked files are never at risk.
   git add tracked.txt

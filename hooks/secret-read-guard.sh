@@ -24,6 +24,15 @@
 #     less, more, bat, nl, xxd, od, strings, base64, a printing awk, a sed
 #     without a redacting substitution, or a grep/rg without -l/-c/-q/-o — on
 #     a secrets path.
+#   - A `Bash` command whose JOB is to print a credential, when its stdout
+#     reaches the transcript: `*db-url.sh` (staging-db-url.sh), `railway
+#     variables`, `vercel env pull /dev/stdout`, `gh auth token`, `supabase …
+#     api-keys`, bare `printenv`/`env`/`export -p`/`set`, `printenv <SECRET>`,
+#     and `echo`/`printf` of a credential-named variable. Allowed when captured
+#     by `$(…)`, redirected to a file or /dev/null, or piped into a sink that
+#     prints no value (wc, a checksum, grep -q/-c/-l, `head -c N` with N <= 8,
+#     a redacting sed). The PostToolUse `credential-output-guard.sh` redacts
+#     whatever still gets through.
 #
 # WHAT'S ALLOWED (by design — this must not make the file unusable):
 #   - `source`/`.` of the file, `set -a; . file` — never PRINTS anything.
@@ -246,7 +255,183 @@ for seg in re.split(r"&&|\|\||\||;|\n", cmd):
     # job — fail open per the header.
 
 if hit:
-    print(hit)
+    print("READ\t" + hit)
+    sys.exit(0)
+
+# ---- Commands whose JOB is to print a credential (#455). ----
+#
+# A file-read check cannot see `staging-db-url.sh`, `railway variables --kv`,
+# `printenv`, `echo $DATABASE_URL` or `gh auth token`: nothing names a secrets
+# file, and the value still lands in the transcript. Each is refused when its
+# stdout reaches the transcript, and allowed when it does not:
+#   - captured by a command substitution (`DB="$(staging-db-url.sh)"`,
+#     `psql "$(…)"`) — the value becomes an argument, never output;
+#   - redirected to a file or /dev/null (`railway variables --kv > vars.env`);
+#   - piped into a sink that prints no value: wc, a checksum, grep -q/-c/-l,
+#     `head -c N`/`cut -c-N` with N <= 8 (a prefix), or a redacting sed.
+SECRET_NAME = re.compile(
+    r"(SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|API_?KEY|PRIVATE_KEY|SERVICE_ROLE|"
+    r"ACCESS_KEY|DATABASE_URL|DB_URL|DIRECT_URL|CONNECTION_STRING|DSN|CREDENTIAL)",
+    re.I,
+)
+SUBST_MARK = "__SECRET_SUBST__"
+WRAPPERS = {"env", "command", "builtin", "time", "nohup", "sudo", "exec", "!"}
+
+
+def strip_heredocs(c):
+    return re.sub(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1.*?^\s*\2\s*$", " ", c, flags=re.S | re.M)
+
+
+def secret_var_ref(tok):
+    """A `$NAME` / `${NAME}` expansion of a credential-named variable that
+    prints its value (not its length, and not a short prefix slice)."""
+    for m in re.finditer(r"\$\{?(#?)([A-Za-z_][A-Za-z0-9_]*)(:[^}]*)?\}?", tok):
+        hashed, name, mod = m.group(1), m.group(2), m.group(3) or ""
+        if hashed or not SECRET_NAME.search(name):
+            continue
+        sl = re.match(r"^:0:(\d+)$", mod)
+        if sl and int(sl.group(1)) <= 8:
+            continue
+        if mod.startswith((":+", ":?")):
+            continue
+        return name
+    return None
+
+
+def unwrap(toks):
+    while toks and (ASSIGN_RE.match(toks[0]) or toks[0] in WRAPPERS):
+        if toks[0] == "env" and all(
+            ASSIGN_RE.match(t) or t.startswith("-") for t in toks[1:]
+        ):
+            return toks  # bare `env` dumps the environment: judged below
+        toks = toks[1:]
+    return toks
+
+
+def emitter(stage):
+    """Why this pipeline stage prints a credential, or None."""
+    try:
+        toks = shlex.split(stage)
+    except ValueError:
+        toks = stage.split()
+    toks = [t for t in toks if not re.match(r"^\d*[<>]", t)]
+    toks = unwrap(toks)
+    if not toks:
+        return None
+    w = toks[0].split("/")[-1]
+    args = toks[1:]
+    plain = [a for a in args if not a.startswith("-")]
+    if re.match(r"^[\w.-]*db-url(\.sh)?$", w):
+        return "`%s` prints a database URL with its password" % w
+    if w == "railway" and plain[:1] and plain[0] in ("variables", "variable", "vars"):
+        if not any(a in ("--set", "-s", "--set-from-stdin") or a.startswith("--set=") for a in args) \
+                and not (plain[1:2] and plain[1] in ("set", "delete", "rm")):
+            return "`railway variables` prints every variable's value"
+    if w == "vercel" and plain[:2] == ["env", "pull"]:
+        if any(a in ("/dev/stdout", "/dev/stderr", "/dev/fd/1", "/dev/fd/2", "/proc/self/fd/1", "-") for a in plain[2:]):
+            return "`vercel env pull` to stdout prints every variable's value"
+    if w == "gh" and plain[:2] == ["auth", "token"]:
+        return "`gh auth token` prints a GitHub token"
+    if w == "gh" and plain[:2] == ["auth", "status"] and any(a in ("-t", "--show-token") for a in args):
+        return "`gh auth status --show-token` prints a GitHub token"
+    if w == "supabase" and "api-keys" in plain:
+        return "`supabase … api-keys` prints the project's service-role key"
+    if w == "printenv":
+        if not plain:
+            return "bare `printenv` prints every variable, credentials included"
+        named = [a for a in plain if SECRET_NAME.search(a)]
+        if named:
+            return "`printenv %s` prints a credential" % named[0]
+    if w == "env" and all(ASSIGN_RE.match(a) or a.startswith("-") for a in args):
+        return "bare `env` prints every variable, credentials included"
+    if w in ("export", "declare", "typeset") and (not args or all(a in ("-p", "-x", "-px", "-xp") for a in args)):
+        return "`%s` with no names prints every exported variable, credentials included" % " ".join(toks)
+    if w == "set" and not args:
+        return "bare `set` prints every variable, credentials included"
+    if w in ("echo", "printf"):
+        if any(SUBST_MARK in a for a in args):
+            return "`%s` prints the output of a credential-emitting command" % w
+        for a in args:
+            name = secret_var_ref(a)
+            if name:
+                return "`%s` prints $%s" % (w, name)
+    return None
+
+
+def stdout_to_file(stage):
+    """True when this stage sends its stdout somewhere other than the transcript."""
+    for m in re.finditer(r"(?:^|[^0-9<>&])(1?>>?|&>>?)\s*([^\s;&|]+)", stage):
+        target = m.group(2)
+        if target.startswith("&"):
+            continue  # >&2 and friends still reach the transcript
+        if target in ("/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/fd/1", "/dev/fd/2"):
+            continue
+        return True
+    return False
+
+
+def safe_sink(stage):
+    try:
+        toks = shlex.split(stage)
+    except ValueError:
+        toks = stage.split()
+    toks = unwrap(toks)
+    if not toks:
+        return False
+    w, args = toks[0].split("/")[-1], toks[1:]
+    if w in ("wc", "sha256sum", "sha1sum", "md5sum", "shasum", "true", "false"):
+        return True
+    if w in ("grep", "egrep", "fgrep", "rg"):
+        return grep_is_allowed([a for a in args if a.startswith("-")]) and not any(
+            a.startswith("-o") or a == "--only-matching" for a in args)
+    if w in ("head", "cut"):
+        joined = " ".join(args)
+        m = re.search(r"-c\s*(?:1?-)?(\d+)", joined) or re.search(r"--bytes[= ](\d+)", joined)
+        return bool(m) and int(m.group(1)) <= 8
+    if w in ("sed", "gsed"):
+        script = " ".join(a for a in args if not a.startswith("-"))
+        return "redact" in script.lower() or "***" in script
+    return False
+
+
+def strip_substitutions(c):
+    """Replace every $(…) and `…` with a placeholder, innermost first, marking
+    the ones whose own contents emit a credential."""
+    pat = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
+    for _ in range(20):
+        m = pat.search(c)
+        if not m:
+            break
+        inner = m.group(1) if m.group(1) is not None else m.group(2)
+        emits = any(emitter(st) for stmt in re.split(r"&&|\|\||;|\n", inner)
+                    for st in re.split(r"(?<!\|)\|(?!\|)", stmt))
+        c = c[:m.start()] + (SUBST_MARK if emits else "__SUBST__") + c[m.end():]
+    return c
+
+
+def find_emit(c):
+    flat = strip_substitutions(strip_heredocs(c).replace("\\\n", " "))
+    for stmt in re.split(r"&&|\|\||;|\n", flat):
+        stages = [st.strip() for st in re.split(r"(?<!\|)\|(?!\|)", stmt)]
+        for i, st in enumerate(stages):
+            why = emitter(st)
+            if not why:
+                continue
+            rest = stages[i + 1:]
+            if stdout_to_file(st) or any(safe_sink(r) for r in rest) or (rest and stdout_to_file(rest[-1])):
+                continue
+            return "%s: %s" % (why, stmt.strip())
+    return None
+
+
+# This half is new and heuristic, so a parse it cannot finish lets the call
+# through rather than refusing every Bash command.
+try:
+    emit = find_emit(cmd)
+except Exception:
+    emit = None
+if emit:
+    print("EMIT\t" + emit)
 PYEOF
 )"
 status=$?
@@ -260,6 +445,22 @@ if [ "$status" -ne 0 ]; then
 fi
 rm -f "$err"
 
-[ -n "$verdict" ] && block "$verdict"
+case "$verdict" in
+  EMIT$'\t'*)
+    reason="${verdict#EMIT$'\t'}"
+    echo "⛔ dotclaude secret-read-guard blocked this." >&2
+    echo "Reason: $reason" >&2
+    echo "Its output would put a live credential in the transcript, where it cannot be taken back (#455)." >&2
+    echo "Safe forms instead:" >&2
+    echo "    capture it:   DB=\"\$(~/.claude/bin/staging-db-url.sh)\"   (the value becomes an argument, never output)" >&2
+    echo "    redirect it:  <command> > /tmp/out.env   then inspect with   sed 's/:[^:@]*@/:<redacted>@/' /tmp/out.env" >&2
+    echo "                  or   sed 's/=.*/=<redacted>/' /tmp/out.env" >&2
+    echo "    measure it:   printenv NODE_AUTH_TOKEN | head -c 4" >&2
+    echo "False positive? Run it yourself, or edit hooks/secret-read-guard.sh." >&2
+    exit 2
+    ;;
+  READ$'\t'*) block "${verdict#READ$'\t'}" ;;
+  ?*) block "$verdict" ;;
+esac
 
 exit 0
