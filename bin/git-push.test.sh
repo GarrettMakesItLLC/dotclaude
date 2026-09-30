@@ -88,5 +88,34 @@ echo "git-push: the log names itself and starts with a nonce"
 log="$(sed -n 's/^→ push log: //p' <<<"$OUT" | head -1)"
 [ -n "$log" ] && head -1 "$log" | grep -q '^nonce:' && ok "log path printed, nonce first" || bad "log: $log"
 
+echo "git-push: a set verification-stale marker refuses, a cleared or absent one does not"
+GD="$(git rev-parse --absolute-git-dir)"
+git commit -q --allow-empty -m stale-case
+before_remote="$(remote_sha work)"
+printf '%s\n%s\n%s\n' aaaaaaaaaaaa111111 bbbbbbbbbbbb222222 'bin/with-check-lock.sh -- npm test' > "$GD/verification-stale"
+: > "$HOOKLOG"
+run origin work
+[ "$RC" = 1 ] && [ ! -s "$HOOKLOG" ] && [ "$(remote_sha work)" = "$before_remote" ] && ok "set: refused before the hook and before any push" || bad "set: rc=$RC $OUT"
+grep -q 'aaaaaaaaaaaa → bbbbbbbbbbbb' <<<"$OUT" && grep -q 'Re-run it against the tree you are shipping: bin/with-check-lock.sh -- npm test' <<<"$OUT" \
+  && ok "names the before/after SHAs and the command to re-run" || bad "message: $OUT"
+run origin :work-nonexistent --delete
+grep -q 'refusing to push' <<<"$OUT" && bad "a deletion was refused" || ok "a deletion is not gated by it"
+rm -f "$GD/verification-stale"
+run origin work
+[ "$RC" = 0 ] && [ "$(remote_sha work)" = "$(git rev-parse HEAD)" ] && ok "cleared: pushes" || bad "cleared: rc=$RC $OUT"
+
+echo "git-push: the marker name follows .claude/repo.json envPrefix"
+git commit -q --allow-empty -m prefix-case
+mkdir -p .claude
+echo '{"envPrefix":"MB"}' > .claude/repo.json
+printf '%s\n%s\n%s\n' cccccccccccc dddddddddddd 'mb check' > "$GD/verification-stale"
+run origin work
+[ "$RC" = 0 ] && ok "a bare marker is ignored once the repo has a prefix" || bad "unprefixed marker refused: $OUT"
+git commit -q --allow-empty -m prefix-case-2
+printf '%s\n%s\n%s\n' eeeeeeeeeeee ffffffffffff 'mb check' > "$GD/mb-verification-stale"
+run origin work
+[ "$RC" = 1 ] && grep -q 'mb check' <<<"$OUT" && ok "mb-verification-stale refuses" || bad "prefixed marker: rc=$RC $OUT"
+rm -f "$GD/verification-stale" "$GD/mb-verification-stale" .claude/repo.json
+
 [ "$fail" = 0 ] && echo "git-push: all cases passed"
 exit "$fail"
