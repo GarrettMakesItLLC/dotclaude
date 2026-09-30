@@ -33,7 +33,8 @@
 #                 `<workspaceDirs>/*/node_modules` (real copies, verified
 #                 name@version and file-for-file against the source, refreshed
 #                 when the source install moves), the root `node_modules/.bin`
-#                 (per-binary symlinks into a real directory), and optionally
+#                 (per-binary symlinks into a real directory, re-pointed at the
+#                 worktree's own package once it has one), and optionally
 #                 `node_modules/<workspaceScope>/*` links to THIS worktree's own
 #                 packages, without which a worktree typechecks against the main
 #                 tree's copy of a package it edited. `node_modules` itself is
@@ -42,8 +43,9 @@
 #   * No generated Prisma client (`worktree.prismaGenerate`).
 #   * No graph for graphify (`worktree.graphify`), built best-effort.
 #
-# `worktree.postSteps` run last, in the worktree, with WORKTREE and MAIN_TREE
-# exported — the place for a repo's own extra step. `--check` writes nothing: it
+# `worktree.postSteps` run last, in the worktree, with WORKTREE, MAIN_TREE and
+# the SETUP_WORKTREE_* state exported (docs/repo-manifest.md) — the place for a
+# repo's own extra step. `--check` writes nothing: it
 # answers "would a build here fail on the bootstrap rather than the code?", runs
 # `worktree.checkSteps`, and exits non-zero naming the repair. A pre-push hook
 # can call it, since the bootstrap runs once and a later dependency change in
@@ -63,7 +65,9 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=bin/lib/repo-manifest.sh
 . "$HERE/lib/repo-manifest.sh"
-LOCK="$HERE/with-check-lock.sh"
+# SETUP_WORKTREE_LOCK overrides the wrapper (the self-test injects a lock that
+# times out); it is exported to postSteps either way.
+LOCK="${SETUP_WORKTREE_LOCK:-$HERE/with-check-lock.sh}"
 
 say() { echo "[setup-worktree] $*"; }
 warn() { echo "[setup-worktree] $*" >&2; }
@@ -88,9 +92,15 @@ fi
 strategy="$(manifest_get worktree.strategy || echo install)"
 case "$strategy" in install | mirror) ;; *) warn "unknown worktree.strategy '$strategy' (install | mirror)"; exit 1 ;; esac
 state_dir="$(manifest_path_expand "$(manifest_get stateDir || echo "")")"
+env_prefix="$(manifest_get envPrefix || true)"
+case "$env_prefix" in *[!A-Za-z0-9_]*) env_prefix="" ;; esac
 mapfile -t workspace_dirs < <(manifest_get worktree.workspaceDirs || printf 'apps\npackages\n')
 scope="$(manifest_get worktree.workspaceScope || true)"
-export WORKTREE="$target" MAIN_TREE="$main_tree"
+# What postSteps/checkSteps may read (docs/repo-manifest.md). The SETUP_WORKTREE_*
+# values are filled in by the mirror strategy below; under `install` they stay
+# empty, which reads as "nothing copied, nothing exempt, nothing stale".
+export WORKTREE="$target" MAIN_TREE="$main_tree" SETUP_WORKTREE_LOCK="$LOCK"
+export SETUP_WORKTREE_STALE=0 SETUP_WORKTREE_COPIED_STAMP="" SETUP_WORKTREE_EXEMPT=""
 
 # One bootstrap of a given worktree at a time: the hook and a hand-run can both
 # fire on one `git worktree add`, and the loser of a race leaves a PARTIAL copy.
@@ -245,6 +255,37 @@ if [ "$strategy" = mirror ]; then
     [ "$n" -eq 0 ] || say "linked $n root bin(s) into node_modules/.bin"
   fi
 
+  # A root `.bin` link into the main tree is right only while this worktree has
+  # no package of that name of its own. Once it does (a root install here, which
+  # the never-overwrite rule above leaves the old links beside), the link runs
+  # the MAIN tree's binary against THIS tree's packages: `npx vitest` starts
+  # main's vitest while the setup file extends this tree's `expect`, and every
+  # matcher fails as "Invalid Chai property". Such a link is re-pointed at the
+  # worktree's own package, relative — the shape npm leaves.
+  split_bins=()
+  if [ -d "$target/node_modules/.bin" ] && [ ! -L "$target/node_modules/.bin" ]; then
+    while IFS= read -r -d '' bin_link; do
+      bin_dest="$(readlink "$bin_link")"
+      case "$bin_dest" in "$main_tree/node_modules/"*) ;; *) continue ;; esac
+      bin_rel="${bin_dest#"$main_tree/node_modules/"}"
+      bin_pkg="${bin_rel%%/*}"
+      case "$bin_pkg" in @*) bin_pkg="$bin_pkg/$(cut -d/ -f2 <<<"$bin_rel")" ;; esac
+      [ -d "$target/node_modules/$bin_pkg" ] && [ ! -L "$target/node_modules/$bin_pkg" ] || continue
+      [ -e "$target/node_modules/$bin_rel" ] || continue
+      split_bins+=("$(basename "$bin_link")")
+      ((check_only)) || ln -sfn "../$bin_rel" "$bin_link"
+    done < <(find "$target/node_modules/.bin" -maxdepth 1 -type l -print0)
+  fi
+  if [ "${#split_bins[@]}" -gt 0 ]; then
+    if ((check_only)); then
+      warn "node_modules/.bin runs the main tree's copy of a package this worktree has itself: ${split_bins[*]}"
+      warn "Two copies of one tool meet at runtime (vitest shows it as \"Invalid Chai property\"). Repair:"
+      warn "  ~/.claude/bin/setup-worktree.sh $target"
+      exit 1
+    fi
+    say "re-pointed ${#split_bins[@]} root bin(s) at this worktree's own packages"
+  fi
+
   # A branch whose lockfile moved a package needs its own install for THAT
   # package, so the main tree's copy is exempt per package, not per tree. The
   # comparison is against the main tree's COMMITTED lockfile: an install there
@@ -254,7 +295,7 @@ if [ "$strategy" = mirror ]; then
   compare_lock="$main_tree/package-lock.json"
   git -C "$main_tree" show HEAD:package-lock.json >"$main_head_lock" 2>/dev/null && compare_lock="$main_head_lock"
   if ! git -C "$main_tree" diff --quiet -- package-lock.json 2>/dev/null; then
-    warn "the MAIN checkout has UNCOMMITTED package-lock.json changes; this worktree is compared against its HEAD."
+    warn "the MAIN checkout ($main_tree) has UNCOMMITTED package-lock.json changes; this worktree is compared against its HEAD. Check with: (cd $main_tree && git diff --stat -- package-lock.json)"
   fi
 
   branch_owns_deps=0
@@ -341,11 +382,21 @@ if [ "$strategy" = mirror ]; then
   # kept in the worktree's private git dir.
   source_stamp=""
   [ -f "$main_tree/node_modules/.package-lock.json" ] && source_stamp="$(stat -c %Y "$main_tree/node_modules/.package-lock.json")"
-  stamp_file="$(git -C "$target" rev-parse --path-format=absolute --git-dir)/nested-deps-stamp"
+  # Named from envPrefix (`mb-nested-deps-stamp`), so a worktree bootstrapped by
+  # a repo's own older copy of this script keeps its stamp instead of reading as
+  # stale and being re-copied from scratch.
+  stamp_prefix="$(printf '%s' "$env_prefix" | tr '[:upper:]' '[:lower:]')"
+  stamp_file="$(git -C "$target" rev-parse --path-format=absolute --git-dir)/${stamp_prefix:+$stamp_prefix-}nested-deps-stamp"
   copied_stamp=""
   [ -f "$stamp_file" ] && copied_stamp="$(cat "$stamp_file")"
   stale=0
   if [ "$branch_owns_deps" = 0 ] && [ -n "$source_stamp" ] && [ "$copied_stamp" != "$source_stamp" ]; then stale=1; fi
+  # The state BEFORE this run, for a repo's own mirror step: the stamp written
+  # below would otherwise tell it the copy is current even when this run just
+  # refreshed it.
+  SETUP_WORKTREE_STALE="$stale" SETUP_WORKTREE_COPIED_STAMP="$copied_stamp"
+  SETUP_WORKTREE_EXEMPT=""
+  [ "$branch_owns_deps" = 0 ] || SETUP_WORKTREE_EXEMPT="$exempt_pkgs"
 
   # Copies READ the main tree's node_modules, which a concurrent `--writer npm ci`
   # rewrites; `cp` copies whatever bytes are there. So a copy holds the check
@@ -353,8 +404,10 @@ if [ "$strategy" = mirror ]; then
   # bookkeeping. A lock timeout (75) is reported as that, not as a short source;
   # a source quiet for SETUP_WORKTREE_STABLE_SECS has no writer to race, so a
   # timed-out copy retries once unlocked.
-  stable_secs="${SETUP_WORKTREE_STABLE_SECS:-300}"
-  lock_gave_up=()
+  stable_knob="${env_prefix:+${env_prefix}_SETUP_WORKTREE_STABLE_SECS}"
+  stable_secs="${SETUP_WORKTREE_STABLE_SECS:-${stable_knob:+${!stable_knob:-}}}"
+  stable_secs="${stable_secs:-300}"
+  lock_gave_up=(); lock_retried=()
   copy_guarded() {
     local label="$1" status=0
     shift
@@ -363,6 +416,7 @@ if [ "$strategy" = mirror ]; then
     if [ "$status" -eq 75 ]; then
       if [ -n "$source_stamp" ] && (($(date +%s) - source_stamp >= stable_secs)); then
         cp "$@" || true
+        lock_retried+=("$label")
       else
         lock_gave_up+=("$label")
       fi
@@ -394,8 +448,31 @@ if [ "$strategy" = mirror ]; then
       rm -rf "${dst:?}/$name"
       refreshed+=("$workspace/$name")
     done < <(drifted "$src" "$dst")
+    # A package the branch's lockfile moved is its own install's to place, and
+    # `cp -rn` fills whatever gap it finds: a branch that hoisted a package out
+    # of this nest leaves exactly such a gap, and the main tree's nested copy at
+    # the OLD version would land in it and shadow the branch's hoisted one. Note
+    # which moved packages the copy would introduce, and take them back out.
+    introduced_exempt=()
+    if ((branch_owns_deps)); then
+      while IFS= read -r entry; do
+        name="${entry%@*}"
+        [ -n "$name" ] && [ ! -e "$dst/$name" ] || continue
+        if is_exempt "$name"; then introduced_exempt+=("$name"); fi
+      done < <(pkg_list "$src")
+    fi
     before=$(find "$dst" -mindepth 1 -maxdepth 1 | wc -l)
     copy_guarded "$workspace" -rn "$src/." "$dst/"
+    for name in ${introduced_exempt[@]+"${introduced_exempt[@]}"}; do
+      rm -rf "${dst:?}/$name"
+      case "$name" in @*/*) rmdir "$dst/${name%%/*}" 2>/dev/null || true ;; esac
+    done
+    # Their `.bin` links came along too, now dangling; left in place they would
+    # shadow the branch's own root binaries on an npm script's PATH.
+    if [ "${#introduced_exempt[@]}" -gt 0 ] && [ -d "$dst/.bin" ]; then
+      find "$dst/.bin" -maxdepth 1 -xtype l -delete
+      rmdir "$dst/.bin" 2>/dev/null || true
+    fi
     after=$(find "$dst" -mindepth 1 -maxdepth 1 | wc -l)
     if ((after > before)); then
       if ((was_stale)); then refreshed+=("$workspace"); else nested+=("$workspace"); fi
@@ -403,6 +480,8 @@ if [ "$strategy" = mirror ]; then
     [ -z "$(drifted "$src" "$dst")" ] || short+=("$workspace")
     while IFS= read -r name; do [ -n "$name" ] && short+=("$workspace/$name"); done < <(incomplete_packages "$src" "$dst")
   done < <([ "${#find_roots[@]}" -eq 0 ] || find "${find_roots[@]}" -mindepth 2 -maxdepth 2 -type d -name node_modules 2>/dev/null | sort)
+  # A package absent from the copy is both drifted and incomplete; name it once.
+  if [ "${#short[@]}" -gt 0 ]; then mapfile -t short < <(printf '%s\n' "${short[@]}" | awk '!seen[$0]++'); fi
 
   # Workspace packages resolve to THIS worktree's source, not the main tree's.
   if [ -n "$scope" ] && ((check_only == 0)); then
@@ -440,6 +519,7 @@ if [ "$strategy" = mirror ]; then
     exit 0
   fi
 
+  [ "${#lock_retried[@]}" -eq 0 ] || say "the check lock gave up waiting to copy: ${lock_retried[*]} — retried unlocked, since the source has been quiet for at least ${stable_secs}s and no writer can be racing it."
   if [ "${#lock_gave_up[@]}" -gt 0 ]; then
     warn "the check lock timed out before copying: ${lock_gave_up[*]} — nothing was copied for them (exit 75, the box is"
     warn "contended; the source is not short). Retry: ~/.claude/bin/setup-worktree.sh $target  (CHECK_TIMEOUT=0 waits indefinitely)"
@@ -464,7 +544,14 @@ prisma_cmd="$(manifest_get worktree.prismaGenerate || true)"
 if [ -n "$prisma_cmd" ]; then
   say "generating the Prisma client: $prisma_cmd"
   if ! (cd "$target" && sh -c "$prisma_cmd" >/dev/null 2>&1); then
-    warn "Prisma client generation failed — run it by hand: (cd $target && $prisma_cmd)"
+    # A CLI that does not resolve is a dependency problem, not a schema one, and
+    # wants a different repair.
+    if ! (cd "$target" && npx --no-install prisma --version >/dev/null 2>&1); then
+      warn "the prisma CLI does not resolve here, so the client could not be generated. Install first:"
+      warn "  (cd $target && ~/.claude/bin/with-check-lock.sh --writer npm ci)   then re-run: ~/.claude/bin/setup-worktree.sh $target"
+    else
+      warn "Prisma client generation failed — run it by hand: (cd $target && $prisma_cmd)"
+    fi
     exit 1
   fi
 fi
@@ -480,8 +567,23 @@ fi
 
 run_steps post worktree.postSteps
 
-if [ -n "$state_dir" ] && [ ! -f "$state_dir/agent.env" ]; then
-  warn "agent shell creds not found — build them once: (cd $main_tree && ~/.claude/bin/agent-env-build.sh)"
+# Credentials are per machine, in the state dir and sourced from ~/.bashrc, so a
+# worktree inherits them; a fresh machine has to build them once. Nudged, not
+# pulled: a pull needs the network and a linked cloud project.
+if [ -n "$state_dir" ]; then
+  if [ "$(manifest_get ops.channel || echo false)" = true ] && [ ! -f "$state_dir/ops.env" ]; then
+    warn "ops secrets not found — on a new machine run: (cd $main_tree && ~/.claude/bin/ops-pull.sh)"
+  fi
+  if [ ! -f "$state_dir/agent.env" ]; then
+    warn "agent shell creds not found — build them once: (cd $main_tree && ~/.claude/bin/agent-env-build.sh)"
+  fi
+fi
+# The next thing a worktree is likely to run is an install, and npm exits 0 on
+# one that silently omitted every auth-gated package when the token is empty.
+if [ -z "${NODE_AUTH_TOKEN:-}" ] && [ "$strategy" = mirror ] \
+  && ! grep -qs '^export NODE_AUTH_TOKEN=.' "$HOME/.config/secrets/gmi.env" ${state_dir:+"$state_dir/agent.env"}; then
+  warn "no GitHub Packages token in this shell or in ~/.config/secrets/gmi.env — an \`npm ci\` here would silently omit"
+  warn "every auth-gated package. Put the PAT (read:packages) in ~/.config/secrets/gmi.env, then start a new shell."
 fi
 
 say "$target ready ($strategy)."

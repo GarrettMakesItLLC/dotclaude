@@ -57,8 +57,24 @@ in the environment overrides discovery (the self-tests use it).
 | `lockWorktree` | string | `git worktree lock` reason, so generic sweeps cannot remove a live tree. |
 | `prismaGenerate` | command | Run after dependencies, e.g. `npx prisma generate`. |
 | `graphify` | bool | Build `graphify-out/` best-effort. |
-| `postSteps` | commands | Run last, in the worktree, with `WORKTREE` and `MAIN_TREE` exported. |
-| `checkSteps` | commands | Run by `--check`. |
+| `postSteps` | commands | Run last, in the worktree, with the step environment below exported. |
+| `checkSteps` | commands | Run by `--check`, with the same environment. |
+
+The step environment, for a repo's own mirror step (MuscleBuddy's
+`bin/worktree-tailwind-sources.sh`):
+
+| Variable | Meaning |
+|---|---|
+| `WORKTREE`, `MAIN_TREE` | The worktree and the main checkout. |
+| `SETUP_WORKTREE_STALE` | `1` when the main tree's install moved since the last copy. Read before this run's copy, so a step can refresh its own copy too. |
+| `SETUP_WORKTREE_COPIED_STAMP` | Non-empty when this bootstrap had already copied into the worktree before this run. A step judges completeness only for copies it made; an unstamped tree is the branch's own install. |
+| `SETUP_WORKTREE_EXEMPT` | Packages the branch's lockfile moved, one per line, or `ALL` when the lockfiles cannot be compared. The main tree's copy is the wrong one for those. |
+| `SETUP_WORKTREE_LOCK` | The check-lock wrapper. Read the main tree's `node_modules` under `--light --no-drift`. |
+
+The `mirror` copy stamp lives in the worktree's git dir as
+`<envprefix>-nested-deps-stamp` (`nested-deps-stamp` without an `envPrefix`).
+`<PREFIX>_SETUP_WORKTREE_STABLE_SECS` or `SETUP_WORKTREE_STABLE_SECS` (default 300)
+sets how long a source must be quiet before a copy that timed out on the lock retries unlocked.
 
 ## `supabase` — `bin/staging-db-url.sh`
 
@@ -79,6 +95,8 @@ in the environment overrides discovery (the self-tests use it).
 
 ## Example — a mirror-strategy repo with the OPS channel
 
+MuscleBuddy's manifest, verbatim.
+
 ```json
 {
   "name": "MuscleBuddy",
@@ -86,22 +104,56 @@ in the environment overrides discovery (the self-tests use it).
   "stateDir": "~/.musclebuddy",
   "credentials": {
     "sources": ["apps/server/.env.local", "apps/server/.env", ".env"],
-    "direct": ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY"],
+    "direct": [
+      "SUPABASE_URL",
+      "SUPABASE_ANON_KEY",
+      "SUPABASE_SERVICE_KEY",
+      "VAPID_PUBLIC_KEY",
+      "VAPID_PRIVATE_KEY",
+      "ANTHROPIC_API_KEY",
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "STRIPE_PRO_PRICE_ID",
+      "STRIPE_COACH_PRICE_ID",
+      "GOOGLE_PLACES_API_KEY",
+      "RESEND_API_KEY",
+      "FDC_API_KEY"
+    ],
     "aliasDirect": true,
-    "namespaced": { "MB_PROD_DATABASE_URL": "DATABASE_URL", "MB_PROD_DIRECT_URL": "DIRECT_URL" },
+    "namespaced": {
+      "MB_PROD_DATABASE_URL": "DATABASE_URL",
+      "MB_PROD_DIRECT_URL": "DIRECT_URL"
+    },
     "githubToken": true,
     "railway": {
       "service": "@musclebuddy/server",
       "environment": "production",
-      "fallback": ["SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "DATABASE_URL", "DIRECT_URL"]
+      "fallback": [
+        "SUPABASE_URL",
+        "SUPABASE_ANON_KEY",
+        "SUPABASE_SERVICE_KEY",
+        "VAPID_PUBLIC_KEY",
+        "VAPID_PRIVATE_KEY",
+        "DATABASE_URL",
+        "DIRECT_URL"
+      ]
     }
   },
   "ops": {
     "channel": true,
-    "unsetAlways": ["RAILWAY_TOKEN", "RAILWAY_API_TOKEN", "MB_RAILWAY_TOKEN", "MB_RAILWAY_API_TOKEN"],
+    "unsetAlways": [
+      "RAILWAY_TOKEN",
+      "RAILWAY_API_TOKEN",
+      "MB_RAILWAY_TOKEN",
+      "MB_RAILWAY_API_TOKEN"
+    ],
     "fileSecrets": [
       "SERVER_ENV_LOCAL_B64",
-      { "name": "ASC_API_KEY_P8_B64", "path": "signing/AuthKey_{ASC_KEY_ID}.p8", "mustContain": "BEGIN PRIVATE KEY" }
+      {
+        "name": "ASC_API_KEY_P8_B64",
+        "path": "signing/AuthKey_{ASC_KEY_ID}.p8",
+        "mustContain": "BEGIN PRIVATE KEY"
+      }
     ]
   },
   "worktree": {
@@ -113,14 +165,51 @@ in the environment overrides discovery (the self-tests use it).
     "postSteps": ["bin/worktree-tailwind-sources.sh"],
     "checkSteps": ["bin/worktree-tailwind-sources.sh --check"]
   },
-  "supabase": { "projectName": "MuscleBuddy", "stagingBranch": "staging" },
+  "supabase": {
+    "projectName": "MuscleBuddy",
+    "stagingBranch": "staging"
+  },
   "doctor": {
     "resolves": "vitest",
     "nestedDeps": ["apps/web:lucide-react", "apps/server:fastify", "packages/engine:zod"],
     "prismaClient": ["prisma/generated/client/client.ts", "prisma/generated/client/index.js"],
     "envFiles": [
-      { "path": ".env", "fix": "~/.claude/bin/agent-env-build.sh reads the DB and Supabase values from Railway; .env.example lists the rest" },
-      { "path": "apps/web/.env.local", "fix": "npx vercel env pull apps/web/.env.local" }
+      {
+        "path": ".env",
+        "fix": "~/.claude/bin/agent-env-build.sh reads the DB and Supabase values from Railway; .env.example lists the rest"
+      },
+      {
+        "path": "apps/web/.env.local",
+        "fix": "npx vercel env pull apps/web/.env.local"
+      },
+      {
+        "path": "apps/server/.env.local",
+        "fix": "bin/server-env-sync.sh pull"
+      },
+      {
+        "path": ".env.test",
+        "fix": "bin/e2e-env.sh (mints the E2E sandbox from the Supabase PAT; e2e cannot provision its fixtures without it)"
+      }
+    ],
+    "checks": [
+      {
+        "name": "npm is the pinned one, not a hoisted package's bin",
+        "run": "case \"$(command -v npm)\" in */node_modules/.bin/npm) exit 1 ;; esac",
+        "fix": "npm run unshadow-npm",
+        "severity": "warn"
+      },
+      {
+        "name": "a Playwright browser is installed",
+        "run": "ls -d \"$HOME\"/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell >/dev/null 2>&1",
+        "fix": "npx playwright install chromium (e2e cannot run without it)",
+        "severity": "warn"
+      },
+      {
+        "name": "the Playwright browser starts (system libraries present)",
+        "run": "b=$(ls -d \"$HOME\"/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell 2>/dev/null | tail -1); [ -z \"$b\" ] || \"$b\" --version",
+        "fix": "export LD_LIBRARY_PATH=$HOME/.local/lib/wsl-playwright-libs:$HOME/.local/pwlibs/usr/lib/x86_64-linux-gnu",
+        "severity": "warn"
+      }
     ]
   }
 }
