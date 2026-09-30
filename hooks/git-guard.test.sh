@@ -80,6 +80,15 @@ check 2 "git commit -m 'subject${NL}body' --no-verify"
 # ...and the message body itself still can't trip it.
 check 0 "git commit -m \"subject${NL}${NL}stop using --no-verify and -n${NL}and .env\""
 
+# The --no-verify refusal points at the wrapper that solves the slow-hook drop (#439).
+out="$(printf '%s' 'git push --no-verify origin x' \
+  | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
+  | "$GUARD" 2>&1 >/dev/null)"
+case "$out" in
+  *bin/git-push.sh*) : ;;
+  *) echo "FAIL: the --no-verify refusal does not name bin/git-push.sh: $out"; echo x >> "$FAIL_MARKER" ;;
+esac
+
 # Should ALLOW — flag/path tokens that appear only inside a -m MESSAGE body.
 check 0 'git commit -m "fix: load .env before init"'
 check 0 'git commit -am "chore: add .env to gitignore"'

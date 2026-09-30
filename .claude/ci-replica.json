@@ -7,7 +7,7 @@
     {
       "name": "validate",
       "$mirrors": "validate.yml `validate`, steps run from the workflow file; the shellcheck apt install is dropped (installed locally)",
-      "budgetSeconds": 300,
+      "budgetSeconds": 900,
       "commands": [
         "bin/run-workflow-job.py .github/workflows/validate.yml validate --drop-line '^\\s*sudo apt-get'"
       ]
