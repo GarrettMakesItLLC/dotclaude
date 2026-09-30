@@ -125,7 +125,7 @@ if [ -n "${GIT_GUARD_HOOK_PROVEN_KILLED:-}" ]; then
     echo "   (exit 137 / dmesg 'Killed process'), not when it found a real problem." >&2
   fi
 elif printf '%s' "$scrubbed" | grep -Eq -- '--no-verify'; then
-  block "git --no-verify is forbidden. Fix the failing hook (gitleaks/lint/typecheck) and commit normally — then make a NEW commit. If the hook was OOM-killed by unrelated swarm contention (exit 137, or 'dmesg | grep -i \"killed process\"' names it) rather than finding a real problem, set GIT_GUARD_HOOK_PROVEN_KILLED=1 for this one command."
+  block "git --no-verify is forbidden. Fix the failing hook (gitleaks/lint/typecheck) and commit normally — then make a NEW commit. If the push's slow pre-push hook is what keeps dropping the connection (exit 141, ref unmoved), use ~/dotclaude/bin/git-push.sh: it runs the hook first, then pushes with the connection open only for the transfer, and verifies the ref landed. If the hook was OOM-killed by unrelated swarm contention (exit 137, or 'dmesg | grep -i \"killed process\"' names it) rather than finding a real problem, set GIT_GUARD_HOOK_PROVEN_KILLED=1 for this one command."
 fi
 if printf '%s' "$scrubbed" | grep -Eiq -- '-c[[:space:]=]*core\.hookspath'; then
   block "git -c core.hooksPath=... disables hooks (same effect as --no-verify). Forbidden — fix the hook and retry."
