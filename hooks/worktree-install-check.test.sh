@@ -86,6 +86,19 @@ rm -rf "$base/main/node_modules"
 expect quiet "$base/wt" "main uninstalled"
 rm -rf "$base"
 
+# --- a manifest repo: install strategy names dotclaude's shared script --------
+base="$(make_repo)"
+rm -f "$base/main/bin/setup-worktree.sh"
+mkdir -p "$base/main/.claude"
+echo '{ "worktree": { "strategy": "install" } }' > "$base/main/.claude/repo.json"
+out="$(run_in "$base/wt")"
+grep -q -- ".claude/bin/setup-worktree.sh $base/wt" <<<"$out" \
+  || { echo "FAIL(manifest install): should name the shared script, got: $out"; fail=1; }
+# ... and a mirror-strategy repo resolves upward by design: silent.
+echo '{ "worktree": { "strategy": "mirror" } }' > "$base/main/.claude/repo.json"
+expect quiet "$base/wt" "manifest mirror"
+rm -rf "$base"
+
 # --- not a git repo at all --------------------------------------------------
 outside="$(mktemp -d)"
 expect quiet "$outside" "outside a repo"
