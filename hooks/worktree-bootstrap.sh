@@ -7,13 +7,18 @@
 # missing environment instead of on real code. This hook primes it.
 #
 # Fires after every Bash call, cheaply no-ops unless the command was a
-# `git worktree add`, and on a match runs the repo's `bin/setup-worktree.sh`
-# against the new worktree IF that script exists, DETACHED (#408) — this is a
-# PostToolUse hook with its own time budget, and the script can queue for
-# minutes behind a check lock on a busy box, so it never runs inline. The
-# trigger is repo-agnostic; the priming logic is per-repo and lives in that
-# script. No script -> no-op, so this hook is inert in every repo that hasn't
-# opted in.
+# `git worktree add`, and on a match primes the new worktree DETACHED (#408) —
+# this is a PostToolUse hook with its own time budget, and priming can queue for
+# minutes behind a check lock on a busy box, so it never runs inline.
+#
+# Which script primes it:
+#   - a repo with a `.claude/repo.json` manifest (docs/repo-manifest.md) ->
+#     dotclaude's shared `bin/setup-worktree.sh`, driven by that manifest;
+#   - otherwise the repo's own `bin/setup-worktree.sh`, if it has one;
+#   - neither -> no-op, so this hook is inert in a repo that hasn't opted in.
+#
+# The hook's message reaches the agent as `additionalContext` JSON on stdout: a
+# PostToolUse hook's stderr is not surfaced on exit 0.
 #
 # Fail-open by design: no python3, unparseable input, no match, or any error
 # exits 0 and stays silent. A bootstrap hook that blocks a shell is far worse
@@ -26,7 +31,7 @@ input="$(cat)"
 # Need python3 to parse the payload; without it, fail open.
 command -v python3 >/dev/null 2>&1 || exit 0
 
-# Pull the command string out of the PostToolUse payload.
+# Pull the command string and the shell's cwd out of the PostToolUse payload.
 command_str="$(printf '%s' "$input" | python3 -c '
 import json, sys
 try:
@@ -34,6 +39,13 @@ try:
 except Exception:
     print("")
 ' 2>/dev/null)" || exit 0
+payload_cwd="$(printf '%s' "$input" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("cwd", "") or "")
+except Exception:
+    print("")
+' 2>/dev/null)" || payload_cwd=""
 
 # Only care about `git worktree add`. Anything else: silent no-op.
 #
@@ -81,11 +93,13 @@ for t in rest:
 
 [ -z "$target" ] && exit 0
 
-# Resolve relative to the project dir the hook ran in.
+# Resolve a relative target against the SHELL's cwd from the payload, not the
+# project dir: an agent inside `.worktrees/a` that creates `.worktrees/b` would
+# otherwise resolve to `.worktrees/a/.worktrees/b`, find nothing, and give up.
 project_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
 case "$target" in
   /*) ;;
-  *) target="$project_dir/$target" ;;
+  *) target="${payload_cwd:-$project_dir}/$target" ;;
 esac
 [ -d "$target" ] || exit 0
 
@@ -111,7 +125,16 @@ else
 fi
 [ -d "$owner_repo" ] || exit 0
 
-script="$owner_repo/bin/setup-worktree.sh"
+# A manifest opts the repo into dotclaude's shared script. The worktree's own
+# copy is read first — it is tracked, so it is the branch's — then the main
+# checkout's.
+self_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+shared_script="$self_dir/../bin/setup-worktree.sh"
+if { [ -f "$target/.claude/repo.json" ] || [ -f "$owner_repo/.claude/repo.json" ]; } && [ -x "$shared_script" ]; then
+  script="$(cd "$(dirname "$shared_script")" && pwd)/setup-worktree.sh"
+else
+  script="$owner_repo/bin/setup-worktree.sh"
+fi
 [ -x "$script" ] || exit 0
 
 # Run it DETACHED (#408). This hook fires as a PostToolUse hook, which has a
@@ -148,7 +171,10 @@ rm -f "$rc_file" 2>/dev/null || true
     "$script" "$target" "$log" "$rc_file" >/dev/null 2>&1 &
 )
 
-echo "→ dotclaude worktree-bootstrap: priming $target in the background — this hook's own time budget can no longer kill it partway." >&2
-echo "  Log: $log" >&2
-echo "  Done when: cat \"$rc_file\" exists and reads 0. Until then, do not trust a typecheck, lint or test result from that worktree." >&2
+python3 -c '
+import json, sys
+print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": sys.argv[1]}}))
+' "dotclaude worktree-bootstrap: priming $target in the background with $script.
+Log: $log
+Done when: $rc_file exists and reads 0. Until then, do not trust a typecheck, lint or test result from that worktree." 2>/dev/null || true
 exit 0

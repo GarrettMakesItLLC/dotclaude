@@ -274,6 +274,36 @@ git -C "$discard_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty 
   check_discard_env 0 1 'git checkout -- tracked.txt'
   check_discard_env 2 '' 'git checkout -- tracked.txt'
 
+  # The `--`-less forms git treats as path restores are blocked too: git is
+  # asked whether the argument resolves to a commit.
+  check 2 'git checkout tracked.txt'
+  check 2 'git checkout .'
+  check 2 'GIT_GUARD_ALLOW_DISCARD=0 git checkout tracked.txt'
+  check 0 'GIT_GUARD_ALLOW_DISCARD=1 git checkout -- tracked.txt'
+
+  # The tree the discard LANDS in is the one judged: `git -C` and a leading
+  # `cd` both name it, whatever the session cwd is.
+  here="$PWD"
+  ( cd / && check 2 "git -C $here checkout -- tracked.txt" )
+  ( cd / && check 2 "cd $here && git checkout -- tracked.txt" )
+  ( cd / && check 0 "git -C $here checkout -- untouched-elsewhere.txt" )
+
+  # A path in a loop variable is expanded from the loop's word list.
+  check 2 'for f in tracked.txt; do git checkout -- "$f"; done'
+  check 2 'git checkout -- "$SOME_UNKNOWN_VAR"'
+
+  # A staged-only change survives a restore from the index, not a reset from
+  # the commit you are on. Untracked files are never at risk.
+  git add tracked.txt
+  check 0 'git checkout -- tracked.txt'
+  check 0 'git restore tracked.txt'
+  check 2 'git checkout HEAD -- tracked.txt'
+  check 2 'git restore --staged --worktree tracked.txt'
+  git reset -q tracked.txt
+  echo new > untracked.txt
+  check 0 'git restore untracked.txt'
+  rm -f untracked.txt
+
   # A CLEAN path is never blocked.
   git checkout -q -- tracked.txt
   check 0 'git checkout -- tracked.txt'

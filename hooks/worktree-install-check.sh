@@ -32,9 +32,23 @@ here="$(git rev-parse --show-toplevel 2>/dev/null)" || exit_quiet
 owner="$(dirname "$common")"
 [ -d "$owner" ] || exit_quiet
 
-# Only repos that opt into priming at all. A repo with no setup script has no
-# expectation this hook can check.
-[ -x "$owner/bin/setup-worktree.sh" ] || exit_quiet
+# Only repos that opt into priming at all: a `.claude/repo.json` manifest
+# (primed by dotclaude's shared bin/setup-worktree.sh) or the repo's own
+# bin/setup-worktree.sh. A repo with neither has no expectation to check. A
+# manifest repo on the `mirror` strategy resolves upward into the main
+# checkout BY DESIGN, so an empty node_modules there is correct, not a gap —
+# `setup-worktree.sh --check` is that strategy's check.
+setup_cmd=""
+manifest="$here/.claude/repo.json"
+[ -f "$manifest" ] || manifest="$owner/.claude/repo.json"
+if [ -f "$manifest" ] && command -v python3 >/dev/null 2>&1; then
+  strategy="$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get("worktree") or {}).get("strategy") or "install")' "$manifest" 2>/dev/null)"
+  [ "$strategy" = mirror ] && exit_quiet
+  setup_cmd="$HOME/.claude/bin/setup-worktree.sh"
+elif [ -x "$owner/bin/setup-worktree.sh" ]; then
+  setup_cmd="$owner/bin/setup-worktree.sh"
+fi
+[ -n "$setup_cmd" ] || exit_quiet
 
 # Top-level packages, ignoring npm's own dot-directories (`.package-lock.json`,
 # `.vite-temp`, `.bin`) — those are exactly what an empty-but-not-absent
@@ -63,7 +77,7 @@ MSG="⚠ This worktree has no node_modules, but the main checkout does ($owner_n
 Node and npx will resolve UPWARD past this worktree and bind to the main
 checkout's install, so commands run — against another checkout's dependencies.
 A typecheck, lint or test result from here is not about this tree until the
-install exists. Run: $owner/bin/setup-worktree.sh $here"
+install exists. Run: $setup_cmd $here"
 
 WORKTREE_INSTALL_MSG="$MSG" python3 -c '
 import json, os

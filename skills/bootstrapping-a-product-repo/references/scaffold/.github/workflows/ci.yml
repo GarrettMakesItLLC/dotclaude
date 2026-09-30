@@ -207,8 +207,9 @@ jobs:
   # reasoning as dotrepo-sync.sh (hook) + link-doctor.sh (verify) in
   # dotclaude. graphify-out/ itself is gitignored (rules/context-tools.md),
   # so a fresh checkout never has it; the opt-in signal is the committed
-  # `.claude/skills/graphify/` directory that `graphify install --project`
-  # writes. Not part of `ci-success` — this never gates a PR, only publishes
+  # `graphify hook-guard` PreToolUse hook in `.claude/settings.json` that
+  # `graphify claude install` writes (the skill itself is user-scope, from
+  # dotclaude). Not part of `ci-success` — this never gates a PR, only publishes
   # a snapshot after merge, and is a true no-op (steps skipped, not failed)
   # on a repo that hasn't opted in.
   graphify:
@@ -222,7 +223,7 @@ jobs:
       - name: Check Graphify opt-in
         id: graphify-check
         run: |
-          if [ -d .claude/skills/graphify ]; then
+          if grep -qs 'graphify hook-guard' .claude/settings.json; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"

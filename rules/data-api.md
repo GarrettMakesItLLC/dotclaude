@@ -35,10 +35,8 @@ paths:
 
 ## Migrations & data operations
 
-- **Expand-then-contract.** Migrations run pre-deploy against the *old* server, so a migration must never write data the currently-deployed client can't read. DDL in the migration (additive / nullable / metadata-only); the data change in a backfill run after the new code is live; the contracting migration (drop the old column) a deploy later.
-- **Forward-fix only** — Prisma has no down-migrations. Snapshot the DB before any destructive migration.
-- **A fix to a data invariant ships a backfill for the rows already violating it.** A schema/logic fix that strands bad rows is a half-fix.
-- **Backfills / one-off scripts:** dry-run by default, `--apply` to write; idempotent and re-runnable; kept in `scripts/backfill/`.
+Migration authoring, the pre-deploy (expand-then-contract) rules, applying DDL and the backfill contract: `rules/prisma.md`. Staging seeds: `rules/staging-seed.md`.
+
 - **Guard scripts that can reach prod.** A local reset/seed/backfill gets a `guard-not-production` check that refuses a production `DATABASE_URL`; export prod DB URLs **namespaced** (e.g. `PROD_DATABASE_URL`) so a bare `DATABASE_URL` never silently pins a script to prod.
 
 ## Feature flags & kill switches

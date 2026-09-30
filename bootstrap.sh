@@ -59,6 +59,7 @@ SHARED_SKILLS=(
   "avoiding-ai-slop"            # strip AI writing tells from prose (docs, PRs, comments, drafted content)
   "task-observer"               # meta-skill: watches sessions for skill-improvement opportunities, logs them
   "operating-a-fleet"           # multi-machine roles, the integrator lease, batching, degraded-mode CI replica
+  "agent-credentials"           # what an agent shell holds in a product repo, how Railway/Vercel values are fetched
 )
 # Third-party skills that ship as a plain repo with no plugin marketplace, so
 # they can't go in settings.json's enabledPlugins. `<dir-name>=<owner/repo>`.
@@ -211,6 +212,16 @@ doctor() {
       && echo "    ✓ $cmd" \
       || echo "    · $cmd — absent (gh: fleet tools; jq: bin/fleet-merge.sh, apt install jq; node/npm: github MCP build; rsync: bin/kb-sync.sh)"
   done
+  # The graphify skill is generated from the CLI (bin/graphify-skill.sh), so a
+  # CLI upgraded without a re-bootstrap leaves the skill describing another
+  # version. Soft, like the tools above.
+  if command -v graphify >/dev/null 2>&1; then
+    if "$REPO_DIR/bin/graphify-skill.sh" --check >/dev/null 2>&1; then
+      echo "    ✓ skills/graphify (matches the graphify CLI)"
+    else
+      echo "    · skills/graphify — missing or older than the CLI; run $REPO_DIR/bin/graphify-skill.sh"
+    fi
+  fi
   if command -v gh >/dev/null 2>&1 && ! gh auth status >/dev/null 2>&1; then
     echo "    · gh is installed but not authenticated — \`gh auth login\`"
   fi
@@ -423,9 +434,13 @@ fi
 # --------------------------------------------------------------------------
 if command -v uv >/dev/null 2>&1; then
   echo
-  echo "→ Installing Graphify (local knowledge-graph CLI)"
+  echo "→ Installing Graphify (local knowledge-graph CLI) and its skill"
   # PyPI package is graphifyy (double-y); the command it installs is graphify.
-  uv tool install graphifyy
+  # --upgrade so every bootstrap refreshes it, and the skill is regenerated from
+  # the CLI right after, so the two never disagree about the version.
+  uv tool install --upgrade graphifyy
+  "$REPO_DIR/bin/graphify-skill.sh" \
+    || echo "  WARNING: graphify skill not installed — run $REPO_DIR/bin/graphify-skill.sh" >&2
 
   echo
   echo "→ Installing Serena (LSP-backed symbol navigation)"
