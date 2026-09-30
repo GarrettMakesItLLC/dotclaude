@@ -84,6 +84,12 @@ gmi_line="$(grep -n 'gmi.env' "$HOME/.bashrc" | tail -1 | cut -d: -f1)"
 [ -n "$src_line" ] && [ "$src_line" -lt "$gmi_line" ] && ok "sourced from ~/.bashrc, above gmi.env" || bad "bashrc: $(cat "$HOME/.bashrc")"
 run
 [ "$(grep -c 'demo/ops.env' "$HOME/.bashrc")" = 1 ] && ok "the source line is added once" || bad "duplicated source line"
+cp "$HOME/.bashrc" "$TMP/bashrc.keep"
+# shellcheck disable=SC2016 # the literal line a repo's own older script wrote
+printf '[ -f "$HOME/.demo/ops.env" ] && . "$HOME/.demo/ops.env"\n[ -f "$HOME/.config/secrets/gmi.env" ] && . "$HOME/.config/secrets/gmi.env"\n' >"$HOME/.bashrc"
+run
+[ "$(grep -c 'demo/ops.env' "$HOME/.bashrc")" = 1 ] && ok "a \$HOME-spelled source line counts as present" || bad "duplicated: $(cat "$HOME/.bashrc")"
+cp "$TMP/bashrc.keep" "$HOME/.bashrc"
 
 echo "ops-pull: a file secret that does not decode to what it must contain is deleted"
 bad_pem="$(printf 'not a key' | base64 -w0)"
