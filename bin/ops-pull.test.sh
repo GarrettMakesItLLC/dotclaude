@@ -76,6 +76,11 @@ grep -q '^export MONITOR_KEY="m-123"$' "$OPS" && ok "OPS_ prefix stripped, expor
 ! grep -q 'STALE' "$OPS" && grep -q 'OPS_STALE' <<<"$OUT" && ok "[SENSITIVE] dropped and named" || bad "sensitive: $OUT"
 ! grep -q '^export BUNDLE_B64\|^export KEY_P8_B64' "$OPS" && grep -q '^unset BUNDLE_B64 KEY_P8_B64$' "$OPS" && ok "file secrets never exported, and unset" || bad "file secrets: $(cat "$OPS")"
 grep -q '^unset DM_RAILWAY_TOKEN$' "$OPS" && ok "unsetAlways emitted" || bad "unsetAlways missing"
+# Sourcing applies lines in order, so an export below an unset re-sets what it cleared.
+last_export="$(grep -n '^export ' "$OPS" | tail -1 | cut -d: -f1)"
+first_unset="$(grep -n '^unset ' "$OPS" | head -1 | cut -d: -f1)"
+[ -n "$last_export" ] && [ -n "$first_unset" ] && [ "$first_unset" -gt "$last_export" ] \
+  && ok "every unset comes after the last export" || bad "unset at line ${first_unset:-none}, last export at ${last_export:-none}"
 KEYF="$HOME/.demo/signing/AuthKey_ABC123.p8"
 [ -f "$KEYF" ] && grep -q 'BEGIN PRIVATE KEY' "$KEYF" && [ "$(stat -c %a "$KEYF")" = 600 ] && ok "file secret decoded to its {VAR} path, mode 600" || bad "key file: $(ls -la "$HOME/.demo/signing" 2>&1)"
 [ "$(stat -c %a "$OPS")" = 600 ] && ok "ops.env is mode 600" || bad "mode $(stat -c %a "$OPS")"
