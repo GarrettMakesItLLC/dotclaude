@@ -167,6 +167,20 @@ check 0 Bash command 'export FOO=bar'
 check 0 Bash command 'bash bin/staging-db-url.test.sh'
 check 0 Bash command "$(printf "cat > notes.md <<'EOF'\nrun printenv to see everything\nEOF")"
 
+# --- Bash: a search PATTERN that ends in .env is not a secrets path (#459). ---
+check 0 Bash command 'grep -n "process.env" apps/server/src/jobs/trend-sync.test.ts'
+check 0 Bash command 'grep process.env src/config.ts'
+check 0 Bash command "rg '\\.env' src/"
+check 0 Bash command 'rg -n process.env src/'
+check 0 Bash command 'grep DATABASE_URL README.md'
+check 0 Bash command 'grep -rn --include=*.ts process.env apps/'
+# ...but a real secrets target still refuses, whatever the pattern is.
+check 2 Bash command 'grep process.env ~/.redthread/agent.env'
+check 2 Bash command "rg '\\.env' /repo/.env"
+check 2 Bash command 'grep -e process.env .env.local'
+check 2 Bash command 'grep TOKEN ~/.config/secrets/gmi.env'
+check 2 Bash command 'grep -n process.env src/a.ts .env'
+
 if [ -s "$FAIL_MARKER" ]; then
   echo "FAILED: $(wc -l < "$FAIL_MARKER") case(s)."
   exit 1
