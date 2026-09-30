@@ -19,9 +19,11 @@
 #      migration is ALREADY future-dated, the ceiling moves to just past it, so
 #      rules 2 and 4 stay jointly satisfiable.
 #
-# Editing SQL inside an EXISTING migration directory is blocked: every database
-# that applied it holds a sha256 of its bytes in `_prisma_migrations`, and an
-# edit (a comment included) puts the chain out of step with every ledger.
+# Editing SQL inside an EXISTING migration directory is blocked once a shared
+# branch (origin's default, `main` or `dev`) carries it: every database that
+# applied it holds a sha256 of its bytes in `_prisma_migrations`, and an edit
+# (a comment included) puts the chain out of step with every ledger. A
+# migration only this branch has is still free to edit.
 # `migrate deploy` does not notice; a ledger comparison or a replay does,
 # permanently. Write a new migration forward instead.
 #
@@ -72,6 +74,18 @@ if [ -d "$migrations_dir/$dir_name" ]; then
   # A brand-new .sql inside a dir created moments ago is fine; a modification
   # to one that already exists on disk is the ledger-drift risk.
   [ -f "$file_path" ] || exit 0
+  # ...unless no shared branch has it yet: a migration authored on this branch
+  # and never merged has been applied to no shared database, so there is no
+  # ledger to drift from.
+  repo_top="$(git -C "$migrations_dir" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$repo_top" ]; then
+    rel_path="${file_path#"$repo_top"/}"
+    on_shared=0
+    for ref in origin/HEAD origin/main origin/dev; do
+      if git -C "$repo_top" cat-file -e "$ref:$rel_path" 2>/dev/null; then on_shared=1; break; fi
+    done
+    [ "$on_shared" = 1 ] || exit 0
+  fi
   cat >&2 <<EOF
 ⛔ dotclaude migration-guard: $dir_name/ already exists and its SQL is checksum-locked.
 
