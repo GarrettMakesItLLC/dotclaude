@@ -723,6 +723,16 @@ available_mb() {
     /proc/meminfo 2>/dev/null || echo -1
 }
 
+# The background single-slot waiter, if one is queued (see the admission loop).
+queue_pid=""
+drop_queue() {
+  [ -n "$queue_pid" ] || return 0
+  kill "$queue_pid" 2>/dev/null || true
+  wait "$queue_pid" 2>/dev/null || true
+  queue_pid=""
+}
+trap 'drop_queue; reap_stamp' EXIT
+
 waited=0
 started_at="$(now)"
 next_report="$report_secs"
@@ -783,15 +793,37 @@ while :; do
   # CHECK_TIMEOUT and be told "nothing was run" — which is the one outcome
   # that leaves it with no verification signal at all. Blocking hands the
   # ordering to the kernel, which does queue, so every waiter is admitted in
-  # turn. Bounded by the heartbeat interval so the loop still re-reads load,
-  # memory and the deadline.
+  # turn.
+  #
+  # The place in that queue has to survive the heartbeat. A `flock -w` that
+  # times out leaves the queue, and a newcomer arriving while the loop re-reads
+  # load and memory is queued ahead of a waiter that has been there for minutes.
+  # So ONE blocking `flock` runs in the background for the whole wait, on the
+  # open file description this shell also holds: when it is granted, the lock
+  # belongs to that description and stays held after the helper exits. The loop
+  # only watches it, so it still re-reads load, memory and the deadline.
   if [ "$admitted" -eq 1 ]; then
-    exec 9>"$lock_dir/$LOCK_NAME.1.lock"
-    if flock -w "$report_secs" 9; then
-      stamp "$lock_dir/$LOCK_NAME.1.info" "$@"
-      run_command "$@"
+    if [ -z "$queue_pid" ]; then
+      exec 9>"$lock_dir/$LOCK_NAME.1.lock"
+      flock 9 7>&- &
+      queue_pid=$!
+    fi
+    for _ in $(seq 1 "$report_secs"); do
+      kill -0 "$queue_pid" 2>/dev/null || break
+      sleep 1
+    done
+    if ! kill -0 "$queue_pid" 2>/dev/null; then
+      queue_status=0
+      wait "$queue_pid" || queue_status=$?
+      queue_pid=""
+      if [ "$queue_status" -eq 0 ]; then
+        stamp "$lock_dir/$LOCK_NAME.1.info" "$@"
+        run_command "$@"
+      fi
     fi
   else
+    # Admission widened (or memory is holding it at zero): leave the queue.
+    drop_queue
     for slot in $(seq 1 "$admitted"); do
       # Reopening fd 9 drops the previous candidate's lock, which is correct — we
       # only ever hold one, and only once flock succeeds.
@@ -840,5 +872,9 @@ $(readers "$admitted")
 $(readers "$admitted")"
     fi
   fi
-  sleep 2
+  # A single candidate already slept inside `flock -w`, queued in the kernel.
+  # Sleeping again OUTSIDE the queue hands a newcomer that window to jump ahead
+  # of a waiter that has been queued for minutes — the lottery the blocking
+  # wait exists to remove.
+  [ "$admitted" -eq 1 ] || sleep 2
 done
