@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Self-test for pr-base-guard.sh against a two-tier and a single-tier fixture
 # repo: a non-dev head into main is blocked (gh CLI and the github-rest MCP),
-# dev -> main, feature -> dev, another repo, and a single-tier repo pass.
+# dev -> main, release/* -> main, feature -> dev, another repo, and a single-tier repo pass.
 #   bash hooks/pr-base-guard.test.sh
 set -uo pipefail
 
@@ -40,6 +40,9 @@ check 2 "$TMP/two" "$(mcp_payload '{"title":"x","head":"feat/x","base":"main"}')
 check 2 "$TMP/two" "$(mcp_payload '{"title":"x","head":"feat/x","base":"main","repo":"Org/Two"}')"
 check 0 "$TMP/two" "$(bash_payload 'gh pr create --base main --head dev --title promote')"
 check 0 "$TMP/two" "$(mcp_payload '{"title":"x","head":"dev","base":"main"}')"
+check 0 "$TMP/two" "$(mcp_payload '{"title":"x","head":"release/2026-10-01-0439","base":"main"}')"
+check 0 "$TMP/two" "$(bash_payload 'gh pr create --base main --head release/2026-10-01-0439 --title promote')"
+check 2 "$TMP/two" "$(mcp_payload '{"title":"x","head":"feature/release","base":"main"}')"
 check 0 "$TMP/two" "$(bash_payload 'gh pr create --base dev --title x')"
 check 0 "$TMP/two" "$(mcp_payload '{"title":"x","head":"feat/x","base":"main","repo":"Org/Other"}')"
 check 0 "$TMP/two" "$(bash_payload 'gh pr list --base main')"

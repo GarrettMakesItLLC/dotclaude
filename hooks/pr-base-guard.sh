@@ -2,7 +2,8 @@
 # dotclaude pr-base-guard — PreToolUse hook (matcher: Bash|mcp__github-rest__pr_create).
 #
 # In a two-tier repo (one with a `dev` branch on origin), feature work targets
-# `dev` and the only PR into `main` is the `dev -> main` promotion. A PR opened
+# `dev` and the only PR into `main` is a promotion: `dev -> main`, or a
+# `release/*` branch cut from `dev` (ci's release-cut.yml cuts these). A PR opened
 # against `main` from anything else is rejected by the repo's CI base check —
 # but only after a full CI run, which is the cost this avoids.
 #
@@ -74,10 +75,10 @@ if not git("rev-parse", "--verify", "--quiet", "refs/remotes/origin/dev"):
 if not head:
     head = git("rev-parse", "--abbrev-ref", "HEAD")
 head = (head or "").split(":")[-1]
-if head and head != "dev":
+if head and head != "dev" and not head.startswith("release/"):
     print(head)
 ' 2>/dev/null)" || exit 0
 
 [ -n "$verdict" ] || exit 0
-echo "⛔ dotclaude pr-base-guard: a PR from '$verdict' into 'main'. In this two-tier repo the only PR into 'main' is 'dev -> main'; feature work targets 'dev' (--base dev). The repo's CI base check rejects any other base, after a full run." >&2
+echo "⛔ dotclaude pr-base-guard: a PR from '$verdict' into 'main'. In this two-tier repo the only PR into 'main' is a promotion ('dev' or 'release/*' -> main); feature work targets 'dev' (--base dev). The repo's CI base check rejects any other base, after a full run." >&2
 exit 2
