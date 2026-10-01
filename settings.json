@@ -78,6 +78,10 @@
           },
           {
             "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/heredoc-guard.sh"
+          },
+          {
+            "type": "command",
             "command": "\"$HOME\"/.claude/hooks/db-push-guard.sh"
           }
         ]
