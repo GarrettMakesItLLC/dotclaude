@@ -52,7 +52,7 @@ if [ "$put" = 1 ]; then
 fi
 case "$path" in
   */issues/comments/*) jq -r .body "$STUB_DIR/comment.json" ;;
-  */pulls/*) printf '{"head":{"sha":"%s"},"base":{"ref":"dev"},"state":"open"}\n' "$STUB_HEAD" ;;
+  */pulls/*) printf '{"head":{"sha":"%s","ref":"%s"},"base":{"ref":"%s"},"state":"open"}\n' "$STUB_HEAD" "${STUB_HEAD_REF:-feat/x}" "${STUB_BASE_REF:-dev}" ;;
   */contents/*) cat "$STUB_DIR/manifest" ;;
   */rules/branches/*) echo '[{"type":"merge_queue","ruleset_source_type":"Repository","ruleset_id":11},{"type":"required_status_checks","ruleset_source_type":"Organization","ruleset_id":22},{"type":"deletion","ruleset_source_type":"Repository","ruleset_id":33}]' ;;
   */rulesets/*) id="$(basename "$path")"
@@ -112,6 +112,47 @@ OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$H
 OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" STUB_ORG_KEYRING_ONLY=1 \
   "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" --dry-run 2>&1)"; RC=$?
 [ "$RC" = 0 ] && ok "no ambient token still works" || bad "rc=$RC $OUT"
+
+echo "fleet-merge: the merge method defaults to merge for a promotion, squash otherwise, and --method wins"
+method_of() { grep -o 'merge_method=[a-z]*' "$TMP/calls" | tail -1; }
+runref() {  # runref <head-ref> <base-ref> [args...]
+  local h="$1" b="$2"; shift 2
+  : > "$TMP/calls"; rm -f "$TMP"/state-*.json
+  OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" STUB_HEAD_REF="$h" STUB_BASE_REF="$b" \
+    "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" "$@" 2>&1)"; RC=$?
+}
+verdict '.'
+for c in 'dev main merge' 'release/1.2 main merge' 'dev release/1.2 merge' 'feat/x dev squash' 'feat/x main squash' 'wave/1 dev squash'; do
+  set -- $c; runref "$1" "$2"
+  [ "$RC" = 0 ] && [ "$(method_of)" = "merge_method=$3" ] && ok "$1 -> $2 defaults to $3" || bad "$1 -> $2: rc=$RC $(method_of) $OUT"
+done
+runref dev main --method squash
+[ "$(method_of)" = merge_method=squash ] && ok "explicit --method squash overrides a promotion default" || bad "override: $(method_of)"
+runref feat/x dev --method merge
+[ "$(method_of)" = merge_method=merge ] && ok "explicit --method merge overrides the squash default" || bad "override: $(method_of)"
+runref feat/x dev --method bogus
+[ "$RC" = 2 ] && [ "$(writes)" = 0 ] && ok "an unknown --method is a usage error with no write" || bad "bogus method: rc=$RC"
+
+echo "fleet-merge: the token source is named, and an unreachable org ruleset names the scope"
+verdict '.'; : > "$TMP/calls"; rm -f "$TMP"/state-*.json
+OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" STUB_ORG_KEYRING_ONLY=1 \
+  BASH_ENV=/dev/null GH_TOKEN=ambient FLEET_MERGE_GH_TOKEN=explicit "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" 2>&1)"; RC=$?
+grep -q 'token source: FLEET_MERGE_GH_TOKEN' <<<"$OUT" && ok "FLEET_MERGE_GH_TOKEN is preferred and named" || bad "source: $OUT"
+[ "$RC" = 0 ] && ok "and the org call still recovers on the keyring credential" || bad "rc=$RC $OUT"
+OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" BASH_ENV=/dev/null GH_TOKEN=ambient "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" --dry-run 2>&1)"
+grep -q 'token source: ambient GH_TOKEN' <<<"$OUT" && ok "an ambient token is named as such" || bad "ambient source: $OUT"
+mv "$TMP/bin/gh" "$TMP/bin/gh-real"
+cat > "$TMP/bin/gh" <<'S404'
+#!/usr/bin/env bash
+case "$*" in *orgs/*) echo '{"message":"Not Found"}'; exit 1 ;; esac
+exec "$STUB_REAL_GH" "$@"
+S404
+chmod +x "$TMP/bin/gh"; export STUB_REAL_GH="$TMP/bin/gh-real"
+: > "$TMP/calls"; rm -f "$TMP"/state-*.json
+OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" BASH_ENV=/dev/null GH_TOKEN=ambient "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" 2>&1)"; RC=$?
+grep -q 'lacks admin:org' <<<"$OUT" && grep -q 'FLEET_MERGE_GH_TOKEN' <<<"$OUT" && ok "a 404 on the org ruleset names the token-scope cause" || bad "404 message: $OUT"
+[ "$(writes)" = 0 ] && ok "and nothing was written" || bad "wrote despite unreachable org ruleset: $(writes)"
+mv "$TMP/bin/gh-real" "$TMP/bin/gh"; unset STUB_REAL_GH
 
 echo "fleet-merge: the verdict is published before the first lift, and a failed publish writes nothing"
 verdict '.'; run

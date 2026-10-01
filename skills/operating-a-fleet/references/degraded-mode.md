@@ -41,7 +41,14 @@ once, merged once.
    `${XDG_STATE_HOME:-~/.local/state}/fleet-merge/<owner>-<repo>/` (before-state, pid, PR, time), because
    a SIGKILL skips the restore trap. The next `fleet-merge.sh` restores any record whose pid is dead
    before it does anything else; `fleet-merge.sh --restore-pending [--repo OWNER/NAME]` does it
-   explicitly, and the SessionStart banner names any lift still pending. A job carried over from an earlier SHA is
+   explicitly, and the SessionStart banner names any lift still pending.
+   The merge method defaults to `merge` for a promotion (head `dev`/`develop`/`staging`/`release/*`
+   into `main`/`master`/`production`/`release/*`) and `squash` otherwise, because a squash onto `main`
+   shares no history with `dev` and the next promotion conflicts on every file both touched;
+   `--method` overrides. Export the credential that has `admin:org` as `FLEET_MERGE_GH_TOKEN`, not
+   `GH_TOKEN=`: a profile or `BASH_ENV` can re-export `GH_TOKEN` under the script. The script prints
+   which token source it used, and a failed org-ruleset call names the missing scope (GitHub answers
+   404, not 403, for an org ruleset the token cannot see). A job carried over from an earlier SHA is
    not a verdict. Re-run the full suite on the final SHA.
 
 8. **Reconcile.** `fleet-reconcile.sh --pr <N> --apply`, then release the lease. The wave is not
