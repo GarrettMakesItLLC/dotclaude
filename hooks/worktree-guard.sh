@@ -79,9 +79,11 @@
 # rather than resolved: the agent must spell an absolute path or lead with
 # `cd <absolute-path> &&`, which is verifiable. A cwd in a MAIN tree still
 # resolves normally — that path blocks anyway, and the message is more useful.
-# Claude Code strips that leading `cd` before the hook runs when it names the
-# session's own cwd, so the guard reads the command as written back from the
-# transcript to tell that case from a real drift (#466, #468).
+# Claude Code deletes a leading `cd <dir> &&` before any hook runs (and before
+# it reaches the transcript) when <dir> is already the session's cwd, so from
+# inside the tree a `cd` into that same tree arrives as no `cd` at all and is
+# indistinguishable from a drift. The block message therefore steers to an
+# absolute write-target, the one spelling that survives (#466, #468).
 #
 # NOT THE CAUSE OF NetWorthy#223: a Bash command merely referencing a
 # credential-shaped env var name (`export DATABASE_URL=$NW_DATABASE_URL`) was
@@ -733,64 +735,6 @@ if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ]; then
   fi
 fi
 
-# Claude Code drops a leading `cd <dir> &&` from a Bash command before any hook
-# sees it when <dir> is already the session's cwd (#466, #468). The command the
-# agent wrote named its tree, but `tool_input.command` arrives with the `cd`
-# gone and the cwd a linked worktree, which is exactly the shape blocked above.
-# The transcript keeps the command as written, so recover it by `tool_use_id`
-# and trust the cwd only when the two differ by exactly that one leading `cd`
-# into this very directory. Anything else (no transcript, no match, a `cd`
-# elsewhere, any other difference) leaves the cwd untrusted.
-cwd_entered=0
-if [ "$cwd_untrusted" = 1 ]; then
-  cwd_entered="$(INPUT_JSON="$input" HOOK_CWD="$(pwd -P)" python3 - <<'PYEOF' 2>/dev/null
-import json, os, re, shlex
-
-def main():
-    obj = json.loads(os.environ["INPUT_JSON"])
-    if obj.get("tool_name") != "Bash":
-        return 0
-    seen = (obj.get("tool_input") or {}).get("command") or ""
-    tid, tpath = obj.get("tool_use_id"), obj.get("transcript_path")
-    if not (seen and tid and tpath and os.path.isfile(tpath)):
-        return 0
-    with open(tpath, "rb") as f:
-        f.seek(max(0, os.path.getsize(f.name) - 4 * 1024 * 1024))
-        tail = f.read().decode("utf-8", "replace")
-    written = None
-    for line in reversed(tail.splitlines()):
-        if tid not in line:
-            continue
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-        for item in (rec.get("message") or {}).get("content") or []:
-            if isinstance(item, dict) and item.get("type") == "tool_use" and item.get("id") == tid:
-                written = (item.get("input") or {}).get("command")
-        if written is not None:
-            break
-    if not written or written == seen:
-        return 0
-    m = re.match(r"\s*cd\s+(\S+|'[^']*'|\"[^\"$`]*\")\s*(?:&&|;)\s*", written)
-    if not m or written[m.end():].strip() != seen.strip():
-        return 0
-    target = shlex.split(m.group(1))[0]
-    if target.startswith("~/"):
-        target = os.path.expanduser(target)
-    if not target.startswith("/") or any(c in target for c in "$`"):
-        return 0
-    return 1 if os.path.realpath(target) == os.environ["HOOK_CWD"] else 0
-
-try:
-    print(main())
-except Exception:
-    print(0)
-PYEOF
-)"
-  [ "$cwd_entered" = 1 ] || cwd_entered=0
-fi
-
 # Check one candidate path; echoes a block reason and returns 2 on a hit, 0
 # otherwise. Isolated in a function so Bash's multiple candidates can each be
 # checked without repeating the Edit/Write single-path logic.
@@ -811,7 +755,7 @@ check_one() {
       case "${file_path%%/*}" in
         *'$'* | *'`'*) return 0 ;;
       esac
-      if [ "$cwd_untrusted" = 1 ] && [ "$cwd_entered" != 1 ]; then
+      if [ "$cwd_untrusted" = 1 ]; then
         echo "⛔ dotclaude worktree-guard blocked this write." >&2
         # A `cd` the guard could not resolve — `cd $VAR`, `cd -`, `cd` bare —
         # is a different situation from no `cd` at all, and the generic advice
@@ -840,10 +784,12 @@ check_one() {
           echo "  command never entered. An agent's Bash cwd resets between calls and can" >&2
           echo "  point into a SIBLING agent's worktree, so a relative write is not" >&2
           echo "  attributable to any tree (see #166)." >&2
-          echo "Fix: name the tree explicitly — either an absolute write-target:" >&2
-          echo "    echo x > /abs/path/to/your/worktree/$file_path" >&2
-          echo "  or lead the command with a cd into it:" >&2
-          echo "    cd /abs/path/to/your/worktree && echo x > $file_path" >&2
+          echo "Fix: give the write an absolute target:" >&2
+          echo "    echo x > $(pwd -P)/$file_path" >&2
+          echo "  If you DID lead with \`cd $(pwd -P) &&\`, Claude Code deleted it before" >&2
+          echo "  this hook ran, because it names the cwd the session is already in —" >&2
+          echo "  so the \`cd\` form cannot work from inside the tree. Use the absolute" >&2
+          echo "  target (or the Edit/Write tool with an absolute path)." >&2
         fi
         echo "Policy: ~/dotclaude/CLAUDE.md (Worktree-first). Deliberate?" >&2
         echo "  Re-run with WORKTREE_GUARD_OFF=1 set, or ask the user to run it via ! prefix." >&2
