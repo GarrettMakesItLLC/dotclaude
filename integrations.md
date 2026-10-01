@@ -368,7 +368,7 @@ the worktree bootstrap after every `git worktree add`.
 | `bin/agent-env-build.sh` | builds `<stateDir>/agent.env`, sourced from `~/.bashrc` | `credentials` |
 | `bin/ops-pull.sh` | pulls the Vercel `OPS_*` channel into `<stateDir>/ops.env`, and named Vercel/Railway values into the unsourced `<stateDir>/cloud.env` | `ops`, `credentials.railway` |
 | `bin/setup-worktree.sh` | bootstraps a worktree (install or mirror strategy) | `worktree` |
-| `bin/with-check-lock.sh` | the per-repo semaphore for memory-heavy checks | `envPrefix` |
+| `bin/with-check-lock.sh` | the box-wide semaphore for memory-heavy checks, shared by every repo (`${XDG_CACHE_HOME:-~/.cache}/gmi-check-lock`) | `envPrefix` (knob aliases and drift marker only) |
 | `bin/doctor.sh` | "is this box set up for this repo?" | `doctor` |
 | `bin/staging-db-url.sh` | mints the staging Postgres URL from the Supabase Management PAT | `supabase` |
 
