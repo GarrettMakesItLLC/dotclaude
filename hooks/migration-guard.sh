@@ -19,6 +19,10 @@
 #      migration is ALREADY future-dated, the ceiling moves to just past it, so
 #      rules 2 and 4 stay jointly satisfiable.
 #
+# A new migration.sql written whole must also follow rules/prisma.md's lock
+# rules: `SET LOCAL lock_timeout` before a heavy lock on an existing table, and
+# `CREATE INDEX CONCURRENTLY` alone in its migration (bin/migration-lock-check.py).
+#
 # Editing SQL inside an EXISTING migration directory is blocked once a shared
 # branch (origin's default, `main` or `dev`) carries it: every database that
 # applied it holds a sha256 of its bytes in `_prisma_migrations`, and an edit
@@ -50,6 +54,30 @@ except Exception:
 
 [ -n "$file_path" ] || exit 0
 
+# A NEW migration.sql written whole (Write) is also checked against the lock
+# rules in rules/prisma.md — the same check a repo can run in CI, from
+# bin/migration-lock-check.py. Edits are not judged: an Edit carries a fragment,
+# not the file, and Prisma-generated SQL never passes through a tool call.
+lock_checker="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../bin/migration-lock-check.py"
+check_lock_rules() {
+  case "$file_path" in *.sql) ;; *) return 0 ;; esac
+  [ -f "$lock_checker" ] || return 0
+  local content findings rc
+  content="$(printf '%s' "$input" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+if d.get("tool_name") == "Write":
+    sys.stdout.write(d.get("tool_input", {}).get("content") or "")
+' 2>/dev/null)" || return 0
+  [ -n "$content" ] || return 0
+  findings="$(printf '%s' "$content" | python3 "$lock_checker" - 2>&1)"
+  rc=$?
+  [ "$rc" = 1 ] || return 0
+  echo "⛔ dotclaude migration-guard: this migration breaks a lock rule." >&2
+  printf '%s\n' "$findings" >&2
+  return 2
+}
+
 # Only care about paths under prisma/migrations/.
 case "$file_path" in
   */prisma/migrations/*) ;;
@@ -71,9 +99,13 @@ if [ -d "$migrations_dir/$dir_name" ]; then
     *.sql) ;;
     *) exit 0 ;;
   esac
-  # A brand-new .sql inside a dir created moments ago is fine; a modification
-  # to one that already exists on disk is the ledger-drift risk.
-  [ -f "$file_path" ] || exit 0
+  # A brand-new .sql inside a dir created moments ago is fine (once it passes
+  # the lock rules); a modification to one that already exists on disk is the
+  # ledger-drift risk.
+  if [ ! -f "$file_path" ]; then
+    check_lock_rules
+    exit $?
+  fi
   # ...unless no shared branch has it yet: a migration authored on this branch
   # and never merged has been applied to no shared database, so there is no
   # ledger to drift from.
@@ -206,4 +238,5 @@ EOF
     ;;
 esac
 
-exit 0
+check_lock_rules
+exit $?

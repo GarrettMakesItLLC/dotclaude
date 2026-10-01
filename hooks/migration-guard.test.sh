@@ -46,6 +46,27 @@ check 0 "$M/migration_lock.toml" Edit
 check 0 "$TMP/repo/prisma/schema.prisma" Edit
 check 0 "$TMP/repo/src/index.ts"
 
+# Lock rules on a NEW migration.sql written whole (#471).
+check_sql() {
+  local want="$1" path="$2" sql="$3" got
+  python3 -c 'import json,sys; print(json.dumps({"tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":sys.argv[2]}}))' "$path" "$sql" \
+    | "$GUARD" >/dev/null 2>&1
+  got=$?
+  [ "$got" = "$want" ] || { echo "FAIL: want $want got $got for SQL in $path: $sql"; fail=1; }
+}
+new="$M/${past}_lock_rules/migration.sql"
+check_sql 2 "$new" 'ALTER TABLE "User" ADD COLUMN "x" TEXT;'
+check_sql 0 "$new" "SET LOCAL lock_timeout = '5s';
+ALTER TABLE \"User\" ADD COLUMN \"x\" TEXT;"
+check_sql 0 "$new" 'CREATE TABLE "W" ("id" TEXT); CREATE INDEX "W_a_idx" ON "W"("a");'
+check_sql 0 "$new" 'CREATE INDEX CONCURRENTLY "U_a_idx" ON "User"("a");'
+check_sql 2 "$new" "SET LOCAL lock_timeout = '5s'; CREATE INDEX CONCURRENTLY \"U_a_idx\" ON \"User\"(\"a\");"
+# A new .sql inside a directory that already exists is judged the same way.
+check_sql 2 "$M/20260102093722_branch_only/extra.sql" 'DROP INDEX "User_a_idx";'
+# An Edit carries a fragment, not the file, so it is not judged.
+python3 -c 'import json,sys; print(json.dumps({"tool_name":"Edit","tool_input":{"file_path":sys.argv[1],"old_string":"a","new_string":"ALTER TABLE x ADD y int;"}}))' "$new" \
+  | "$GUARD" >/dev/null 2>&1 || { echo "FAIL: an Edit fragment was judged against the lock rules"; fail=1; }
+
 # The base already holds a future-dated migration: just after it is legal,
 # far past it is not.
 fut="$(date -u -d '+3 days' +%Y%m%d%H)3722"
