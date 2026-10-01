@@ -2,16 +2,29 @@
 #
 #   ~/.claude/bin/with-check-lock.sh [--writer|-w|--light|-l] [--no-drift] <command> [args…]
 #
-# Bound how many memory-heavy checks run at once across every worktree of a repo
-# on this box.
+# Bound how many memory-heavy checks run at once across every worktree of EVERY
+# repo on this box.
 #
-# PER-REPO NAMING. The repo's `.claude/repo.json` `envPrefix` (docs/repo-manifest.md)
-# names the lock files `<prefix>-check.*` (lowercased) and the drift marker
-# `<prefix>-verification-stale`, and every `CHECK_*` knob below is also read as
-# `<PREFIX>_CHECK_*`. So a repo that still carries its own copy of this wrapper
-# and one that calls this shared copy contend for the SAME slots while it
-# migrates. With no manifest the names are `check.*` and `verification-stale`.
-# `CHECK_*` wins over `<PREFIX>_CHECK_*` when both are set.
+# ONE BOX-WIDE SEMAPHORE. The lock files are `check.*` in one machine-scoped
+# directory, `${XDG_CACHE_HOME:-$HOME/.cache}/gmi-check-lock`, whatever repo the
+# caller is in. The RAM every check eats is the box's, so a semaphore per repo
+# bounds nothing: two repos each admitting their full slot count is the same OOM
+# pile-up the lock exists to prevent, just split across two lock sets.
+#
+# The repo's `.claude/repo.json` `envPrefix` (docs/repo-manifest.md) still names
+# the drift marker `<prefix>-verification-stale` (that marker is per worktree, see
+# `stale_marker_path`), and every `CHECK_*` knob below is also read as
+# `<PREFIX>_CHECK_*`. `CHECK_*` wins over `<PREFIX>_CHECK_*` when both are set.
+# With no manifest the marker is `verification-stale`.
+#
+# SLOTS ARE BOX-SCOPED. The count defaults to `default_slots()`, sized from this
+# machine's RAM and cores, so every repo computes the same number. A caller can
+# still ask for its own — `CHECK_SLOTS`, then `<PREFIX>_CHECK_SLOTS`, then the box
+# default — but the slots are the same numbered files for everyone: a caller asking
+# for N scans `check.1` … `check.N`. Two repos asking for different counts
+# therefore combine as the MAX of the two, never the sum: `RT_CHECK_SLOTS=2` and
+# `MB_CHECK_SLOTS=3` admit at most three holders between them, and an RT check
+# never takes slot 3. Set `CHECK_SLOTS` in the environment to pin the whole box.
 #
 # eslint's type-aware program and each `tsc` project peak past 1 GB, so several
 # agent sessions reaching a hook together used to hand the box to the OOM killer
@@ -29,13 +42,10 @@
 # exclude every reader and readers exclude the writer; readers never block each
 # other. Run `npm ci` this way.
 #
-# The lock files live in the shared git dir, which every linked worktree resolves
-# to the same absolute path — per-worktree locks would bound nothing.
-# `CHECK_LOCK_DIR` overrides it, which is how the guards get an isolated set
-# rather than contending with the box's live checks, and how a second CLONE on
-# the same box joins the agents' set instead of running a disjoint one of its own
-# (MuscleBuddy#3966). A semaphore per clone bounds each clone and nothing about the machine
-# both are eating.
+# The lock dir is machine-scoped, so every worktree, every clone (MuscleBuddy#3966)
+# and every repo on the box lands in the same set. `CHECK_LOCK_DIR` overrides it,
+# which is how the guards and self-tests get an isolated set rather than
+# contending with the box's live checks.
 #
 # A slot bounds two things, not one: how many checks run (the semaphore) and how
 # much heap each may take (the NODE_OPTIONS pin below, MuscleBuddy#3282). Bounding only the
@@ -102,11 +112,12 @@ if command -v python3 >/dev/null 2>&1; then
   fi
 fi
 case "$ENV_PREFIX" in *[!A-Za-z0-9_]*) ENV_PREFIX="" ;; esac
+# The slot, gate, intent and writer files are box-wide and never prefixed: a
+# prefix in their names is exactly what kept repos on disjoint semaphores (#461).
+LOCK_NAME="check"
 if [ -n "$ENV_PREFIX" ]; then
-  LOCK_NAME="$(printf '%s' "$ENV_PREFIX" | tr '[:upper:]' '[:lower:]')-check"
-  STALE_MARKER="${LOCK_NAME%-check}-verification-stale"
+  STALE_MARKER="$(printf '%s' "$ENV_PREFIX" | tr '[:upper:]' '[:lower:]')-verification-stale"
 else
-  LOCK_NAME="check"
   STALE_MARKER="verification-stale"
 fi
 
@@ -153,9 +164,10 @@ export TURBO_CACHE_DIR
 # only thrash each other. Floor of 2.
 #
 # The count is the steady-state answer. The MemAvailable floor below is what
-# protects a box that is busier than MemTotal suggests (other repos' worktrees,
+# protects a box that is busier than MemTotal suggests (dev servers, IDEs,
 # a big eslint run): it holds admission while memory is short, whatever the
-# count says. `CHECK_SLOTS` still wins if it is set.
+# count says. `CHECK_SLOTS` (or `<PREFIX>_CHECK_SLOTS`) still wins if it is set;
+# see SLOTS ARE BOX-SCOPED in the header for how differing requests combine.
 default_slots() {
   local kb cores
   kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null) || true
@@ -235,13 +247,22 @@ fi
 # The override names a path on the BOX, not in the checkout, so a workflow that
 # carries it is carrying one machine's layout. A run on a different machine —
 # the lane's hosted `only_evidence` mode — inherits a path it cannot create, and
-# there the right answer is this clone's own lock set, not a failed step.
+# there the right answer is the box default, not a failed step. A box whose cache
+# dir cannot be created at all (a read-only HOME in a sandbox) falls back to this
+# clone's git dir: a narrower semaphore beats none.
+box_lock_dir="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/gmi-check-lock"
 lock_dir="${CHECK_LOCK_DIR:-}"
 if [ -n "$lock_dir" ] && ! mkdir -p "$lock_dir" 2>/dev/null; then
-  echo "with-check-lock: CHECK_LOCK_DIR=$lock_dir is not usable here; using this clone's own lock set" >&2
+  echo "with-check-lock: CHECK_LOCK_DIR=$lock_dir is not usable here; using the box lock set $box_lock_dir" >&2
   lock_dir=""
 fi
-[ -n "$lock_dir" ] || lock_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+if [ -z "$lock_dir" ]; then
+  lock_dir="$box_lock_dir"
+  if ! mkdir -p "$lock_dir" 2>/dev/null; then
+    lock_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+    echo "with-check-lock: $box_lock_dir is not usable here; using this clone's own lock set $lock_dir" >&2
+  fi
+fi
 mkdir -p "$lock_dir"
 export CHECK_LOCK_HELD=1
 [ -z "$ENV_PREFIX" ] || export "${ENV_PREFIX}_CHECK_LOCK_HELD=1"
@@ -521,6 +542,11 @@ wait_lock() {
 #
 # Best-effort throughout. Outside a git repo, or with an unreadable admin dir,
 # there is nothing to record and the check simply does not exist for that run.
+#
+# Unlike the lock files, the marker stays in the repo — the worktree's own admin
+# dir, under the per-prefix name. It describes ONE worktree's HEAD and is read by
+# that worktree's `git-push.sh`; in the box-wide lock dir it would let a check in
+# one repo set or retire another repo's refusal.
 stale_marker_path() {
   local admin
   admin="$(git rev-parse --absolute-git-dir 2>/dev/null)" || return 1
@@ -677,9 +703,10 @@ max_load="${CHECK_MAX_LOAD:-$(default_max_load)}"
 # that reads exactly like a defect in the caller's own diff.
 #
 # The slot count cannot close this on its own. It is sized from MemTotal at
-# start-up and keyed off THIS clone's git dir, so it is blind both to what the
-# box is doing later and to the other repos' worktrees on the same machine
-# eating the RAM (MuscleBuddy#4224). MemAvailable is the one number that sees all of it.
+# start-up, so it is blind to what the box is doing later, and it bounds only
+# processes that go through this wrapper — anything else on the machine eating
+# RAM (an IDE, a browser, a dev server) never takes a slot (MuscleBuddy#4224).
+# MemAvailable is the one number that sees all of it.
 #
 # So: below the floor, admit NOBODY for a while. This is the one place the
 # admitted count reaches zero — the load path floors at one because a caller must
@@ -688,7 +715,7 @@ max_load="${CHECK_MAX_LOAD:-$(default_max_load)}"
 #
 # Holding indefinitely was tried and is wrong. A memory hold frees no slot, so it
 # does nothing for anyone else; it only backs off and hopes. That works against
-# this repo's own spikes, and starves against the other repos' worktrees, which
+# the wrapper's own spikes, and starves against processes outside it, which
 # never back off and never see this lock. Measured on the box in MuscleBuddy#4224: available
 # memory oscillated 634-1936 MB for a quarter of an hour, so a pre-push spent the
 # whole CHECK_TIMEOUT under the floor and refused a legitimate push with 75.
@@ -766,7 +793,7 @@ while :; do
   if [ "$avail" -ge 0 ] && [ "$avail" -lt "$min_avail_mb" ]; then
     if [ -z "$mem_held" ]; then
       mem_held="$(now)"
-      echo "⏳ only ${avail}MB of memory is available, under the ${min_avail_mb}MB floor — holding every check until it frees (this is memory pressure, not CPU, and it may be another repo's worktrees)."
+      echo "⏳ only ${avail}MB of memory is available, under the ${min_avail_mb}MB floor — holding every check until it frees (this is memory pressure, not CPU, and it may be processes outside this lock)."
     fi
     if [ "$(($(now) - mem_held))" -lt "$mem_wait_secs" ]; then
       admitted=0
@@ -859,8 +886,8 @@ while :; do
   if [ "$lock_timeout" -gt 0 ] && [ "$waited" -ge "$deadline" ]; then
     if [ "$admitted" -eq 0 ]; then
       give_up "$waited" "  Available memory stayed under the ${min_avail_mb}MB floor (${avail}MB now).
-  This is box-wide memory pressure — check \`free -h\` and \`ps aux --sort=-%mem\`; other repos'
-  worktrees on this machine are outside this repo's semaphore and count against the same RAM."
+  This is box-wide memory pressure — check \`free -h\` and \`ps aux --sort=-%mem\`; processes
+  that never go through this wrapper count against the same RAM."
     elif [ -n "$load_narrowed" ]; then
       give_up "$waited" "  The box is over its load threshold ($(current_load) > $max_load), so the semaphore is
   narrowed to one slot and the queue is serial. It is held by:

@@ -3,8 +3,9 @@
 # contends with a real check on the box: the semaphore admits at most SLOTS
 # readers, a writer excludes readers, the command's exit status comes back, a
 # nested call runs through, a timed-out wait runs nothing and exits 75, HEAD
-# moving mid-run leaves the drift marker, and a repo's manifest prefix names the
-# lock files and answers for the knobs. Also: light mode, load narrowing and its
+# moving mid-run leaves the drift marker, a repo's manifest prefix names the drift
+# marker and answers for the knobs but not the lock files, and two repos with
+# different prefixes share one box-wide semaphore under the default dir. Also: light mode, load narrowing and its
 # widened deadline, the memory floor, retry_on_oom, the heap pin and slot sizing,
 # holder liveness, the heartbeat and slot list, FIFO admission, and a wall-clock
 # jump mid-wait (#452).
@@ -306,17 +307,55 @@ wait "$qp"; rc=$?
 [ "$rc" = 0 ] && [ -e "$TMP/jumped" ] && ok "and admitted when the holder leaves" || bad "rc=$rc"
 export CHECK_LOCK_DIR="$TMP/locks"
 
-echo "with-check-lock: the manifest prefix names the files and answers for the knobs"
+echo "with-check-lock: the manifest prefix answers for the knobs but never names the lock files"
+newlock
 mkdir -p .claude
 echo '{ "envPrefix": "DM" }' >.claude/repo.json
 unset CHECK_SLOTS
 DM_CHECK_SLOTS=1 "$LOCK" true
-[ -e "$CHECK_LOCK_DIR/dm-check.1.lock" ] && ok "lock files are dm-check.*" || bad "files: $(ls "$CHECK_LOCK_DIR")"
-[ -e "$CHECK_LOCK_DIR/dm-check.2.lock" ] && bad "DM_CHECK_SLOTS=1 ignored (slot 2 used)" || ok "DM_CHECK_SLOTS is honoured"
+prefixed=("$CHECK_LOCK_DIR"/dm-*)
+[ -e "$CHECK_LOCK_DIR/check.1.lock" ] && [ ! -e "${prefixed[0]}" ] \
+  && ok "lock files are the box-wide check.*, not dm-check.*" || bad "files: $(ls "$CHECK_LOCK_DIR")"
+[ -e "$CHECK_LOCK_DIR/check.2.lock" ] && bad "DM_CHECK_SLOTS=1 ignored (slot 2 used)" || ok "DM_CHECK_SLOTS is honoured"
 out="$(DM_CHECK_LOCK_HELD=1 CHECK_SLOTS=1 "$LOCK" sh -c 'echo "held=$CHECK_LOCK_HELD/$DM_CHECK_LOCK_HELD"' 2>&1)"
 grep -q 'held=1/1' <<<"$out" && ok "an outer repo-local wrapper's HELD flag is honoured and both are exported" || bad "$out"
 touch move
 "$LOCK" sh -c "$check" >/dev/null 2>&1
 [ -f "$(git rev-parse --absolute-git-dir)/dm-verification-stale" ] && ok "drift marker is dm-verification-stale" || bad "marker not prefixed"
+[ ! -e "$CHECK_LOCK_DIR/dm-verification-stale" ] && ok "and it stays in the repo, not the shared lock dir" || bad "marker leaked into the lock dir"
+
+# #461: one semaphore for the whole box. Two repos with different envPrefix
+# values and NO CHECK_LOCK_DIR land in the default dir, pointed at a scratch
+# XDG_CACHE_HOME so the live box lock is never touched.
+echo "with-check-lock: two repos with different prefixes share the box-wide default lock set"
+XDG="$TMP/xdg"; BOX="$XDG/gmi-check-lock"
+for r in ra rb; do
+  git init -q -b main "$TMP/$r"
+  git -C "$TMP/$r" commit -q --allow-empty -m one
+  mkdir -p "$TMP/$r/.claude"
+done
+echo '{ "envPrefix": "AA" }' >"$TMP/ra/.claude/repo.json"
+echo '{ "envPrefix": "BB" }' >"$TMP/rb/.claude/repo.json"
+inrepo() { local r="$1"; shift; (cd "$TMP/$r" && env -u CHECK_LOCK_DIR -u CHECK_SLOTS XDG_CACHE_HOME="$XDG" HOME="$TMP/home" "$@"); }
+inrepo ra env AA_CHECK_SLOTS=1 "$LOCK" sleep 4 >/dev/null 2>&1 & hp=$!
+# The stamp names the wrapper's pid, not this subshell's, so match the command.
+if wait_stamp "$BOX/check.1.info" "sleep 4"; then
+  ok "repo AA holds slot 1 under \$XDG_CACHE_HOME/gmi-check-lock"
+else
+  bad "no box-wide stamp: $(ls "$BOX" 2>&1)"
+fi
+out="$(inrepo rb env BB_CHECK_SLOTS=1 CHECK_TIMEOUT=1 "$LOCK" touch "$TMP/bb-ran" 2>&1)"; rc=$?
+[ "$rc" = 75 ] && [ ! -e "$TMP/bb-ran" ] && ok "a check in repo BB queues behind repo AA's" || bad "rc=$rc $out"
+grep -q 'slot 1: sleep 4' <<<"$out" && ok "and names AA's holder" || bad "holder not named: $out"
+inrepo rb env BB_CHECK_SLOTS=1 CHECK_TIMEOUT=30 "$LOCK" touch "$TMP/bb-ran" >/dev/null 2>&1; rc=$?
+[ "$rc" = 0 ] && [ -e "$TMP/bb-ran" ] && ok "and runs once AA's check finishes" || bad "rc=$rc"
+wait "$hp"
+prefixed=("$BOX"/aa-* "$BOX"/bb-*)
+[ -e "${prefixed[0]}" ] || [ -e "${prefixed[1]}" ] && bad "prefixed lock files in the box dir: $(ls "$BOX")" || ok "no per-prefix lock files in the box dir"
+inrepo ra "$LOCK" --writer sleep 2 >/dev/null 2>&1 & wp=$!
+wait_for "$BOX/check.gate.info"; sleep 0.3
+out="$(inrepo rb env CHECK_TIMEOUT=1 "$LOCK" touch "$TMP/bb-during-install" 2>&1)"; rc=$?
+wait "$wp"
+[ "$rc" = 75 ] && [ ! -e "$TMP/bb-during-install" ] && ok "repo AA's install excludes repo BB's reader" || bad "rc=$rc $out"
 
 exit "$fail"

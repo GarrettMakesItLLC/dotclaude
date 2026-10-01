@@ -14,7 +14,7 @@ in the environment overrides discovery (the self-tests use it).
 | Field | Type | Read by | Meaning |
 |---|---|---|---|
 | `name` | string | all | Display name in generated file headers. |
-| `envPrefix` | string, `[A-Z0-9_]` | `agent-env-build.sh`, `ops-pull.sh`, `with-check-lock.sh` | The repo's namespace: `<PREFIX>_` aliases, `<prefix>-check.*` lock files, `<PREFIX>_CHECK_*` knobs. |
+| `envPrefix` | string, `[A-Z0-9_]` | `agent-env-build.sh`, `ops-pull.sh`, `with-check-lock.sh` | The repo's namespace: `<PREFIX>_` aliases, `<PREFIX>_CHECK_*` knobs, the `<prefix>-verification-stale` drift marker. Never the check-lock files: those are box-wide `check.*` under `${XDG_CACHE_HOME:-~/.cache}/gmi-check-lock`, shared by every repo. |
 | `stateDir` | path | `agent-env-build.sh`, `ops-pull.sh`, `setup-worktree.sh`, `doctor.sh`, `npm-install-guard.sh` | Per-machine home for `agent.env`, `ops.env`, `cloud.env` and file secrets, e.g. `~/.musclebuddy`. |
 
 ## `credentials` — `bin/agent-env-build.sh`
