@@ -39,21 +39,34 @@
 #
 #   fleet-merge.sh <PR> --verdict <verdict.json> [--repo OWNER/NAME]
 #                  [--manifest-path .claude/ci-replica.json]
-#                  [--allow-not-run JOB]... [--method squash|merge] [--title T]
+#                  [--allow-not-run JOB]... [--method squash|merge|rebase] [--title T]
 #                  [--dry-run]
 #
 # --dry-run checks the verdict and names the rulesets it would lift, and changes
-# nothing. FLEET_MERGE_GH_TOKEN, when set, is used as GH_TOKEN for every call
-# (the org ruleset needs admin:org; see the fleet skill for which credential has it).
+# nothing.
+#
+# --method defaults to `merge` for a promotion (head is a trunk — dev, develop,
+# staging, release/* — and base is main, master, production or release/*) and to
+# `squash` for everything else. A squash onto main leaves it sharing no history
+# with dev, so the next promotion conflicts on every file both sides touched. An
+# explicit --method always wins.
+#
+# Token: the org ruleset needs admin:org, which an ambient GH_TOKEN usually lacks.
+# Set FLEET_MERGE_GH_TOKEN (not GH_TOKEN=, which a profile or BASH_ENV can
+# re-export under the script) to a credential that has it; it is exported as
+# GH_TOKEN for every call. An org call that fails under it is retried once on the
+# stored gh credential. The source used is printed. If neither reaches the org
+# ruleset the error names the token scope: GitHub answers 404, not 403, for an
+# org ruleset the token cannot see, so a 404 does not mean no ruleset exists.
 #
 # Exit: 0 merged (or dry-run clean), 1 refused, 2 usage, 3 merge or restore failed.
 set -uo pipefail
 
-usage() { sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,70p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 die() { echo "fleet-merge: $*" >&2; exit 2; }
 refuse() { echo "fleet-merge: REFUSED — $*" >&2; exit 1; }
 
-PR="" VERDICT="" REPO="" MANIFEST_PATH=".claude/ci-replica.json" METHOD="squash" TITLE="" DRY=0 ACTION=merge
+PR="" VERDICT="" REPO="" MANIFEST_PATH=".claude/ci-replica.json" METHOD="" TITLE="" DRY=0 ACTION=merge
 ALLOW=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -77,7 +90,13 @@ if [ "$ACTION" = merge ]; then
   [ -f "$VERDICT" ] || refuse "no verdict file at $VERDICT"
 fi
 command -v jq >/dev/null || die "jq is required (verdict, ruleset and merge JSON are all read with it) — install it: sudo apt install jq"
-[ -n "${FLEET_MERGE_GH_TOKEN:-}" ] && export GH_TOKEN="$FLEET_MERGE_GH_TOKEN"
+if [ -n "${FLEET_MERGE_GH_TOKEN:-}" ]; then
+  export GH_TOKEN="$FLEET_MERGE_GH_TOKEN"; TOKEN_SRC="FLEET_MERGE_GH_TOKEN"
+elif [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
+  TOKEN_SRC="ambient GH_TOKEN/GITHUB_TOKEN"
+else
+  TOKEN_SRC="stored gh credential"
+fi
 
 STATE_ROOT="${FLEET_MERGE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/fleet-merge}"
 
@@ -92,8 +111,12 @@ gh_ruleset() {
   # Captured, not streamed: a refused call still prints its error body on stdout,
   # and that must not precede the retry's real answer.
   if out="$(gh api "$@" 2>/dev/null)"; then printf '%s\n' "$out"; return 0; fi
-  [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ] || return 1
-  env -u GH_TOKEN -u GITHUB_TOKEN gh api "$@"
+  if [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
+    echo "fleet-merge: org call failed under $TOKEN_SRC; retrying on the stored gh credential" >&2
+    if out="$(env -u GH_TOKEN -u GITHUB_TOKEN gh api "$@" 2>/dev/null)"; then printf '%s\n' "$out"; return 0; fi
+  fi
+  echo "fleet-merge: org ruleset call failed (tried $TOKEN_SRC, then the stored gh credential). GitHub answers 404 for an org ruleset the token cannot see, so this means the token lacks admin:org, not that the ruleset is absent. Set FLEET_MERGE_GH_TOKEN to a credential with admin:org." >&2
+  return 1
 }
 
 # ruleset_path <Organization|Repository> <id> <owner/name>
@@ -177,7 +200,18 @@ jq -e . "$VERDICT" >/dev/null 2>&1 || refuse "$VERDICT is not valid JSON"
 pr_json="$(gh api "repos/$REPO/pulls/$PR")" || die "cannot read PR #$PR"
 head_sha="$(jq -r .head.sha <<<"$pr_json")"
 base_ref="$(jq -r .base.ref <<<"$pr_json")"
+head_ref="$(jq -r .head.ref <<<"$pr_json")"
 state="$(jq -r .state <<<"$pr_json")"
+if [ -z "$METHOD" ]; then
+  case "$head_ref:$base_ref" in
+    dev:main|dev:master|dev:production|dev:release/*|develop:main|develop:master|develop:production|develop:release/*|\
+    staging:main|staging:master|staging:production|release/*:main|release/*:master|release/*:production) METHOD=merge ;;
+    *) METHOD=squash ;;
+  esac
+  echo "fleet-merge: merge method $METHOD (default for $head_ref -> $base_ref; --method overrides)"
+fi
+case "$METHOD" in squash|merge|rebase) ;; *) die "--method must be squash, merge or rebase, not '$METHOD'" ;; esac
+echo "fleet-merge: GitHub token source: $TOKEN_SRC"
 [ "$state" = open ] || refuse "PR #$PR is $state"
 
 v() { jq -r "$1" "$VERDICT"; }
