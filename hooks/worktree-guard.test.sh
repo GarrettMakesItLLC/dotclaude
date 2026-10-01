@@ -504,62 +504,23 @@ EOF"
   exit 0
 ) || fail=1
 
-# --- #466/#468: Claude Code drops a leading `cd <session cwd> &&` before the
-# hook runs, so the payload's command has no `cd` while the transcript holds the
-# command as written. Standing in the linked worktree, the guard recovers the
-# written command by tool_use_id and trusts the cwd only when the sole
-# difference is a `cd` into that same directory.
+# --- #466/#468: Claude Code deletes a leading `cd <session cwd> &&` before the
+# hook runs, so from inside the tree the refusal must not recommend that form —
+# it must point at an absolute target under the cwd, and say why.
 (
-  WT="$CONV/.worktrees/wt"
-  cd "$WT" || exit 1
-  T="$TMP/transcript.jsonl"
-  # want, written, seen, [cwd-to-cd-into-in-written]
-  stripped() {
-    local want="$1" written="$2" seen="$3" got
-    python3 -c '
-import json, sys
-print(json.dumps({"type": "assistant", "message": {"content": [
-    {"type": "tool_use", "id": "toolu_x", "name": "Bash", "input": {"command": sys.argv[1]}}]}}))
-' "$written" > "$T"
-    python3 -c '
-import json, sys
-print(json.dumps({"tool_name": "Bash", "tool_use_id": "toolu_x", "transcript_path": sys.argv[2],
-                  "tool_input": {"command": sys.argv[1]}}))
-' "$seen" "$T" | "$GUARD" >/dev/null 2>&1
-    got=$?
-    if [ "$got" != "$want" ]; then
-      echo "FAIL: want $want, got $got for written='$written' seen='$seen'"
-      echo x >> "$FAIL_MARKER"
-    fi
-  }
-
-  # Should ALLOW — the harness removed exactly `cd <this tree> &&`. The quoted
-  # sed scripts are the two reported shapes.
-  stripped 0 "cd $WT && sed -i 's/a/b/' f.txt && cat f.txt" "sed -i 's/a/b/' f.txt && cat f.txt"
-  stripped 0 "cd $WT && sed -i 's/X\\[p\\] !== u || g(p) !== null,/Y/' src/c.ts && grep -c 'l > 0,' src/c.ts" \
-    "sed -i 's/X\\[p\\] !== u || g(p) !== null,/Y/' src/c.ts && grep -c 'l > 0,' src/c.ts"
-  stripped 0 "cd '$WT'; mkdir -p m/a && cat > m/a/migration.sql <<'EOF'
-SELECT 1;
-EOF" "mkdir -p m/a && cat > m/a/migration.sql <<'EOF'
-SELECT 1;
-EOF"
-
-  # Should BLOCK — the written `cd` names a different directory than the cwd.
-  stripped 2 "cd $CONV && sed -i 's/a/b/' f.txt" "sed -i 's/a/b/' f.txt"
-  # Should BLOCK — the commands differ by more than the leading `cd`.
-  stripped 2 "cd $WT && sed -i 's/a/b/' g.txt" "sed -i 's/a/b/' f.txt"
-  # Should BLOCK — nothing was stripped: written and seen are the same command.
-  stripped 2 "sed -i 's/a/b/' f.txt" "sed -i 's/a/b/' f.txt"
-  # Should BLOCK — a `cd` through a variable is not a named tree.
-  stripped 2 "cd \$W && sed -i 's/a/b/' f.txt" "sed -i 's/a/b/' f.txt"
-  # Should BLOCK — no transcript to recover the written command from.
-  rm -f "$T"
-  python3 -c '
-import json
-print(json.dumps({"tool_name": "Bash", "tool_use_id": "toolu_x", "transcript_path": "/nonexistent.jsonl",
-                  "tool_input": {"command": "sed -i s/a/b/ f.txt"}}))
-' | "$GUARD" >/dev/null 2>&1
-  [ $? = 2 ] || { echo "FAIL: missing transcript must stay blocked"; echo x >> "$FAIL_MARKER"; }
+  cd "$CONV/.worktrees/wt" || exit 1
+  msg=$(python3 -c 'import json; print(json.dumps({"tool_name":"Bash","tool_input":{"command":"sed -i s/a/b/ f.txt"}}))' \
+    | "$GUARD" 2>&1 >/dev/null)
+  case "$msg" in
+    *"$(pwd -P)/f.txt"*"Claude Code deleted it"*) ;;
+    *) echo "FAIL: refusal does not steer to an absolute target / explain the stripped cd (#466)"
+       echo x >> "$FAIL_MARKER" ;;
+  esac
+  case "$msg" in
+    *"or lead the command with a cd"*)
+       echo "FAIL: refusal still recommends the cd form that cannot work from inside the tree (#468)"
+       echo x >> "$FAIL_MARKER" ;;
+  esac
   exit 0
 ) || fail=1
 
