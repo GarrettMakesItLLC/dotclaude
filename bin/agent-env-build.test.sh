@@ -73,6 +73,7 @@ F="$HOME/.demo/agent.env"
 [ "$(get GITHUB_TOKEN)" = gho_fromgh ] && ! grep -q 'gho_fromgh' <(grep NODE_AUTH_TOKEN "$F") && ok "GITHUB_TOKEN from gh, never as NODE_AUTH_TOKEN" || bad "gh token handling"
 
 ! grep -qE '^export ANTHROPIC_(API_KEY|AUTH_TOKEN)=' "$F" && [ "$(get DM_ANTHROPIC_API_KEY)" = sk-root ] && ok "the Anthropic key is exported only under the alias" || bad "anthropic: $(grep ANTHROPIC "$F")"
+# shellcheck source=/dev/null
 [ "$( ( set +u; export ANTHROPIC_API_KEY=sk-older-bundle; . "$F" >/dev/null 2>&1; printf '%s' "${ANTHROPIC_API_KEY:-}" ) )" = "" ] && ok "sourcing the bundle unsets a bare Anthropic key from an earlier one" || bad "bare Anthropic key survives sourcing"
 
 echo "agent-env-build: the Railway fallback"
