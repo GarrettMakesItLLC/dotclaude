@@ -72,6 +72,9 @@ F="$HOME/.demo/agent.env"
 ! grep -q 'SIBLING_KEY=' "$F" && grep -q '^unset DM_SIBLING_KEY$' "$F" && ok "a repo key in the ambient shell is NOT trusted; its alias is unset" || bad "sibling: $(grep SIBLING "$F")"
 [ "$(get GITHUB_TOKEN)" = gho_fromgh ] && ! grep -q 'gho_fromgh' <(grep NODE_AUTH_TOKEN "$F") && ok "GITHUB_TOKEN from gh, never as NODE_AUTH_TOKEN" || bad "gh token handling"
 
+! grep -qE '^export ANTHROPIC_(API_KEY|AUTH_TOKEN)=' "$F" && [ "$(get DM_ANTHROPIC_API_KEY)" = sk-root ] && ok "the Anthropic key is exported only under the alias" || bad "anthropic: $(grep ANTHROPIC "$F")"
+[ "$( ( set +u; export ANTHROPIC_API_KEY=sk-older-bundle; . "$F" >/dev/null 2>&1; printf '%s' "${ANTHROPIC_API_KEY:-}" ) )" = "" ] && ok "sourcing the bundle unsets a bare Anthropic key from an earlier one" || bad "bare Anthropic key survives sourcing"
+
 echo "agent-env-build: the Railway fallback"
 [ "$(get VAPID_PUBLIC_KEY)" = vapid-rw ] && [ "$(get DM_PROD_DIRECT_URL)" = postgres://direct-rw ] && ok "missing fallback keys come from Railway" || bad "railway: $OUT"
 [ "$(wc -l <"$RAILWAY_CALLS")" = 1 ] && ok "Railway fetched exactly once" || bad "railway calls: $(wc -l <"$RAILWAY_CALLS")"
@@ -91,7 +94,7 @@ echo "agent-env-build: from a linked worktree it reads the main checkout's env"
 git -C "$REPO" worktree add -q "$REPO/.worktrees/wt" -b wt
 rm -f "$F"
 RUN_DIR="$REPO/.worktrees/wt" run
-[ "$RC" = 0 ] && [ "$(get ANTHROPIC_API_KEY)" = sk-root ] && ok "main tree .env used" || bad "rc=$RC $OUT"
+[ "$RC" = 0 ] && [ "$(get DM_ANTHROPIC_API_KEY)" = sk-root ] && ok "main tree .env used" || bad "rc=$RC $OUT"
 
 echo "agent-env-build: no manifest is refused"
 git init -q "$TMP/bare"
