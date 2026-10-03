@@ -162,11 +162,26 @@ TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
   printf '# Sourced from ~/.bashrc so every agent shell and worktree inherits it. chmod 600.\n\n'
 } >"$TMP"
 
+# Never exported bare, whatever a manifest lists: Claude Code bills a bare
+# ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN in its environment to that key
+# instead of the subscription, so a product's API key in an agent shell charges
+# every session on the box to it. The prefix alias, which Claude Code ignores,
+# is still emitted. The bundle also unsets both, so it scrubs an older bundle
+# sourced before it.
+NEVER_BARE=(ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN)
+
 emitted=(); skipped=()
 for key in "${DIRECT[@]}"; do
   [ -n "$key" ] || continue
   if val="$(resolve "$key")"; then
     lookup "$key" >/dev/null || from_railway+=("$key")
+    if in_list "$key" "${NEVER_BARE[@]}"; then
+      if [ "$alias_direct" = true ]; then
+        printf 'export %s_%s=%q\n' "$prefix" "$key" "$val" >>"$TMP"
+        emitted+=("${prefix}_$key")
+      fi
+      continue
+    fi
     printf 'export %s=%q\n' "$key" "$val" >>"$TMP"
     [ "$alias_direct" = true ] && printf 'export %s_%s=%q\n' "$prefix" "$key" "$val" >>"$TMP"
     emitted+=("$key")
@@ -174,6 +189,8 @@ for key in "${DIRECT[@]}"; do
     skipped+=("$key")
   fi
 done
+
+printf '\n# Claude Code bills a bare Anthropic key instead of the subscription.\nunset %s\n' "${NEVER_BARE[*]}" >>"$TMP"
 
 if [ "$alias_direct" = true ] && [ "${#skipped[@]}" -gt 0 ]; then
   {
