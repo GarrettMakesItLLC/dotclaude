@@ -1,6 +1,9 @@
 {
   "$comment": "Verdicts GitHub Actions owes dotclaude for the window it refused every job (GarrettMakesItLLC/platform#998). A `paid` records the run, the main SHA and the result. Keep `.claude/fleet-mode.json` on `degraded` until every item is paid.",
-  "window": { "from": "2026-09-16T09:01:05Z", "issue": "GarrettMakesItLLC/dotclaude#437" },
+  "window": {
+    "from": "2026-09-16T09:01:05Z",
+    "issue": "GarrettMakesItLLC/dotclaude#437"
+  },
   "items": [
     {
       "id": "ci-on-main",
@@ -15,6 +18,18 @@
         "note": "validate on push to main: JSON, shellcheck (apt-installed), self-tests and bin/ tool self-tests all success. CI Success runs only on pull_request, so the aggregate is evidenced by the PR run https://github.com/GarrettMakesItLLC/dotclaude/actions/runs/36663770193 (head 95c52e8ab3dbb413066fe1d92395928d264d91a3): all five jobs, CI Success included, succeeded.",
         "paidOn": "2026-09-30"
       }
+    },
+    {
+      "id": "ci-on-main-2026-10",
+      "verdict": "One validate.yml run of main on Actions after #498 merged in degraded mode, including the shellcheck install and the CI Success aggregate as the runner executes them.",
+      "why": "#498 merged on a local ci-replica verdict while Actions refused every job (startup_failure); the replica reports ci-success NOT-RUN.",
+      "owedFor": ["#498"],
+      "howToPay": "Actions → validate → Run workflow on main once Actions runs again, or the first PR after the window. Record the run URL, SHA and conclusion.",
+      "window": {
+        "from": "2026-10-04T12:57:00Z",
+        "issue": "GarrettMakesItLLC/MuscleBuddy#10493"
+      },
+      "paid": null
     }
   ]
 }
