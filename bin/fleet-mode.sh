@@ -221,7 +221,10 @@ def parse_runs(rs):
         start = ts(r.get("run_started_at") or r.get("created_at"))
         end = ts(r.get("updated_at"))
         out.append({
-            "name": r.get("name") or r.get("workflow_id"),
+            # A refused run can carry an empty `name` (startup_failure), so the
+            # workflow is identified by its id first.
+            "name": r.get("name") or str(r.get("workflow_id") or r.get("path") or ""),
+            "key": str(r.get("workflow_id") or r.get("name") or r.get("path") or ""),
             "conclusion": r.get("conclusion"),
             "status": r.get("status"),
             "dur": (end - start) if (start is not None and end is not None) else None,
@@ -232,7 +235,15 @@ def parse_runs(rs):
 
 parsed = parse_runs(windowed)
 
+# `startup_failure` is how an account/billing lock records a run: no job was
+# ever handed a runner, so it has no duration to test and is never a test
+# failure. A plain `failure` is only a refusal when it is also instant.
+def is_startup_fail(p):
+    return p["conclusion"] == "startup_failure"
+
 def is_instant_fail(p):
+    if is_startup_fail(p):
+        return True
     return p["conclusion"] == "failure" and p["dur"] is not None and p["dur"] <= instant
 
 instant_fails = [p for p in parsed if is_instant_fail(p)]
@@ -249,7 +260,8 @@ instant_fails = [p for p in parsed if is_instant_fail(p)]
 # `deployment_status` runs outrank the actual failures), so corroboration
 # looks at every fetched run (already bounded by RUNS_PER_PAGE) rather than
 # re-truncating to `window`.
-all_names = {p["name"] for p in parse_runs(runs) if is_instant_fail(p)}
+all_names = {p["key"] for p in parse_runs(runs) if is_instant_fail(p)}
+startup_fails = [p for p in parsed if is_startup_fail(p)]
 
 def is_executing(p):
     return (p["conclusion"] == "success"
@@ -265,14 +277,19 @@ def is_executing(p):
 # can take tens of seconds to record its jobs as refused, and that one slow
 # record used to veto nineteen corroborating ones (#398).
 recent = parsed[:5]
-if (len(instant_fails) >= 3 and len(all_names) >= 2
+# A repo with a single workflow cannot show two refused workflows, so a run of
+# startup_failures corroborates itself: nothing a repo can do to one workflow
+# keeps every job from ever starting while the rest of the window ran.
+if (len(instant_fails) >= 3 and (len(all_names) >= 2 or len(startup_fails) >= 3)
         and not any(is_executing(p) for p in recent)
         and any(is_instant_fail(p) for p in recent)):
     newest = next(p for p in recent if is_instant_fail(p))
-    others = [n for n in sorted(all_names) if n != newest["name"]][:3]
+    others = sorted({p["name"] for p in parsed if is_instant_fail(p)} - {newest["name"]})[:3]
     emit("refused",
-         "Actions is refusing jobs — %d of the last %d runs failed within %ds of starting, "
-         "across %d workflows" % (len(instant_fails), len(parsed), int(instant), len(all_names)),
+         "Actions is refusing jobs — %d of the last %d runs failed within %ds of starting%s, "
+         "across %d workflow(s)" % (len(instant_fails), len(parsed), int(instant),
+                                    " or never started (startup_failure)" if startup_fails else "",
+                                    len(all_names)),
          "most recent: %s%s" % (newest["name"],
                                 "; also " + ", ".join(others) if others else ""))
 

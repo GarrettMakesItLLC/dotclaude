@@ -97,6 +97,24 @@ elif kind == "schedule-only":
     # Filtering to zero gating runs must not make it permanently UNKNOWN.
     for i in range(4):
         runs.append(run("nightly", "success", 120, 3600 + i * 3600, event="schedule"))
+elif kind == "startup-failure-lock":
+    # #489: an org billing lock records every run as `startup_failure` with an
+    # empty name and no duration, on ONE workflow. Older runs that executed sit
+    # behind them in the window and used to carry the verdict to healthy.
+    for i in range(12):
+        r = run("", "startup_failure", 0, 60 + i * 60, event="push" if i % 2 else "pull_request")
+        r["path"] = "BuildFailed"; r["workflow_id"] = 376017751
+        runs.append(r)
+    for i in range(4):
+        runs.append(run("CI", "success", 90, 86400 + i * 3600))
+elif kind == "startup-failure-one-broken":
+    # One workflow with a broken definition fails to start while the rest of the
+    # runs of the repo execute: a defect, not a lock.
+    for i in range(4):
+        r = run("", "startup_failure", 0, 600 + i * 60)
+        r["workflow_id"] = 1
+        runs.append(r)
+    runs.append(run("CI", "success", 90, 120))
 elif kind == "empty":
     pass
 elif kind == "garbage":
@@ -109,7 +127,7 @@ print(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
 '
 }
 
-for k in refused healthy one-flaky stale-history buried-refusal slow-newest-refusal single-gating-refusal schedule-only empty garbage; do
+for k in refused healthy one-flaky stale-history buried-refusal slow-newest-refusal single-gating-refusal schedule-only startup-failure-lock startup-failure-one-broken empty garbage; do
   mkfixture "$k" > "$TMP/$k.json"
 done
 
@@ -169,6 +187,20 @@ wantnot "single-gating-refusal" "UNKNOWN" "$out"
 fresh; marker -
 out="$(run_probe schedule-only)"
 wantnot "schedule-only" "UNKNOWN" "$out"
+
+# --- 1e. A billing lock records startup_failure, not failure (#489) ---------
+fresh; marker -
+out="$(run_probe startup-failure-lock)"
+want "startup-failure-lock" "CI IS REFUSING JOBS" "$out"
+want "startup-failure-lock" "startup_failure" "$out"
+wantnot "startup-failure-lock" "healthy" "$out"
+out="$(run_probe startup-failure-lock --json)"
+want "startup-failure-lock json" '"ci": "refused"' "$out"
+
+# A broken workflow while other runs execute is a defect, not a lock.
+fresh; marker -
+out="$(run_probe startup-failure-one-broken --json)"
+wantnot "startup-failure-one-broken" '"ci": "refused"' "$out"
 
 # --- 2. CI refusing AND degraded declared: the mode is on, say what to do ----
 fresh; marker degraded
