@@ -9,11 +9,17 @@
 # that already exist. Schema reaches a shared database only through a
 # timestamped migration and `prisma migrate deploy` (rules/prisma.md).
 #
-# The database it would hit: an inline `DATABASE_URL=` on the command, else the
-# ambient environment, else the `.env` in the directory the command runs in
-# (after a leading `cd`), which is where Prisma itself looks. Local means
-# localhost, 127.0.0.1, [::1] or host.docker.internal. A URL that cannot be
-# resolved at all is blocked: nothing proves it safe.
+# The database it would hit is whichever URL variable Prisma reads: `DATABASE_URL`,
+# `DIRECT_URL` (a `directUrl`, or a `prisma.config.ts` datasource pointing at it,
+# is what the CLI connects through), and any other name the directory's
+# `schema.prisma` / `prisma.config.ts` reads with `env("X")` or `process.env.X`.
+# Each is resolved from an inline `X=` on the command, else the ambient
+# environment, else the `.env` in the directory the command runs in (after a
+# leading `cd`), which is where Prisma itself looks. Every one that resolves must
+# be local — judging only `DATABASE_URL` let a prod `DIRECT_URL` through beside a
+# local `DATABASE_URL`. Local means localhost, 127.0.0.1, [::1] or
+# host.docker.internal. When none resolves the push is blocked: nothing proves
+# it safe.
 #
 # Fail-open on input it cannot parse.
 set -uo pipefail
@@ -48,24 +54,45 @@ if [ -n "$cd_target" ]; then
   esac
 fi
 
-url="$(printf '%s' "$normalized" | sed -n 's/.*DATABASE_URL=\([^ ]*\).*/\1/p' | head -1)"
-source_desc="the inline DATABASE_URL"
-if [ -z "$url" ] && [ -n "${DATABASE_URL:-}" ]; then
-  url="$DATABASE_URL"; source_desc="the exported DATABASE_URL"
-fi
-if [ -z "$url" ] && [ -f "$dir/.env" ]; then
-  url="$(sed -n 's/^\(export \)\{0,1\}DATABASE_URL=//p' "$dir/.env" | tail -1 | tr -d "\"'")"
-  source_desc="DATABASE_URL in $dir/.env"
-fi
+# The variable names to judge: the two Prisma conventions, plus any the
+# directory's own Prisma config reads.
+names="DATABASE_URL DIRECT_URL"
+for f in "$dir/prisma.config.ts" "$dir/prisma.config.js" "$dir/prisma.config.mjs" "$dir/schema.prisma" "$dir/prisma/schema.prisma"; do
+  [ -f "$f" ] || continue
+  names="$names $(grep -oE "env\(['\"][A-Za-z_][A-Za-z0-9_]*['\"]\)|process\.env(\.[A-Za-z_][A-Za-z0-9_]*|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])" "$f" \
+    | grep -oE "[A-Za-z_][A-Za-z0-9_]*['\"]?\]?\)?$" | tr -d "'\")]" | tr '\n' ' ')"
+done
+names="$(printf '%s\n' $names | awk 'NF && !seen[$0]++' | tr '\n' ' ')"
 
-if [ -z "$url" ]; then
-  echo "⛔ dotclaude db-push-guard: 'prisma db push' with no resolvable DATABASE_URL, so nothing proves it is local. Change schema through a timestamped migration (\`prisma migrate dev --create-only\`, or a hand-written prisma/migrations/<ts>_<name>/migration.sql) and apply it with \`prisma migrate deploy\`." >&2
+# resolve <NAME> -> prints "<url>\t<where>" or nothing. Inline matches the exact
+# name at a word start, so `MB_PROD_DATABASE_URL=` is not read as `DATABASE_URL=`.
+resolve() {
+  local n="$1" v
+  v="$(printf ' %s' "$normalized" | sed -n "s/.*[[:space:];&|(]$n=\([^[:space:];&|]*\).*/\1/p" | head -1)"
+  [ -n "$v" ] && { printf '%s\tthe inline %s\n' "$v" "$n"; return; }
+  v="${!n:-}"
+  [ -n "$v" ] && { printf '%s\tthe exported %s\n' "$v" "$n"; return; }
+  if [ -f "$dir/.env" ]; then
+    v="$(sed -n "s/^\(export \)\{0,1\}$n=//p" "$dir/.env" | tail -1 | tr -d "\"'")"
+    [ -n "$v" ] && printf '%s\t%s in %s/.env\n' "$v" "$n" "$dir"
+  fi
+}
+
+resolved=0
+for n in $names; do
+  line="$(resolve "$n")"
+  [ -n "$line" ] || continue
+  resolved=1
+  url="${line%%	*}"; source_desc="${line#*	}"
+  case "$url" in
+    *@localhost[:/]* | *@127.0.0.1[:/]* | *"@[::1]"* | *@host.docker.internal[:/]* | file:*) continue ;;
+  esac
+  echo "⛔ dotclaude db-push-guard: 'prisma db push' against a non-local database ($source_desc). It records no migration, so the deployed schema drifts from prisma/migrations/ and the next \`migrate deploy\` fails on objects that already exist. Write a timestamped migration and apply it with \`prisma migrate deploy\` (rules/prisma.md)." >&2
+  exit 2
+done
+
+if [ "$resolved" = 0 ]; then
+  echo "⛔ dotclaude db-push-guard: 'prisma db push' with no resolvable database URL (checked: $names), so nothing proves it is local. Change schema through a timestamped migration (\`prisma migrate dev --create-only\`, or a hand-written prisma/migrations/<ts>_<name>/migration.sql) and apply it with \`prisma migrate deploy\`." >&2
   exit 2
 fi
-
-case "$url" in
-  *@localhost[:/]* | *@127.0.0.1[:/]* | *"@[::1]"* | *@host.docker.internal[:/]* | file:*) exit 0 ;;
-esac
-
-echo "⛔ dotclaude db-push-guard: 'prisma db push' against a non-local database ($source_desc). It records no migration, so the deployed schema drifts from prisma/migrations/ and the next \`migrate deploy\` fails on objects that already exist. Write a timestamped migration and apply it with \`prisma migrate deploy\` (rules/prisma.md)." >&2
-exit 2
+exit 0
