@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# dotclaude secret-read-guard — PreToolUse hook for Read | Bash.
+# dotclaude secret-read-guard — PreToolUse hook for Read | Grep | Bash, and (through
+# mcp-tool-adapter.sh) Serena's read, search and shell tools.
 #
 # Turns "never read a secrets file's VALUES into the transcript" from prose an
 # agent follows probabilistically into a hard, deterministic block. Wired in
@@ -124,6 +125,27 @@ if tool == "Read":
     path = ti.get("file_path") or ""
     if is_secret_path(path):
         print("Read tool targets a secrets path: " + path)
+    sys.exit(0)
+
+# ---- Grep (and search tools restated as Grep by mcp-tool-adapter.sh): it
+# prints matching lines, so `grep -n . <secrets file>` through it is a read.
+# Judged on the path (a secrets file, or a directory that holds only secrets)
+# and on a glob that singles out env files. A plain repo-wide search is not
+# judged: ripgrep skips gitignored files, which is where a repo's .env lives.
+SECRET_DIRS = ("/.config/secrets", "/.musclebuddy", "/.redthread")
+def is_secret_dir(p):
+    norm = os.path.expanduser((p or "").replace("${HOME}", "~").replace("$HOME", "~")).rstrip("/")
+    return any(norm.endswith(d) or (d + "/") in norm for d in SECRET_DIRS)
+
+if tool == "Grep":
+    import fnmatch
+    path = ti.get("path") or ""
+    glob = (ti.get("glob") or "").split("/")[-1]
+    if is_secret_path(path) or is_secret_dir(path):
+        print("Grep targets a secrets path: " + path)
+    elif glob and not fnmatch.fnmatch("index.ts", glob) and any(
+            fnmatch.fnmatch(n, glob) for n in (".env", ".env.local", ".env.production", "app.env", "agent.env")):
+        print("Grep's glob singles out env files: " + glob)
     sys.exit(0)
 
 if tool != "Bash":
