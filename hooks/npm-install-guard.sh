@@ -183,6 +183,16 @@ env_value() {
   printf '%s' "$val"
 }
 
+# Degraded registry on (bin/degraded-registry.sh): `npm ci` takes every
+# @garrettmakesitllc tarball from the local mirror by its lockfile URL and sends
+# GitHub Packages nothing, so there is no token to check. A lockfile WRITER
+# still reads the scope's packuments from GitHub, so it keeps the check.
+user_npmrc="${DEGRADED_REGISTRY_NPMRC:-${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}}"
+if ! ((writes_lockfile)) && [ -f "$user_npmrc" ] \
+   && grep -qF '# >>> dotclaude degraded-registry' "$user_npmrc"; then
+  npmrc=''
+fi
+
 if ((fetches)) && [ -n "$npmrc" ]; then
   # An inline `NODE_AUTH_TOKEN=…` prefix overrides whatever the shell holds, so
   # it is what decides. A command substitution or a literal carries its own

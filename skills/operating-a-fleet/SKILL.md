@@ -121,6 +121,13 @@ files or comments and stops.
 The wave procedure, and the traps that cost a full session the first time through, are in
 `references/degraded-mode.md`.
 
+**Packages can degrade separately from CI.** When GitHub Packages refuses `@gmi/*` downloads
+(`403 … billing limit`), installs move onto a local mirror with one line,
+`bin/degraded-registry.sh on`, with no committed repo change and no owner sign-off, because nothing
+about the merge gate moves. Never substitute versions or install `--offline` to get around it.
+Setup, populating the mirror, degraded publishes from platform, and syncing to the other machine:
+`references/degraded-registry.md`.
+
 ## The gate in degraded mode: a declarative CI replica
 
 An agent reading `ci.yml` and improvising the equivalent locally is not a gate. Two validators did

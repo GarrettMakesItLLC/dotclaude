@@ -99,6 +99,14 @@ check 2 "$PINNED" "$(printf 'echo start && \\\n  npm ci')"
 check 0 "$PINNED" "$(printf "cat > notes.md <<'EOF'\nrun npm ci first\nEOF")"
 check 0 "$PINNED" "$(printf '# npm ci would go here\necho done')"
 
+echo "npm-install-guard: degraded registry on (bin/degraded-registry.sh)"
+unset NODE_AUTH_TOKEN
+printf '# >>> dotclaude degraded-registry (bin/degraded-registry.sh off removes this) >>>\nregistry=http://127.0.0.1:4873/\n# <<< dotclaude degraded-registry <<<\n' >"$HOME/.npmrc"
+check 0 "$PINNED" "npm ci"
+check 2 "$PINNED" "corepack npm@10.8.2 install left-pad"
+rm "$HOME/.npmrc"
+check 2 "$PINNED" "npm ci"
+
 echo "npm-install-guard: lockfile pin"
 export NODE_AUTH_TOKEN=ghp_good
 check 2 "$PINNED" "npm install lodash"
