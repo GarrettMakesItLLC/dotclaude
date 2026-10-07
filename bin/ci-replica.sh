@@ -364,8 +364,12 @@ while IFS="	" read -r idx name; do
   # and the a11y sweep that ran next reported a WCAG violation on a page that
   # exists in no commit (MuscleBuddy#8294).
   tree_before=""
+  tree_before_rc=0
   if [ "$TREE_GUARD" = 1 ]; then
-    tree_before=$(cd "$ROOT" && git status --porcelain -uall 2>/dev/null || true)
+    # Its exit status is kept, not discarded: a `git status` that fails leaves
+    # an empty snapshot, and two empty snapshots compare equal, so the guard
+    # would report a clean tree it never measured.
+    tree_before=$(cd "$ROOT" && git status --porcelain -uall 2>"$d/tree-before.err"); tree_before_rc=$?
     # Written to a file, not just held in $tree_before: a dirty tree of any
     # real size (#415 — a job that leaves thousands of files behind) makes
     # the file the only sound way to hand this to python, since the env-var
@@ -414,8 +418,17 @@ while IFS="	" read -r idx name; do
   # dirt it left for the next one, and a timed-out or half-finished command is
   # exactly when a tree gets left mid-write.
   if [ "$TREE_GUARD" = 1 ]; then
-    tree_after=$(cd "$ROOT" && git status --porcelain -uall 2>/dev/null || true)
-    if [ "$tree_after" != "$tree_before" ]; then
+    tree_after=$(cd "$ROOT" && git status --porcelain -uall 2>"$d/tree-after.err"); tree_after_rc=$?
+    if [ "$tree_before_rc" -ne 0 ] || [ "$tree_after_rc" -ne 0 ]; then
+      {
+        echo ""
+        echo "### tree-guard: git status failed (before: exit $tree_before_rc, after: exit $tree_after_rc), so the tree was not measured"
+        cat "$d/tree-before.err" "$d/tree-after.err" 2>/dev/null | sed 's/^/###   /'
+      } >> "$log"
+      printf '    ! tree-guard: git status failed around %s (before: exit %s, after: exit %s) — refusing to treat an unmeasured tree as clean\n' \
+        "$name" "$tree_before_rc" "$tree_after_rc"
+      if [ "$rc" -eq 0 ]; then rc=91; failed_cmd="tree-guard: git status failed around $name"; fi
+    elif [ "$tree_after" != "$tree_before" ]; then
       # Both snapshots go to FILES under the job dir, not through the
       # environment (#415): a job that leaves thousands of files dirty (WSL's
       # `@lhci/cli` chrome profiles, ~6,500 lines of `git status --porcelain`)
