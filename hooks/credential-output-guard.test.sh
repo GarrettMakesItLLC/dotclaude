@@ -25,6 +25,16 @@ FAKE_SBP="sbp_$(rep a 40)"
 FAKE_AWS="AKIA$(rep F 16)"
 FAKE_VAL="fakevalue$(rep G 20)"
 
+# An isolated HOME with a synthetic secrets file, so the guard's live-value
+# lookup never touches the real one. FAKE_LIVE is deliberately fixture-shaped
+# (all-lowercase words), so only the live-value match can flag it.
+FAKE_HOME="$(mktemp -d)"
+trap 'rm -f "$FAIL_MARKER"; rm -rf "$FAKE_HOME"' EXIT
+FAKE_LIVE="live-secret-words"
+mkdir -p "$FAKE_HOME/.config/secrets"
+printf 'NODE_AUTH_TOKEN=%s\n' "$FAKE_LIVE" >"$FAKE_HOME/.config/secrets/fake.env"
+export HOME="$FAKE_HOME"
+
 # run <stdout> [stderr] — prints the hook's JSON (empty when it passes).
 run() {
   python3 -c '
@@ -70,6 +80,9 @@ must_redact "export line" "export STRIPE_SECRET_KEY='$FAKE_VAL'" "$FAKE_VAL" "th
 must_redact "railway --kv" "RESEND_API_KEY=$FAKE_VAL" "$FAKE_VAL" "RESEND_API_KEY"
 must_redact "JSON pair" "{\"SUPABASE_SERVICE_ROLE_KEY\": \"$FAKE_VAL\", \"PORT\": \"3000\"}" "$FAKE_VAL" "SUPABASE_SERVICE_ROLE_KEY"
 
+# A value equal to a live credential is reported even when fixture-shaped.
+must_redact "live value from a secrets file" "NODE_AUTH_TOKEN=$FAKE_LIVE" "$FAKE_LIVE" "the value of NODE_AUTH_TOKEN"
+
 # Other lines and fields survive, and stderr is scanned too.
 out="$(run "$(printf 'line one\nNODE_AUTH_TOKEN=%s\nline three' "$FAKE_VAL")" "err: $FAKE_GH")"
 so="$(field 'd["hookSpecificOutput"]["updatedToolOutput"]["stdout"]' <<<"$out")"
@@ -91,6 +104,11 @@ must_pass "short value" "TOKEN_TTL=3600"
 must_pass "code" 'GITHUB_TOKEN=process.env.GITHUB_TOKEN ?? ""'
 must_pass "non-secret name" "NEXT_PUBLIC_SITE_URL=https://example.org/some/long/path"
 must_pass "prefix only" "ghp_"
+# Fixtures and sentinels in source code are not credentials (#505).
+must_pass "fixture ghp_good" "export NODE_AUTH_TOKEN=ghp_good"
+must_pass "fixture ghp_bad" "NODE_AUTH_TOKEN=ghp_bad"
+must_pass "sentinel" "token='inline-expansion'"
+must_pass "sentinel unquoted" "token=inline-expansion"
 # A name-mapping file (a repo config) holds variable NAMES, not values (#496).
 must_pass "name mapping JSON" '{"credentials": {"namespaced": {"RT_DATABASE_URL": "DATABASE_URL", "RT_DIRECT_URL": "DIRECT_URL"}}}'
 must_pass "name mapping env" "$(printf 'RT_DATABASE_URL=DATABASE_URL\nSERVICE_TOKEN=GITHUB_TOKEN_VALUE')"
