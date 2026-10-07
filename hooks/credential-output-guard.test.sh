@@ -113,6 +113,79 @@ must_pass "sentinel unquoted" "token=inline-expansion"
 must_pass "name mapping JSON" '{"credentials": {"namespaced": {"RT_DATABASE_URL": "DATABASE_URL", "RT_DIRECT_URL": "DIRECT_URL"}}}'
 must_pass "name mapping env" "$(printf 'RT_DATABASE_URL=DATABASE_URL\nSERVICE_TOKEN=GITHUB_TOKEN_VALUE')"
 
+# A dict repr / object literal pairs a quoted value with its key anywhere on a
+# line (#478): an App Store Connect attributes dict printed with `print(a)`.
+must_redact "Python dict repr" "{'contactEmail': 'r@example.org', 'demoAccountName': 'reviewer', 'demoAccountPassword': '$FAKE_VAL', 'demoAccountRequired': True}" "$FAKE_VAL" "the value of demoAccountPassword"
+must_redact "JS object literal" "const login = { user: 'r', password: \"$FAKE_VAL\" };" "$FAKE_VAL" "the value of password"
+must_pass "dict repr, non-secret keys" "{'contactEmail': 'r@example.org', 'demoAccountRequired': True}"
+must_pass "dict repr, placeholder" "{'demoAccountPassword': 'your-password-here'}"
+# #478's false positive: a name mapping in a repo manifest.
+must_pass "repo.json name mapping" '{"MB_PROD_DATABASE_URL": "DATABASE_URL", "MB_PROD_DIRECT_URL": "DIRECT_URL"}'
+
+# Private-key bodies. FAKE_* bodies are a key's fixed DER prefix (structure, not
+# key material) followed by filler.
+B64LINE="$(rep A 64)"
+FAKE_EC_BODY="MIGTAgEAMBMGByqGSM49$(rep B 44)"
+FAKE_RSA_BODY="MIIEvQIBADANBgkqhkiG9w0BAQEFAASC$(rep C 32)"
+must_redact "PEM block" "$(printf 'APPLE_KEY=-----BEGIN PRIVATE KEY-----\n%s\n%s\nQUJD\n-----END PRIVATE KEY-----\nnext' "$FAKE_RSA_BODY" "$B64LINE")" "$B64LINE" "a private key"
+out="$(run "$(printf -- '-----BEGIN EC PRIVATE KEY-----\n%s\nQUJDRA==\n-----END EC PRIVATE KEY-----\nafter the key' "$B64LINE")")"
+so="$(field 'd["hookSpecificOutput"]["updatedToolOutput"]["stdout"]' <<<"$out")"
+grep -q 'QUJDRA==' <<<"$so" && fail "a key's short last line survived"
+grep -q '^after the key$' <<<"$so" || fail "the line after the key was lost: $so"
+# The header was grep'd away (#478): bare body lines, the first with the prefix.
+must_redact "header-less EC body" "$(printf '%s\n%s\n%s' "$FAKE_EC_BODY" "$B64LINE" "$B64LINE")" "$B64LINE" "a private key"
+must_redact "header-less RSA body" "$FAKE_RSA_BODY" "$FAKE_RSA_BODY" "a private key"
+must_redact "SEC1 P-384 body" "MIGkAgEBBDB$(rep G 53)" "$(rep G 53)" "a private key"
+must_redact "openssh body" "b3BlbnNzaC1rZXktdjE$(rep D 50)" "$(rep D 50)" "a private key"
+# A sourced `railway variables --kv` dump (#509): bash echoes each line of a
+# multi-line PEM value as a command it could not find.
+must_redact "sourced PEM value" "$(printf '/tmp/kv.env: line 7: PRIVATE: command not found\n/tmp/kv.env: line 8: %s: command not found\n/tmp/kv.env: line 9: %s: command not found\n/tmp/kv.env: line 10: -----END: command not found' "$FAKE_EC_BODY" "$B64LINE")" "$B64LINE" "a private key"
+out="$(run "" "$(printf '/tmp/kv.env: line 8: %s: command not found\n/tmp/kv.env: line 9: %s: No such file or directory' "$FAKE_EC_BODY" "$B64LINE")")"
+se="$(field 'd["hookSpecificOutput"]["updatedToolOutput"]["stderr"]' <<<"$out" 2>/dev/null)"
+[ -n "$se" ] && ! grep -qF "$B64LINE" <<<"$se" || fail "a sourced PEM value on stderr was not redacted: ${se:-no report}"
+# A JSON one-liner with escaped newlines (a service-account file).
+must_redact "PEM in JSON" "{\"private_key\": \"-----BEGIN PRIVATE KEY-----\\\\n${B64LINE}\\\\n-----END PRIVATE KEY-----\\\\n\"}" "$B64LINE" "a private key"
+# A header alone is prose, not a key; certificates and public keys are public.
+must_pass "PEM header in prose" "detect the \`-----BEGIN PRIVATE KEY-----\` header, then the body"
+must_pass "certificate body" "$(printf -- '-----BEGIN CERTIFICATE-----\nMIIC+TCCAeGgAwIBAgIU%s\n-----END CERTIFICATE-----' "$(rep E 40)")"
+must_pass "public key body" "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB$(rep F 40)"
+must_pass "long hash" "sha256 $(rep 0 64) package.tgz"
+
+# Serena's execute_shell_command (#519): the result is an MCP payload, replaced
+# through updatedMCPToolOutput. Serena's text is the JSON of
+# {stdout, return_code, cwd, stderr}; the harness hands it over either as that
+# string or as a list of text content blocks.
+SERENA_TEXT="$(python3 -c 'import json,sys; print(json.dumps({"stdout": sys.argv[1], "return_code": 0, "cwd": "/w", "stderr": None}))' \
+  "$(printf 'line one\nDATABASE: postgresql://u:%s@db.example.internal:6543/postgres' "$FAKE_PW")")"
+for shape in blocks string; do
+  for tool in mcp__plugin_serena_serena__execute_shell_command mcp__serena__execute_shell_command; do
+    out="$(python3 -c '
+import json, sys
+text = sys.argv[3]
+resp = [{"type": "text", "text": text}] if sys.argv[2] == "blocks" else text
+print(json.dumps({"tool_name": sys.argv[1], "tool_input": {"command": "env | grep URL"}, "tool_response": resp}))
+' "$tool" "$shape" "$SERENA_TEXT" | "$GUARD")"
+    [ -n "$out" ] || { fail "$tool ($shape): no report"; continue; }
+    got="$(python3 -c '
+import json, sys
+d = json.load(sys.stdin)["hookSpecificOutput"]
+assert "updatedToolOutput" not in d, "an MCP result was replaced through the Bash field"
+r = d["updatedMCPToolOutput"]
+text = r[0]["text"] if isinstance(r, list) else r
+assert (isinstance(r, list) and r[0]["type"] == "text") or isinstance(r, str), "shape changed"
+print(json.loads(text)["stdout"])
+' <<<"$out" 2>&1)" || { fail "$tool ($shape): $got"; continue; }
+    grep -qF "$FAKE_PW" <<<"$got" && fail "$tool ($shape): value survived redaction"
+    grep -qF 'postgresql://u:<redacted>@db.example.internal' <<<"$got" || fail "$tool ($shape): not redacted in place: $got"
+    grep -q '^line one$' <<<"$got" || fail "$tool ($shape): other output lost: $got"
+    grep -q 'Serena shell result' <<<"$out" || fail "$tool ($shape): warning does not name the tool"
+  done
+done
+out="$(python3 -c 'import json; print(json.dumps({"tool_name": "mcp__serena__execute_shell_command", "tool_input": {"command": "ls"}, "tool_response": [{"type": "text", "text": "{\"stdout\": \"a.txt\", \"return_code\": 0}"}]}))' | "$GUARD")"
+[ -z "$out" ] || fail "clean Serena output was flagged: $out"
+out="$(python3 -c 'import json; print(json.dumps({"tool_name": "mcp__serena__read_file", "tool_response": "postgresql://u:secretvalue1@h/db"}))' | "$GUARD")"
+[ -z "$out" ] || fail "a Serena tool other than the shell was scanned"
+
 # Fail open on garbage and on other tools.
 printf 'not json' | "$GUARD" >/dev/null 2>&1 || fail "garbage input did not fail open"
 out="$(printf '%s' '{"tool_name":"Read","tool_response":"x"}' | "$GUARD")"

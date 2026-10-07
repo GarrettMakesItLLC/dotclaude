@@ -121,6 +121,22 @@ for tool, need in sorted(TABLE.items()):
         print(f"FAIL: {tool} reaches no {', '.join(missing)}"); bad = 1
     if tool not in NATIVE and direct & (SHELL_GUARDS | READ_GUARDS | WRITE_GUARDS):
         print(f"FAIL: {tool} is registered directly on {sorted(direct)}, which cannot read its payload"); bad = 1
+
+# PostToolUse: every tool that runs a shell has its output scanned. The guard
+# reads Serena's MCP result shape itself, so it is registered directly, not
+# through the adapter (which restates PreToolUse INPUT only).
+POST_SHELL_GUARDS = {"credential-output-guard"}
+for tool in sorted(t for t, need in TABLE.items() if need is SHELL_GUARDS):
+    have = set()
+    for group in cfg["hooks"].get("PostToolUse", []):
+        if matches(group.get("matcher"), tool):
+            for h in group.get("hooks", []):
+                m = re.search(r"/\.claude/hooks/([A-Za-z0-9_-]+)\.sh", h.get("command", ""))
+                if m:
+                    have.add(m.group(1))
+    missing = sorted(POST_SHELL_GUARDS - have)
+    if missing:
+        print(f"FAIL: {tool}'s output reaches no PostToolUse {', '.join(missing)}"); bad = 1
 sys.exit(bad)
 PY
 
