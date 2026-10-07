@@ -36,7 +36,7 @@ echo 'module.exports = 42;' >"$TMP/pkg/index.js"
 printf 'engine-strict=true\n' >"$DEGRADED_REGISTRY_NPMRC"
 "$CLI" on >/dev/null 2>&1
 check "on writes registry" "grep -qx 'registry=${BASE}/' '$DEGRADED_REGISTRY_NPMRC'"
-check "on writes host rewrite" "grep -qx 'replace-registry-host=npm.pkg.github.com' '$DEGRADED_REGISTRY_NPMRC'"
+check "on writes host rewrite" "grep -qx 'replace-registry-host=always' '$DEGRADED_REGISTRY_NPMRC'"
 check "on keeps other lines" "grep -qx 'engine-strict=true' '$DEGRADED_REGISTRY_NPMRC'"
 "$CLI" on >/dev/null 2>&1
 check "on is idempotent" "[ \"\$(grep -c '^registry=' '$DEGRADED_REGISTRY_NPMRC')\" = 1 ]"

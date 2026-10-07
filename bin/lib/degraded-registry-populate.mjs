@@ -205,7 +205,7 @@ function rebuild(p) {
   try {
     // The mirror serves platform's own @gmi/* pins, so the switch need not be
     // on for a rebuild — only the server has to be up.
-    const reg = `--registry=http://127.0.0.1:${PORT}/ --replace-registry-host=npm.pkg.github.com`;
+    const reg = `--registry=http://127.0.0.1:${PORT}/ --replace-registry-host=always --allow-remote=all`;
     sh(work, `npm ci --no-audit --no-fund ${reg}`);
     sh(work, 'npm run build');
     sh(work, `npm pack -w ${p.name} --pack-destination ${JSON.stringify(out)}`);

@@ -96,8 +96,10 @@ stop_server() {
   [ -f "$PIDFILE" ] || return 0
   local pid
   pid="$(cat "$PIDFILE" 2>/dev/null)"
+  # The basename, not the full path: a mirror started from a worktree checkout
+  # is still this script's to stop once that worktree is gone.
   if [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] \
-     && tr '\0' ' ' <"/proc/$pid/cmdline" | grep -qF "$SERVER"; then
+     && tr '\0' ' ' <"/proc/$pid/cmdline" | grep -qF "$(basename "$SERVER")"; then
     kill "$pid" 2>/dev/null || true
   fi
   rm -f "$PIDFILE"
@@ -122,13 +124,20 @@ write_block() {
   strip_block
   # A user-level `registry=` or `replace-registry-host=` outside the block would
   # silently win or lose depending on order, so refuse rather than guess.
-  if [ -f "$NPMRC" ] && grep -qE '^[[:space:]]*(registry|replace-registry-host)[[:space:]]*=' "$NPMRC"; then
-    die "$NPMRC already sets registry= or replace-registry-host= outside the managed block; remove it first"
+  if [ -f "$NPMRC" ] && grep -qE '^[[:space:]]*(registry|replace-registry-host|allow-remote)[[:space:]]*=' "$NPMRC"; then
+    die "$NPMRC already sets registry=, replace-registry-host= or allow-remote= outside the managed block; remove it first"
   fi
   {
     echo "$BEGIN"
     echo "registry=${URL}"
-    echo "replace-registry-host=npm.pkg.github.com"
+    # `always`, not just npm.pkg.github.com: npm 12 classifies a tarball whose
+    # URL is not on the configured registry as "remote" and refuses it under
+    # allow-remote=none|root (platform commits root). Rewriting every pin onto
+    # the mirror keeps npmjs tarballs registry-typed; the mirror 307s them on.
+    echo "replace-registry-host=always"
+    # The rewritten @garrettmakesitllc pins are still off their SCOPE's registry
+    # (GitHub, from the project .npmrc), so npm 12 needs this too. npm 10 ignores it.
+    echo "allow-remote=all"
     # `npm publish` refuses to run with no credential for the target registry.
     # The mirror ignores it; this is a placeholder, not a secret.
     echo "//127.0.0.1:${PORT}/:_authToken=degraded-local"
