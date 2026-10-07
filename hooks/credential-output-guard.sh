@@ -22,7 +22,16 @@
 #     `"NAME": "value"` (JSON) where NAME is a credential name (…TOKEN, …SECRET,
 #     …PASSWORD, …API_KEY, DATABASE_URL, …) and the value looks real: at least
 #     8 characters, no whitespace, not an expansion, not a placeholder, not a
-#     bare UPPER_SNAKE variable name.
+#     bare UPPER_SNAKE variable name, and not fixture-shaped (below).
+#
+# A `NAME=value` match is a LEAK when the value equals a live credential: a
+# secret-named environment variable, or a value in ~/.config/secrets/*.env,
+# ~/.musclebuddy/*.env or ~/.redthread/*.env (read here, never printed). When it
+# matches no live value it is still reported unless it is fixture-shaped: a
+# known-prefix token shorter than a real one (`ghp_good`) or all-lowercase words
+# joined by `-`/`_` with no digit (`inline-expansion`). Source code and test
+# fixtures hold those, and a false leak report sends the owner to rotate a
+# credential for nothing.
 #
 # Fail-open: anything it cannot parse passes through unchanged.
 set -uo pipefail
@@ -31,7 +40,7 @@ command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude credential-outpu
 
 input="$(cat)"
 INPUT_JSON="$input" python3 - <<'PY' 2>/dev/null
-import json, os, re, sys
+import glob, json, os, re, sys
 
 try:
     obj = json.loads(os.environ.get("INPUT_JSON", ""))
@@ -72,10 +81,51 @@ def placeholder(v):
             or len(set(v)) == 1)
 
 
-def real_value(v):
+def unquote(v):
     v = v.strip()
     if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
         v = v[1:-1]
+    return v
+
+
+def live_values():
+    """Values of live credentials: secret-named env vars and the secrets files."""
+    vals = set()
+    for k, v in os.environ.items():
+        if SECRET_NAME.search(k) and len(v) >= 8:
+            vals.add(v)
+    home = os.path.expanduser("~")
+    pats = [".config/secrets/*.env", ".musclebuddy/*.env", ".redthread/*.env"]
+    for pat in pats:
+        for path in glob.glob(os.path.join(home, pat)):
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        m = re.match(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line.rstrip("\n"))
+                        if m and SECRET_NAME.search(m.group(1)):
+                            v = unquote(m.group(2))
+                            if len(v) >= 8:
+                                vals.add(v)
+            except OSError:
+                continue
+    return vals
+
+
+LIVE = live_values()
+
+
+def fixture_shaped(v):
+    if re.fullmatch(r"(?:gh[pousr]_|github_pat_|sbp_|sk-ant-|sk_live_|rk_live_|AIza)[A-Za-z0-9_\-]{0,19}", v):
+        return True
+    return bool(re.fullmatch(r"[a-z]+(?:[-_][a-z]+)+", v))
+
+
+def real_value(v):
+    v = unquote(v)
+    if v in LIVE:
+        return True
+    if fixture_shaped(v):
+        return False
     if len(v) < 8 or re.search(r"\s", v) or re.search(r"[()\[\]{}$`]", v):
         return False
     # A bare UPPER_SNAKE identifier is a variable NAME (`"RT_DATABASE_URL":
