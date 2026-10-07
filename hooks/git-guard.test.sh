@@ -398,6 +398,9 @@ git -C "$wt_repo" worktree add -q "$wt_repo/.worktrees/w2" -b feature/other 2>/d
   check 2 'git branch -m integration/w3 integration/perf'
   check 2 'git branch -M integration/w3 integration/perf'
   check 2 'git update-ref refs/heads/integration/w3 HEAD'
+  # An env prefix is still that git call.
+  check 2 'FOO=1 git checkout -B integration/w3 origin/main'
+  check 2 'cd . && env A=b git branch -f integration/w3 HEAD'
   # Safe forms: w2's OWN branch, or a brand-new one, is nobody else's tree.
   check 0 'git checkout -b brand-new-branch'
   check 0 'git branch -f feature/other HEAD'

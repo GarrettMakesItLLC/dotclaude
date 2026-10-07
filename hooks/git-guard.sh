@@ -85,7 +85,8 @@ block() {
 # `.env.local` mentioned in prose — survives the scrub, and rule 3 blocks the
 # commit on its own message text (#363).
 scrubbed="$(printf '%s' "$cmd" | perl -0777 -pe "s/<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1.*?^[ \t]*\2[ \t]*\$/ /gms" \
-  | perl -0777 -pe "s/'[^']*'/ /gs; s/\"[^\"]*\"/ /gs")"
+  | perl -0777 -pe "s/'[^']*'/ /gs; s/\"[^\"]*\"/ /gs")" \
+  || scrubbed="$cmd"  # a scrub killed under memory pressure leaves "": judge the raw command, never nothing
 
 # escape <NAME> <segment-regex>: is the narrow escape NAME in force for the
 # command segments that need it? Either the session exported it (the hook runs
@@ -530,11 +531,13 @@ import os, re, subprocess, sys
 cmd = sys.stdin.read()
 cwd = os.getcwd()
 
+# An env-assignment prefix (`FOO=1 git checkout -B …`, `env X=y git …`) is still
+# that git invocation: matching only a bare `git` let any prefix walk past.
 INV = re.compile(
-    r"(?:^|[;&|]\s*)git\s+(?:-C\s+(\S+)\s+)?"
+    r"(?:^|[;&|(]\s*)\s*(?:env\s+)?(?:[A-Za-z_]\w*=\S*\s+)*git\s+(?:-C\s+(\S+)\s+)?"
     r"(checkout|switch|branch|update-ref)\s+"
     r"((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)",
-    re.S,
+    re.S | re.M,
 )
 
 def targets(sub, rest, current_branch):
