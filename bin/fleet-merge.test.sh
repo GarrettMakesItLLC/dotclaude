@@ -53,7 +53,10 @@ fi
 case "$path" in
   */issues/comments/*) jq -r .body "$STUB_DIR/comment.json" ;;
   */pulls/*) printf '{"head":{"sha":"%s","ref":"%s"},"base":{"ref":"%s"},"state":"open"}\n' "$STUB_HEAD" "${STUB_HEAD_REF:-feat/x}" "${STUB_BASE_REF:-dev}" ;;
-  */contents/*) cat "$STUB_DIR/manifest" ;;
+  # The base's manifest is `manifest`; a head that changed its own is `manifest-head`.
+  */contents/*\?ref=$STUB_HEAD) if [ -f "$STUB_DIR/manifest-head" ]; then cat "$STUB_DIR/manifest-head"; else cat "$STUB_DIR/manifest"; fi ;;
+  */contents/*) [ "${STUB_NO_BASE_MANIFEST:-0}" = 1 ] && { echo '{"message":"Not Found"}' >&2; exit 1; }
+                cat "$STUB_DIR/manifest" ;;
   */rules/branches/*)
     if [ -n "${STUB_RULES_ERR:-}" ]; then
       echo "{\"message\":\"$STUB_RULES_ERR\",\"status\":\"${STUB_RULES_STATUS:-403}\"}"
@@ -89,6 +92,21 @@ for case in '.sha="bbbb"|sha mismatch' '.full=false|--job subset' '.treeClean=fa
 done
 rm -f "$TMP/verdict.json"; run
 [ "$RC" = 1 ] && [ "$(writes)" = 0 ] && ok "refuses a missing verdict file" || bad "missing verdict: rc=$RC"
+
+echo "fleet-merge: the job list is the BASE's manifest, not the head's"
+# A head that drops a failing job from its own manifest, then runs the replica on
+# that manifest, must not authorize its own merge.
+printf '%s\n' '{"version":1,"jobs":[{"name":"lint","commands":["npm run lint"]},{"name":"unit","commands":["npm test"]}]}' > "$TMP/manifest"
+printf '%s\n' '{"version":1,"jobs":[{"name":"lint","commands":["npm run lint"]}]}' > "$TMP/manifest-head"
+BASE_MSHA="$(sha256sum "$TMP/manifest" | cut -d' ' -f1)"; HEAD_MSHA="$(sha256sum "$TMP/manifest-head" | cut -d' ' -f1)"
+verdict ".manifestSha256=\"$HEAD_MSHA\""; run
+[ "$RC" = 1 ] && [ "$(writes)" = 0 ] && grep -q "different manifest than dev's" <<<"$OUT" \
+  && ok "refuses a verdict run on a head manifest that dropped a job" || bad "head-manifest verdict: rc=$RC writes=$(writes) $OUT"
+verdict ".manifestSha256=\"$BASE_MSHA\""; run
+[ "$RC" = 0 ] && ok "accepts a verdict run on the base's manifest while the head changes its own" || bad "base-manifest verdict: rc=$RC $OUT"
+verdict ".manifestSha256=\"$BASE_MSHA\""; STUB_NO_BASE_MANIFEST=1 run
+[ "$RC" = 1 ] && [ "$(writes)" = 0 ] && ok "refuses when the base has no manifest" || bad "no base manifest: rc=$RC $OUT"
+printf '%s' "$MANIFEST" > "$TMP/manifest"; rm -f "$TMP/manifest-head"
 
 echo "fleet-merge: an excused data-plane job is allowed, and said so"
 verdict '.jobs[1].result="NOT-RUN"'; run --allow-not-run e2e
