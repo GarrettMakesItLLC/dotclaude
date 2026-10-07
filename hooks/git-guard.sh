@@ -246,10 +246,14 @@ if printf '%s' "$scrubbed" | grep -Eq '(^|[;&|]|^[[:space:]]*)[[:space:]]*git([[
   esac
 fi
 
-# 5) A path-scoped discard (`git checkout -- <path>`, `git checkout <path>`,
-# `git checkout HEAD -- <path>`, `git restore <path>`) silently overwrites the
-# WORKING TREE from the index/HEAD, taking any uncommitted change to that path
-# with it — no warning, no diff, exit 0. The standing instruction to verify a
+# 5) A discard of uncommitted work. A path-scoped restore (`git checkout --
+# <path>`, `git checkout <path>`, `git checkout HEAD -- <path>`, `git restore
+# <path>`) silently overwrites the WORKING TREE from the index/HEAD, taking any
+# uncommitted change to that path with it — no warning, no diff, exit 0. The
+# same class, outside those verbs: `git reset --hard` and `git read-tree
+# --reset -u` (index and worktree, the whole tree), `git checkout-index -f`
+# (the worktree from the index), and `git clean -f` (untracked files; with
+# `-d` untracked directories, with `-x`/`-X` ignored files — beyond recovery). The standing instruction to verify a
 # guard by deliberately breaking something routes agents straight at this:
 # "undo the break" reads as `git checkout -- <file>`, which can erase UNRELATED
 # uncommitted work in the same file along with the deliberate one.
@@ -261,10 +265,17 @@ fi
 #   - The `--`-less forms agents actually type (`git checkout f.txt`,
 #     `git checkout .`): git treats the first argument as a path whenever it does
 #     not resolve to a commit, so git is ASKED, not pattern-matched.
-#   - A leading ref that resolves to the commit already checked out (`HEAD`,
-#     `@`, `HEAD~0`) resets index AND worktree, so a staged-only change is at
-#     risk too. Any other ref fetches a different version — the sanctioned way
-#     to restore a real historical defect — and is never blocked.
+#   - A leading ref (or `restore --source`/`-s`) that resolves to the commit
+#     already checked out (`HEAD`, `@`, `HEAD~0`, `HEAD^{}`, `HEAD@{0}`, or a
+#     branch sitting on it) restores the last commit, a discard: index AND
+#     worktree for `checkout <ref> --`, so a staged-only change is at risk too.
+#     Any other ref fetches a different version — the sanctioned way to restore
+#     a real historical defect — and is never blocked.
+#   - `$(…)` and backticks are command positions (they run), outside single
+#     quotes. A heredoc body is prose unless its opener feeds a shell.
+#   - A tree named through a variable (`WT=/abs; git -C "$WT" …`, `cd "$WT"`)
+#     is expanded from the command's last assignment of it; a target nothing
+#     in the command resolves is judged as the session tree, never skipped.
 #   - A bare checkout / `git restore <path>` restores from the INDEX, so only an
 #     unstaged change is at risk; untracked files never are.
 #   - A path held in a loop variable (`for f in a b; do git checkout -- $f`) is
@@ -279,13 +290,15 @@ fi
 #     whole tree is judged).
 #
 # Allowed: a path with nothing at risk, `restore --staged` (unstages only),
-# `restore --source=<ref>`, branch switches (git refuses a lossy one itself),
-# `-b/-B/--orphan/-p`. NARROW ESCAPE: GIT_GUARD_ALLOW_DISCARD=1, in the
+# `restore --source=<another commit>`, branch switches (git refuses a lossy one
+# itself), `-b/-B/--orphan/-p`, `reset` without `--hard`, `checkout-index`
+# without `-f` or with `--prefix`, `read-tree` without `-u`, and `clean -n`/
+# `--dry-run`/`-i`. NARROW ESCAPE: GIT_GUARD_ALLOW_DISCARD=1, in the
 # environment or as a prefix on the command, lifts ONLY this block, loudly.
-discard_report="$(GG_CMD="$nq" GG_INPUT="$input" python3 - <<'PY' 2>/dev/null
+discard_report="$(GG_CMD="$cmd" GG_INPUT="$input" python3 - <<'PY' 2>/dev/null
 import json, os, re, shlex, subprocess
 
-cmd = os.environ.get("GG_CMD", "")
+raw = os.environ.get("GG_CMD", "")
 try:
     base = json.loads(os.environ.get("GG_INPUT", "{}")).get("cwd") or os.getcwd()
 except Exception:
@@ -302,6 +315,142 @@ def resolve_dir(cur, d):
     d = os.path.expanduser(d)
     return os.path.normpath(d if os.path.isabs(d) else os.path.join(cur, d))
 
+# A heredoc body is prose (a commit message, a note being written) unless its
+# opener runs a shell on it.
+def heredoc(m):
+    opener = m.group(1)
+    if re.search(r"(?:^|[\s;&|(])(?:ba|z|da|k)?sh(?:\s|$)", opener):
+        return m.group(0)
+    return opener + "\n"
+raw = re.sub(r"(?ms)^([^\n]*<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2[^\n]*)\n.*?^[ \t]*\3[ \t]*$",
+             heredoc, raw)
+
+# Quote characters go and their contents stay: a quoted token is still an
+# argument, and `bash -c "git …"` / `eval '…'` still run it. A command
+# substitution, `$(` or a backtick outside single quotes, runs its contents,
+# so it opens a command position (written as a newline, which is one).
+out, q, i = [], None, 0
+while i < len(raw):
+    ch = raw[i]
+    if q == "'":
+        if ch == "'":
+            q = None
+        else:
+            out.append(ch)
+    elif ch == "\\" and i + 1 < len(raw):
+        out.append(raw[i:i + 2]); i += 2; continue
+    elif ch == "`" or raw.startswith("$(", i):
+        out.append("\n")
+        i += 2 if ch == "$" else 1
+        continue
+    elif q == '"':
+        if ch == '"':
+            q = None
+        else:
+            out.append(ch)
+    elif ch in "'\"":
+        q = ch
+    else:
+        out.append(ch)
+    i += 1
+cmd = "".join(out)
+
+# `VAR=<literal>` assignments, last one wins, to expand `$VAR` in a tree name.
+assigned = {}
+for m in re.finditer(r"(?:^|[;&|({\s])([A-Za-z_][A-Za-z0-9_]*)=([^\s;&|)$`]+)", cmd):
+    assigned[m.group(1)] = m.group(2)
+
+def expand(tok):
+    m = re.match(r"^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?(/.*)?$", tok)
+    if m and m.group(1) in assigned:
+        return assigned[m.group(1)] + (m.group(2) or "")
+    return tok
+
+def tree_of(cur, d):
+    d = expand(d)
+    return base if ("$" in d or "`" in d) else resolve_dir(cur, d)
+
+head_cache = {}
+def is_head(tree, ref):
+    """Does `ref` resolve to the commit `tree` has checked out?"""
+    if tree not in head_cache:
+        head_cache[tree] = git(tree, "rev-parse", "--verify", "--quiet", "HEAD")[1].strip()
+    rc, sha = git(tree, "rev-parse", "--verify", "--quiet", (ref or "HEAD") + "^{commit}")
+    return rc == 0 and bool(head_cache[tree]) and sha.strip() == head_cache[tree]
+
+def at_risk(tree, paths, resets_index):
+    """Tracked paths whose uncommitted change the discard would take."""
+    rc, status = git(tree, "status", "--porcelain", "--", *paths)
+    if rc != 0:
+        return []
+    hit = []
+    for line in status.splitlines():
+        if len(line) < 4 or line[0] in "?!":
+            continue
+        if line[1] != " " or resets_index:
+            hit.append(line[3:])
+    return hit
+
+def judge_other(tree, sub, args):
+    """reset --hard, read-tree --reset -u, checkout-index -f, clean -f."""
+    f = dict(hard=False, force=False, all=False, reset=False, update=False, dry=False,
+             dirs=False, xall=False, xonly=False, elsewhere=False, stdin=False)
+    paths, seen_dd, skip = [], False, False
+    for a in args:
+        if skip:
+            skip = False; continue
+        if seen_dd:
+            paths.append(a); continue
+        if a == "--": seen_dd = True
+        elif a == "--hard": f["hard"] = True
+        elif a == "--force": f["force"] = True
+        elif a == "--all": f["all"] = True
+        elif a == "--reset": f["reset"] = True
+        elif a in ("--dry-run", "--interactive"): f["dry"] = True
+        elif a.startswith("--prefix"): f["elsewhere"] = True; skip = a == "--prefix"
+        elif a == "--stdin": f["stdin"] = True
+        elif a in ("--exclude", "--index-output"): skip = True
+        elif a.startswith("--"): pass
+        elif re.match(r"^-[A-Za-z]+$", a):
+            if sub == "clean":
+                f["force"] |= "f" in a; f["dry"] |= bool(set(a) & set("ni"))
+                f["dirs"] |= "d" in a; f["xall"] |= "x" in a; f["xonly"] |= "X" in a
+                skip = a == "-e"
+            elif sub == "checkout-index":
+                f["force"] |= "f" in a; f["all"] |= "a" in a
+            elif sub == "read-tree":
+                f["update"] |= "u" in a
+        else:
+            paths.append(a)
+    if sub == "reset":
+        return at_risk(tree, ["."], True) if f["hard"] else []
+    if sub == "read-tree":
+        return at_risk(tree, ["."], True) if f["reset"] and f["update"] else []
+    if sub == "checkout-index":
+        if not f["force"] or f["elsewhere"]:
+            return []
+        if f["all"] or f["stdin"]:
+            return at_risk(tree, ["."], False)
+        return at_risk(tree, paths, False) if paths else []
+    # clean
+    if not f["force"] or f["dry"]:
+        return []
+    extra = ["--ignored"] if f["xall"] or f["xonly"] else []
+    rc, status = git(tree, "status", "--porcelain", "--untracked-files=normal", *extra, "--", *(paths or ["."]))
+    if rc != 0:
+        return []
+    hit = []
+    for line in status.splitlines():
+        x, rest = line[:1], line[3:]
+        if x == "?" and f["xonly"]:
+            continue
+        if x == "!" and not (f["xall"] or f["xonly"]):
+            continue
+        if x not in "?!" or (not f["dirs"] and rest.endswith("/")):
+            continue
+        hit.append(rest)
+    return hit
+
 # Loop word lists, for `$f`-style paths.
 loops = {}
 for m in re.finditer(r"(?:^|[;&|({\s])for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;&|)]*)", cmd):
@@ -311,8 +460,8 @@ for m in re.finditer(r"(?:^|[;&|({\s])for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+([^;
 # a whole-line `# comment` is nothing, and a newline is the `;` it means to the
 # shell. A subshell's `(`/`)` and a `case` arm's closing `)` are command
 # boundaries too, so `(git checkout -- f)` and `case x in x) git restore f;;
-# esac` put `git` at a command position. `$(` is left alone: its contents are an
-# argument of the command around it.
+# esac` put `git` at a command position, as does a command substitution
+# (rewritten to a newline above; a `$(` left standing was single-quoted, inert).
 flat = re.sub(r"\\\n", " ", cmd)
 flat = re.sub(r"(?m)^[ \t]*#[^\n]*$", "", flat)
 segments = re.split(r"\s*(?:&&|\|\||;;|;|\||\n|(?<!\$)\(|\))\s*", flat)
@@ -391,22 +540,26 @@ for seg in segments:
     toks, reads_stdin = unwrap(toks)
     if not toks:
         continue
-    if toks[0] in ("cd", "pushd") and len(toks) > 1 and "$" not in toks[1]:
-        cur = resolve_dir(cur, toks[1])
+    if toks[0] in ("cd", "pushd") and len(toks) > 1:
+        cur = tree_of(cur, toks[1])
         continue
     if toks[0] != "git":
         continue
     i, tree = 1, cur
     while i < len(toks) and toks[i].startswith("-"):
         if toks[i] == "-C" and i + 1 < len(toks):
-            tree = resolve_dir(tree, toks[i + 1]); i += 2; continue
+            tree = tree_of(tree, toks[i + 1]); i += 2; continue
         if toks[i] in ("-c", "--git-dir", "--work-tree", "--namespace") and i + 1 < len(toks):
             i += 2; continue
         i += 1
-    if i >= len(toks) or toks[i] not in ("checkout", "restore", "switch"):
+    if i >= len(toks) or toks[i] not in ("checkout", "restore", "switch", "reset", "read-tree",
+                                         "checkout-index", "clean"):
         continue
     sub, args = toks[i], toks[i + 1:]
     if not os.path.isdir(tree):
+        continue
+    if sub in ("reset", "read-tree", "checkout-index", "clean"):
+        reports.extend(f"{tree}\t{p}" for p in judge_other(tree, sub, args))
         continue
     flags = [a for a in args if a.startswith("-")]
     # A FORCED switch (`checkout -f`/`--force`, `switch -f`/`--force`/
@@ -428,14 +581,33 @@ for seg in segments:
     elif sub == "checkout" and any(f in ("-b", "-B", "-t", "--track", "--orphan", "--detach", "-p", "--patch") for f in flags):
         continue
     elif sub == "restore":
-        if any(f.startswith("--source") or f == "-s" or f.startswith("-s=") for f in flags):
-            continue
-        staged = any(f in ("--staged", "-S") for f in flags)
-        worktree = any(f in ("--worktree", "-W") for f in flags)
+        # `--source` naming another commit is the sanctioned form; naming the
+        # one checked out (`HEAD`, `@`, `HEAD~0`, an empty value) is a discard.
+        src, staged, worktree, paths, j, seen_dd = None, False, False, [], 0, False
+        while j < len(args):
+            a = args[j]
+            if seen_dd:
+                paths.append(a)
+            elif a == "--":
+                seen_dd = True
+            elif a in ("--source", "-s"):
+                src = args[j + 1] if j + 1 < len(args) else ""; j += 1
+            elif a.startswith("--source="):
+                src = a[len("--source="):]
+            elif re.match(r"^-s.+", a):
+                src = a[2:]
+            elif re.match(r"^-[A-Za-z]+$", a):
+                staged |= "S" in a; worktree |= "W" in a
+            elif a in ("--staged", "--worktree"):
+                staged |= a == "--staged"; worktree |= a == "--worktree"
+            elif not a.startswith("-"):
+                paths.append(a)
+            j += 1
         if staged and not worktree:
             continue
+        if src is not None and not is_head(tree, src):
+            continue
         resets_index = staged and worktree
-        paths = [a for a in args if not a.startswith("-")]
     else:
         # With `--`, whatever precedes it is a tree-ish by definition (an
         # unresolvable one makes git error out, discarding nothing). Without
@@ -456,9 +628,7 @@ for seg in segments:
         if ref is not None:
             if not paths and not reads_stdin:
                 continue  # a branch switch
-            rc_ref, ref_sha = git(tree, "rev-parse", "--verify", "--quiet", ref + "^{commit}")
-            _, head_sha = git(tree, "rev-parse", "--verify", "--quiet", "HEAD")
-            if rc_ref != 0 or not head_sha or ref_sha.strip() != head_sha.strip():
+            if not is_head(tree, ref):
                 continue  # a different (or unresolvable) commit: never a discard of this one
             resets_index = True
     # `xargs git checkout --` takes its paths from stdin: judge the whole tree.
@@ -476,27 +646,19 @@ for seg in segments:
             expanded.extend(words)
         else:
             expanded = ["."]; break
-    rc, status = git(tree, "status", "--porcelain", "--", *expanded)
-    if rc != 0:
-        continue
-    for line in status.splitlines():
-        if len(line) < 4 or line[0] == "?":
-            continue
-        x, y, rest = line[0], line[1], line[3:]
-        if y != " " or resets_index:
-            reports.append(f"{tree}\t{rest}")
+    reports.extend(f"{tree}\t{p}" for p in at_risk(tree, expanded, resets_index))
 print("\n".join(dict.fromkeys(reports)))
 PY
 )" || discard_report=""
 
 if [ -n "$discard_report" ]; then
-  if escape GIT_GUARD_ALLOW_DISCARD 'git\s.*\b(checkout|switch|restore)\b'; then
-    echo "⚠️  dotclaude git-guard: allowing a path-scoped discard — GIT_GUARD_ALLOW_DISCARD is set." >&2
+  if escape GIT_GUARD_ALLOW_DISCARD 'git\s.*\b(checkout|switch|restore|reset|read-tree|checkout-index|clean)\b'; then
+    echo "⚠️  dotclaude git-guard: allowing a discard of uncommitted work — GIT_GUARD_ALLOW_DISCARD is set." >&2
     echo "   This can silently drop uncommitted work in the named path(s). Only legitimate for a" >&2
     echo "   deliberate discard you have already reviewed." >&2
   else
     at_risk="$(printf '%s\n' "$discard_report" | awk -F'\t' '{print "    " $2 "   (in " $1 ")"}')"
-    block "git checkout/switch/restore would silently discard UNCOMMITTED changes — no warning, no diff, exit 0:
+    block "this git command would silently discard UNCOMMITTED work (or delete untracked files) — no warning, no diff, exit 0:
 $at_risk
 This guard cannot tell a deliberate break from real work; you can. Commit first (git reset --soft HEAD~1 undoes it), or restore a REAL historical defect from a known ref instead: git checkout <sha-or-origin/trunk> -- <path> (a ref that is NOT the commit you are on — HEAD, @ and HEAD~0 discard your work rather than fetching an older version). Genuinely deliberate? cp <path> <path>.bak and mv it back afterward, or prefix the command with GIT_GUARD_ALLOW_DISCARD=1."
   fi

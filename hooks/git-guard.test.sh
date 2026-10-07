@@ -475,6 +475,212 @@ if [ "$got" != 2 ]; then
 fi
 rm -rf "$SHIM"
 
+# --- #499: MuscleBuddy's git-checkout-guard corpus, hoisted. Every spelling its
+# repo hook and its corpora (git-integrity-guards.test.ts, hook-bypass-corpus.
+# test.ts) refuse or allow, judged here by the global guard, plus the
+# same-class discards outside checkout/restore/switch: `reset --hard`,
+# `checkout-index -f`, `read-tree --reset -u` and `clean -f`.
+# `other` is a different commit from HEAD: restoring from it fetches another
+# version, the sanctioned form. A ref AT HEAD's commit (`same`) restores the
+# last commit, which is the discard, whatever it is called. (MB's repo hook
+# judged the ref by NAME and allowed `checkout <branch-at-HEAD> -- f`; this
+# guard judges by commit, which is what decides whether work is lost.)
+mb_repo() {  # mb_repo <dir> — file.txt and .gitignore committed, branches `other`, `same`
+  git init -q -b main "$1"
+  printf 'one\n' > "$1/file.txt"
+  printf 'ignored.txt\n' > "$1/.gitignore"
+  git -C "$1" add -A
+  git -C "$1" -c user.email=t@t -c user.name=t commit -qm first
+  git -C "$1" branch other
+  printf 'two\n' > "$1/second.txt"
+  git -C "$1" add second.txt
+  git -C "$1" -c user.email=t@t -c user.name=t commit -qm second
+  git -C "$1" branch same
+}
+MB="$(mktemp -d)"
+mb_repo "$MB/modified";  printf 'one\nwork\n' > "$MB/modified/file.txt"
+mb_repo "$MB/untracked"; printf 'work\n' > "$MB/untracked/scratch.txt"
+mb_repo "$MB/newdir";    mkdir "$MB/newdir/newdir"; printf 'work\n' > "$MB/newdir/newdir/inner.txt"
+mb_repo "$MB/ignored";   printf 'x\n' > "$MB/ignored/ignored.txt"
+mb_repo "$MB/tidy"
+mb_repo "$MB/clean"
+mb_repo "$MB/branchy";   printf 'one\nwork\n' > "$MB/branchy/file.txt"; printf 'x\n' > "$MB/branchy/untouched.txt"
+git -C "$MB/branchy" add untouched.txt && git -C "$MB/branchy" -c user.email=t@t -c user.name=t commit -qm untouched
+in_tree() { local d="$1"; shift; ( cd "$d" && check "$@" ); }
+
+# Over a modified tracked file.
+while IFS= read -r c; do in_tree "$MB/modified" 2 "$c"; done <<'ROWS'
+git checkout -- file.txt
+git restore file.txt
+git checkout HEAD -- file.txt
+git checkout file.txt
+git checkout .
+git checkout HEAD file.txt
+git checkout -- "file.txt"
+git checkout -- 'file.txt'
+git restore "file.txt"
+git checkout HEAD -- "file.txt"
+for i in 1; do git checkout -- file.txt; done
+for i in 1 2; do git checkout -- file.txt; done
+if true; then git checkout -- file.txt; fi
+bash -c "git checkout -- file.txt"
+(git checkout -- file.txt)
+for f in file.txt; do git checkout -- "$f"; done
+for f in a.txt file.txt; do git restore "${f}"; done
+git checkout -- "$TARGET_FILE"
+case x in x) git checkout -- file.txt;; esac
+case x in x) git restore file.txt;; esac
+git restore --source=HEAD file.txt
+git restore --source=@ file.txt
+git restore --source HEAD -- file.txt
+git restore -s HEAD file.txt
+git restore -sHEAD file.txt
+git restore --source=HEAD~0 file.txt
+git restore --source=HEAD^0 file.txt
+git restore --staged --worktree --source=HEAD file.txt
+x=`git checkout -- file.txt`
+x=$(git checkout -- file.txt)
+git -c core.quotepath=off checkout -- file.txt
+git -c a=b -c c=d checkout file.txt
+git -c a=b restore file.txt
+git checkout @ -- file.txt
+git checkout HEAD~0 -- file.txt
+git checkout HEAD^0 file.txt
+git checkout @ file.txt
+git checkout HEAD^{} -- file.txt
+git checkout HEAD@{0} -- file.txt
+time git checkout -- file.txt
+env git checkout -- file.txt
+FOO=bar git checkout -- file.txt
+FOO=bar BAZ=1 git restore file.txt
+nohup git checkout -- file.txt
+timeout 30 git checkout -- file.txt
+! git checkout -- file.txt
+eval git checkout -- file.txt
+eval "git checkout -- file.txt"
+echo file.txt | xargs git checkout --
+command git checkout -- file.txt
+git checkout -f
+git checkout --force other
+git checkout -f other
+git checkout -fb scratch
+git checkout -f -b scratch
+git switch -f other
+git switch --discard-changes other
+git switch --force other
+git switch -fc scratch
+git reset --hard
+git reset --hard HEAD
+git reset --hard other
+git reset -q --hard
+git -C . reset --hard
+env git reset --hard
+git checkout-index -f file.txt
+git checkout-index -f -- file.txt
+git checkout-index -fa
+git checkout-index -a -f
+git checkout-index --force --all
+git checkout-index -fu file.txt
+git read-tree --reset -u HEAD
+git read-tree -u --reset HEAD
+git checkout same -- file.txt
+git restore --source=same file.txt
+git restore --source= file.txt
+ROWS
+# The multi-line forms (a here-string row cannot hold a newline).
+for c in "$(printf 'echo start\ngit checkout -- file.txt')" \
+         "$(printf '# restore the break\ngit checkout -- file.txt')" \
+         "$(printf '# one\n# two\n\ngit restore file.txt')" \
+         "$(printf "cat > notes.md <<'EOF'\nNever run git checkout -- other.txt here.\nEOF\ngit checkout -- file.txt")" \
+         "$(printf 'git checkout other\ngit checkout -- file.txt')" \
+         'git checkout -- file.txt; git checkout other' \
+         "$(printf 'echo a && \\\n  git checkout -- file.txt')" \
+         "$(printf '# force it\ngit checkout -f other')" \
+         "$(printf '# undo the break\ngit reset --hard')"; do
+  in_tree "$MB/modified" 2 "$c"
+done
+while IFS= read -r c; do in_tree "$MB/modified" 0 "$c"; done <<'ROWS'
+git checkout other -- file.txt
+git restore --source=other file.txt
+git restore -s other file.txt
+git restore --staged file.txt
+git checkout -b some-branch
+git switch other
+git checkout main
+git checkout other file.txt
+git switch -c scratch
+git -c a=b checkout other
+echo "git checkout -f is dangerous"
+GIT_GUARD_ALLOW_DISCARD=1 git checkout -f other
+GIT_GUARD_ALLOW_DISCARD=1 git checkout -- file.txt
+git reset
+git reset --soft HEAD
+git reset --mixed HEAD
+git checkout-index -a
+git checkout-index --prefix=/tmp/export/ -fa
+git read-tree HEAD
+git clean -n -d
+git clean -fdn
+git clean --dry-run -fd
+echo "git reset --hard is dangerous"
+GIT_GUARD_ALLOW_DISCARD=1 git reset --hard
+ROWS
+in_tree "$MB/modified" 0 "$(printf "cat > notes.md <<'EOF'\nNever run git checkout -- file.txt here.\nEOF")"
+in_tree "$MB/modified" 0 'echo "git checkout -- file.txt is the dangerous form"'
+in_tree "$MB/modified" 0 "git commit -m 'never run \`git reset --hard\` here'"
+in_tree "$MB/modified" 0 "$(printf "git commit -F - <<'EOF'\nfix: block \`git reset --hard\`\n\ngit clean -fd is blocked too\nEOF")"
+in_tree "$MB/modified" 0 "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\n\`git checkout -- file.txt\` discards\nEOF\n)"')"
+in_tree "$MB/modified" 2 "$(printf "bash <<'EOF'\ngit reset --hard\nEOF")"
+in_tree "$MB/modified" 2 'echo "$(git reset --hard)"'
+in_tree "$MB/modified" 0 "echo '\$(git reset --hard)'"
+in_tree "$MB/branchy" 0 'git checkout -- untouched.txt'
+in_tree "$MB/branchy" 0 'for f in untouched.txt; do git checkout -- "$f"; done'
+in_tree "$MB/tidy" 0 'git checkout .'
+
+# The tree a discard lands in, named from a clean session cwd.
+D="$MB/modified"
+for c in "git -C $D checkout -- file.txt" "git -C $D checkout file.txt" "git -C $D checkout ." \
+         "git -C $D restore file.txt" "git -C \"$D\" checkout -- file.txt" \
+         "WT=$D; git -C \"\$WT\" checkout -- file.txt" "WT=$D; git -C \${WT} restore file.txt" \
+         "WT=$D; cd \"\$WT\" && git checkout -- file.txt" \
+         "cd /tmp && echo hi; cd $D && git checkout -- file.txt" \
+         "WT=$D; git -C \"\$WT\" reset --hard"; do
+  in_tree "$MB/clean" 2 "$c"
+done
+# An unresolvable -C target is judged against the session tree, not skipped.
+in_tree "$D" 2 'git -C "$SOMEWHERE_ELSE" checkout -- file.txt'
+in_tree "$D" 2 'git -C "$SOMEWHERE_ELSE" reset --hard'
+# The LAST cd before the invocation decides the tree.
+in_tree "$D" 0 "cd $D && echo hi; cd $MB/clean && git checkout -- file.txt"
+
+# git clean: untracked files, untracked dirs (-d), ignored files (-x/-X).
+while IFS= read -r c; do in_tree "$MB/untracked" 2 "$c"; done <<'ROWS'
+git clean -fd
+git clean -fdx
+git clean -f -d
+git clean -df
+git clean --force -d
+git clean -f
+git clean -f scratch.txt
+git clean -f -- scratch.txt
+git -C . clean -fd
+ROWS
+in_tree "$MB/newdir" 2 'git clean -fd'
+in_tree "$MB/newdir" 0 'git clean -f'
+in_tree "$MB/ignored" 2 'git clean -fdx'
+in_tree "$MB/ignored" 2 'git clean -fX'
+in_tree "$MB/ignored" 0 'git clean -fd'
+for c in 'git reset --hard' 'git reset --hard other' 'git checkout-index -fa' \
+         'git read-tree --reset -u HEAD' 'git clean -fd'; do
+  in_tree "$MB/tidy" 0 "$c"
+done
+# The refusal names what is at risk.
+msg="$(cd "$MB/modified" && printf '%s' '{"tool_input":{"command":"git reset --hard"}}' | "$GUARD" 2>&1 >/dev/null)"
+grep -q 'file.txt' <<<"$msg" || { echo "FAIL: the reset --hard refusal does not name file.txt: $msg"; echo x >> "$FAIL_MARKER"; }
+msg="$(cd "$MB/untracked" && printf '%s' '{"tool_input":{"command":"git clean -fd"}}' | "$GUARD" 2>&1 >/dev/null)"
+grep -q 'scratch.txt' <<<"$msg" || { echo "FAIL: the clean -fd refusal does not name scratch.txt: $msg"; echo x >> "$FAIL_MARKER"; }
+rm -rf "$MB"
+
 if [ -s "$FAIL_MARKER" ]; then
   echo "git-guard: $(wc -l < "$FAIL_MARKER" | tr -d ' ') case(s) FAILED"
   fail=1
