@@ -21,7 +21,8 @@
 # it for the next session. Nothing here ever waits on the network in the steady
 # state.
 #
-# Also reports rulesets a killed `bin/fleet-merge.sh` left lifted (`--list-pending`).
+# Also reports rulesets a killed `bin/fleet-merge.sh` left lifted (`--list-pending`),
+# and whether npm is routed to the degraded @gmi/* mirror (`bin/degraded-registry.sh`).
 #
 # ALWAYS exits 0. No CLI, no python3, no gh, no network, a corrupt cache — none
 # of that is worth blocking a session over.
@@ -47,17 +48,31 @@ if [ -x "$MERGE" ] && command -v jq >/dev/null 2>&1; then
   lifted="$(timeout 5 "$MERGE" --list-pending 2>/dev/null || true)"
 fi
 
-if [ -z "$lifted" ]; then
+# The degraded npm registry is machine state, not repo state: one ~/.npmrc
+# routes every repo's installs. Its banner rides along whatever the repo's mode
+# is, and asking for it also restarts a mirror a reboot killed.
+REGISTRY="$(dirname "$HOOK_DIR")/bin/degraded-registry.sh"
+registry=""
+if [ -x "$REGISTRY" ]; then
+  registry="$(timeout 8 "$REGISTRY" banner 2>/dev/null || true)"
+fi
+
+if [ -z "$lifted" ] && [ -z "$registry" ]; then
   [ -z "$mode_out" ] || printf '%s\n' "$mode_out"
   exit 0
 fi
 
 # Prepend to the mode banner's envelope, or build one when the mode is silent.
-MODE_OUT="$mode_out" LIFTED="$lifted" python3 -c '
+MODE_OUT="$mode_out" LIFTED="$lifted" REGISTRY_BANNER="$registry" python3 -c '
 import json, os
-banner = ("MERGE GATES LEFT LIFTED: a fleet-merge.sh was killed between lifting a ruleset and "
-          "restoring it, so a merge gate is open right now.\n" + os.environ["LIFTED"] +
-          "\nRestore with: bin/fleet-merge.sh --restore-pending (it also runs at the start of every fleet-merge.sh).")
+parts = []
+if os.environ["LIFTED"]:
+    parts.append("MERGE GATES LEFT LIFTED: a fleet-merge.sh was killed between lifting a ruleset and "
+                 "restoring it, so a merge gate is open right now.\n" + os.environ["LIFTED"] +
+                 "\nRestore with: bin/fleet-merge.sh --restore-pending (it also runs at the start of every fleet-merge.sh).")
+if os.environ["REGISTRY_BANNER"]:
+    parts.append(os.environ["REGISTRY_BANNER"])
+banner = "\n\n".join(parts)
 try:
     env = json.loads(os.environ["MODE_OUT"])
     h = env["hookSpecificOutput"]
