@@ -191,17 +191,17 @@ doctor() {
   fi
 
   # Machine prerequisites. Every SessionStart hook renders its payload with
-  # python3 and exits 0 without it — by design, since a session must never be
+  # python3 (the command guards also perl) and exits 0 without it — by design, since a session must never be
   # blocked — so a machine with no python3 has a complete, healthy-looking
   # symlink farm and not one working hook. That is exactly the drift this
   # doctor exists to catch, and it is invisible in a link check.
   echo "  machine prerequisites:"
   local cmd
-  for cmd in git python3; do
+  for cmd in git python3 perl; do
     if command -v "$cmd" >/dev/null 2>&1; then
       echo "    ✓ $cmd"
     else
-      echo "    ✗ $cmd — required; every hook silently no-ops without it"
+      echo "    ✗ $cmd — required; the hooks that need it stand down without it"
       problems=$((problems + 1))
     fi
   done

@@ -64,7 +64,7 @@ set -uo pipefail
 
 input="$(cat)"
 
-command -v python3 >/dev/null 2>&1 || exit 0
+command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude secret-read-guard: DISABLED — python3 is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
 
 block() {
   echo "⛔ dotclaude secret-read-guard blocked this." >&2

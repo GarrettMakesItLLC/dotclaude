@@ -113,7 +113,7 @@ if [ -n "${WORKTREE_GUARD_OFF:-}" ]; then
 fi
 
 # Need python3 to parse the tool_input JSON. No parser -> fail open.
-command -v python3 >/dev/null 2>&1 || exit 0
+command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude worktree-guard: DISABLED — python3 is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
 
 # A linked `node_modules` — checked before anything else, because it is the one
 # write here whose damage lands somewhere the command never names.

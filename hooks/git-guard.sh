@@ -41,9 +41,8 @@ input="$(cat)"
 
 # Extract tool_input.command. jq is NOT guaranteed on every machine, so parse
 # with python3 (ubiquitous on Linux/macOS). No parser -> fail open.
-if ! command -v python3 >/dev/null 2>&1; then
-  exit 0
-fi
+command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude git-guard: DISABLED — python3 is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
+command -v perl >/dev/null 2>&1 || { echo "⚠️  dotclaude git-guard: DISABLED — perl is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
 cmd="$(printf '%s' "$input" | python3 -c 'import json,sys
 try:
     sys.stdout.write(json.load(sys.stdin).get("tool_input", {}).get("command", "") or "")

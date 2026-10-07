@@ -18,7 +18,7 @@
 # line is skipped, and anything this cannot read fails open.
 set -uo pipefail
 
-command -v python3 >/dev/null 2>&1 || exit 0
+command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude heredoc-guard: DISABLED — python3 is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
 input="$(cat)"
 
 INPUT_JSON="$input" python3 - <<'PYEOF'

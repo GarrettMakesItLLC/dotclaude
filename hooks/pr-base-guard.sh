@@ -16,7 +16,7 @@
 # Fail-open on anything it cannot parse.
 set -uo pipefail
 
-command -v python3 >/dev/null 2>&1 || exit 0
+command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude pr-base-guard: DISABLED — python3 is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
 input="$(cat)"
 
 verdict="$(printf '%s' "$input" | python3 -c '

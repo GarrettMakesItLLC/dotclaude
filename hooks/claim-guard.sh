@@ -53,9 +53,9 @@ if [ -n "${CLAIM_GUARD_OFF:-}" ]; then
 fi
 
 # Need python3 to parse the hook payload and to talk REST. No parser -> fail open.
-command -v python3 >/dev/null 2>&1 || exit 0
-command -v git >/dev/null 2>&1 || exit 0
-command -v gh >/dev/null 2>&1 || exit 0
+command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude claim-guard: DISABLED — python3 is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
+command -v git >/dev/null 2>&1 || { echo "⚠️  dotclaude claim-guard: DISABLED — git is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
+command -v gh >/dev/null 2>&1 || { echo "⚠️  dotclaude claim-guard: DISABLED — gh is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
 
 # Edit/Write/MultiEdit use file_path; NotebookEdit uses notebook_path. One parse
 # emits the session id then the path, each on its own line, so a path containing
