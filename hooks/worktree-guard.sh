@@ -619,7 +619,10 @@ if tool == "Bash":
         # FILE`'s one argument is both its first and last non-flag token, so
         # this covers the common single-destination form; `tee a b` (writes
         # both) only catches the last, which costs nothing beyond a miss.
-        toks = seg.split()
+        # Shell-aware, like the sed parse above: a quoted destination with
+        # spaces is one argument, and a whitespace split would read its last
+        # word as a relative write target (#510).
+        toks = toks_seg
         if toks:
             head = toks[0].rsplit("/", 1)[-1]
             if head in ("cp", "mv", "install", "tee"):
