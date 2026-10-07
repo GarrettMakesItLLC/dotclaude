@@ -259,6 +259,33 @@ run "$BASEJOB" --base no-such-ref
 run '{"version":1,"jobs":[{"name":"scan","commands":["n=$(git rev-list --count \"$(git merge-base \"${CI_REPLICA_BASE:-HEAD~0}\" HEAD)..HEAD\"); [ \"$n\" -gt 0 ]"]}]}' --base HEAD
 [ "$RC" = 1 ] && ok "a manifest's empty-range refusal fails the job on a base equal to HEAD" || bad "empty range passed: rc=$RC $OUT"
 
+echo "ci-replica: one run per worktree"
+# A run that blocks until released holds the lock; a second run on the same
+# root must refuse at once (rc 2) and name the holder, while a run on another
+# worktree is unaffected. The blocker is the job, so the lock is held by a run
+# that is genuinely in progress, not a fixture file.
+printf '%s' '{"version":1,"jobs":[{"name":"hold","commands":["while [ ! -e '"$TMP"'/release ]; do sleep 0.1; done"]}]}' > "$ROOT/.claude/ci-replica.json"
+"$CIR" --repo-root "$ROOT" --log-dir "$TMP/logs-hold" >/dev/null 2>&1 &
+HOLD_PID=$!
+for _ in $(seq 1 50); do grep -q "^pid " "$ROOT/.git/ci-replica.lock" 2>/dev/null && break; sleep 0.1; done
+OUT="$("$CIR" --repo-root "$ROOT" --log-dir "$TMP/logs-second" 2>&1)"; RC=$?
+[ "$RC" = 2 ] && ok "a second run on the same worktree is refused" || bad "concurrent run not refused: rc=$RC $OUT"
+grep -q "another ci-replica run holds" <<<"$OUT" && grep -q "pid $HOLD_PID" <<<"$OUT" \
+  && ok "and the refusal names the holder's pid" || bad "refusal does not name the holder: $OUT"
+OTHER="$TMP/other"
+mkdir -p "$OTHER/.claude"; git init --quiet "$OTHER"
+printf '%s' '{"version":1,"jobs":[{"name":"ok","commands":["true"]}]}' > "$OTHER/.claude/ci-replica.json"
+OUT="$("$CIR" --repo-root "$OTHER" --log-dir "$TMP/logs-other" 2>&1)"; RC=$?
+[ "$RC" = 0 ] && ok "a run on a different worktree is not blocked" || bad "unrelated worktree blocked: rc=$RC $OUT"
+touch "$TMP/release"; wait "$HOLD_PID"; HRC=$?
+[ "$HRC" = 0 ] && ok "the holding run itself completes" || bad "holding run failed: rc=$HRC"
+run '{"version":1,"jobs":[{"name":"after","commands":["true"]}]}'
+[ "$RC" = 0 ] && ok "the lock is free again once the holder exits" || bad "lock leaked past the holder: rc=$RC $OUT"
+# A job that leaves a process running must not keep the worktree locked.
+run '{"version":1,"jobs":[{"name":"daemon","commands":["(sleep 30 &) ; true"]}]}'
+run '{"version":1,"jobs":[{"name":"next","commands":["true"]}]}'
+[ "$RC" = 0 ] && ok "a process a job leaves running does not hold the lock" || bad "leftover child kept the lock: rc=$RC $OUT"
+
 echo "ci-replica: the shipped example manifest is valid"
 EXAMPLE="$(cd "$HERE/.." && pwd)/skills/operating-a-fleet/references/ci-replica.example.json"
 if [ -f "$EXAMPLE" ]; then

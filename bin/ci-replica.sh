@@ -30,6 +30,7 @@
 set -uo pipefail
 
 PROG="$(basename "$0")"
+ORIG_ARGS="$*"
 MANIFEST=""
 LOG_DIR=""
 ROOT=""
@@ -284,6 +285,23 @@ if [ "$LIST_ONLY" = 1 ]; then
   exit 0
 fi
 
+# One run per worktree. Two runs on one tree interleave: each job's tree-guard
+# sees the other run's writes, and a job reads files the other is rewriting, so
+# both verdicts are noise. The lock lives in the worktree's own git dir, so
+# validators on separate worktrees never contend. It is held on fd 9 for the
+# whole run and closed for every job command, so a process a job leaves running
+# cannot keep it.
+GIT_DIR_ABS="$(git -C "$ROOT" rev-parse --absolute-git-dir 2>/dev/null)" \
+  || die "cannot resolve the git dir of $ROOT"
+RUN_LOCK="$GIT_DIR_ABS/ci-replica.lock"
+command -v flock >/dev/null 2>&1 || die "flock is required to hold the worktree lock"
+exec 9>>"$RUN_LOCK"
+if ! flock -n 9; then
+  holder="$(cat "$RUN_LOCK" 2>/dev/null)"
+  die "another ci-replica run holds $ROOT (${holder:-holder unknown}); two runs on one worktree corrupt both verdicts — wait for it, or run in a separate worktree"
+fi
+printf 'pid %s since %s: %s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ORIG_ARGS:-(no args)}" > "$RUN_LOCK"
+
 # A base that does not resolve would make every diff-scoped command fail on
 # `git merge-base`, which reads as a finding about the diff. Refuse it here.
 if [ -n "$BASE" ]; then
@@ -403,7 +421,7 @@ while IFS="	" read -r idx name; do
     } >> "$log"
     # Bare invocation with a redirect, never a pipe: a pipe would report the
     # LAST stage's status and an OOM-killed command reads as a pass.
-    ( cd "$ROOT" && env "${envargs[@]}" bash -c "$cmd" ) >> "$log" 2>&1
+    ( cd "$ROOT" && env "${envargs[@]}" bash -c "$cmd" 9>&- ) >> "$log" 2>&1
     rc=$?
     echo "### exit: $rc" >> "$log"
     if [ "$rc" -ne 0 ]; then failed_cmd="$cmd"; break; fi
