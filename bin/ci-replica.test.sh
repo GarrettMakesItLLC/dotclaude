@@ -5,9 +5,6 @@
 # written per job, and a malformed manifest refused rather than half-run.
 #   bash bin/ci-replica.test.sh
 set -uo pipefail
-# A replica validating this repo exports CI_REPLICA_BASE to every job, this
-# self-test included; the --base cases below must start from a clean slate.
-unset CI_REPLICA_BASE
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CIR="$HERE/ci-replica.sh"
@@ -253,6 +250,12 @@ git -C "$ROOT" -c user.email=t@t -c user.name=t commit --quiet --allow-empty -m 
 BASEJOB='{"version":1,"jobs":[{"name":"base","commands":["test \"${CI_REPLICA_BASE-unset}\" = \"$EXPECT_BASE\""]}]}'
 EXPECT_BASE="unset" run "$BASEJOB"
 [ "$RC" = 0 ] && ok "without --base, CI_REPLICA_BASE is not set" || bad "leaked a base: rc=$RC $OUT"
+# An outer replica run with --base exports it to the job that runs this one
+# (#521). The inner run was given no base, so its jobs must not see the outer.
+CI_REPLICA_BASE=inherited EXPECT_BASE="unset" run "$BASEJOB"
+[ "$RC" = 0 ] && ok "a caller's CI_REPLICA_BASE does not reach a run without --base" || bad "inherited the caller's base: rc=$RC $OUT"
+CI_REPLICA_BASE=inherited EXPECT_BASE=HEAD run "$BASEJOB" --base HEAD
+[ "$RC" = 0 ] && ok "--base wins over a caller's CI_REPLICA_BASE" || bad "caller's base won over --base: rc=$RC $OUT"
 EXPECT_BASE=HEAD run "$BASEJOB" --base HEAD
 [ "$RC" = 0 ] && ok "--base HEAD exports CI_REPLICA_BASE=HEAD" || bad "base not exported: rc=$RC $OUT"
 grep -q 'base=HEAD' <<<"$OUT" && ok "and the header names it" || bad "header silent about base: $OUT"
