@@ -150,12 +150,13 @@ record_file() {  # record_file <owner/name> <Organization|Repository> <id>
 }
 # pending_records [owner/name] -> paths of dead-owner records
 pending_records() {
-  local f d
-  if [ -n "${1:-}" ]; then d="$(record_dir "$1")"; else d="$STATE_ROOT/*"; fi
-  # shellcheck disable=SC2086
-  for f in $d/*.json; do
-    [ -f "$f" ] || continue
-    record_owner_alive "$f" || echo "$f"
+  local f d dirs
+  if [ -n "${1:-}" ]; then dirs=("$(record_dir "$1")"); else dirs=("$STATE_ROOT"/*); fi
+  for d in "${dirs[@]}"; do
+    for f in "$d"/*.json; do
+      [ -f "$f" ] || continue
+      record_owner_alive "$f" || echo "$f"
+    done
   done
 }
 # restore_record <record.json>: PUT the recorded bypass_actors back, read them

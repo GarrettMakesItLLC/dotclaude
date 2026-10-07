@@ -185,7 +185,7 @@ if [ "$strategy" = install ]; then
     for f in "$HOME/.config/secrets/gmi.env" ${state_dir:+"$state_dir/agent.env"}; do
       [ -f "$f" ] || continue
       tok="$(
-        # shellcheck disable=SC1090
+        # shellcheck disable=SC1090  # a per-machine secrets file chosen at runtime; there is nothing to follow statically
         . "$f" >/dev/null 2>&1
         printf '%s' "${NODE_AUTH_TOKEN:-}"
       )"

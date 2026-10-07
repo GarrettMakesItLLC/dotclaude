@@ -62,7 +62,7 @@ for f in "$dir/prisma.config.ts" "$dir/prisma.config.js" "$dir/prisma.config.mjs
   names="$names $(grep -oE "env\(['\"][A-Za-z_][A-Za-z0-9_]*['\"]\)|process\.env(\.[A-Za-z_][A-Za-z0-9_]*|\[['\"][A-Za-z_][A-Za-z0-9_]*['\"]\])" "$f" \
     | grep -oE "[A-Za-z_][A-Za-z0-9_]*['\"]?\]?\)?$" | tr -d "'\")]" | tr '\n' ' ')"
 done
-names="$(printf '%s\n' $names | awk 'NF && !seen[$0]++' | tr '\n' ' ')"
+names="$(printf '%s' "$names" | tr ' ' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ' ')"
 
 # resolve <NAME> -> prints "<url>\t<where>" or nothing. Inline matches the exact
 # name at a word start, so `MB_PROD_DATABASE_URL=` is not read as `DATABASE_URL=`.
