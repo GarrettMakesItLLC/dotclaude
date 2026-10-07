@@ -113,7 +113,7 @@ check 0 Edit file_path "$TMP/unclaimed/src/app.ts" 1
 # honoured opt-out is never silent (#514, #517).
 cg_stderr() {  # cg_stderr <off> <path>
   python3 -c 'import json,sys; print(json.dumps({"session_id":"s1","tool_name":"Edit","tool_input":{"file_path":sys.argv[1]}}))' "$2" \
-    | CLAIM_GUARD_OFF="$1" "$GUARD" 2>&1 >/dev/null
+    | CLAIM_GUARD_OFF="$1" "$GUARD" >/dev/null 2>"$TMP/cg.err"; cat "$TMP/cg.err"
 }
 msg="$(cg_stderr '' "$TMP/unclaimed/src/app.ts")"
 case "$msg" in *"Re-run with CLAIM_GUARD_OFF=1 set"*) echo "FAIL: claim-guard advice still says to re-run with the var set"; fail=1 ;; esac

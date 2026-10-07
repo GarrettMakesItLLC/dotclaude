@@ -110,7 +110,7 @@ check 0 Edit  file_path "$CONV/src/existing.ts" 1     # escape hatch set
 check 2 Bash command "WORKTREE_GUARD_OFF=1 sed -i 's/a/b/' $CONV/src/existing.ts"
 wg_stderr() {  # wg_stderr <off> <tool> <key> <path>
   python3 -c 'import json,sys; print(json.dumps({"tool_name":sys.argv[1],"tool_input":{sys.argv[2]:sys.argv[3]}}))' "$2" "$3" "$4" \
-    | WORKTREE_GUARD_OFF="$1" "$GUARD" 2>&1 >/dev/null
+    | WORKTREE_GUARD_OFF="$1" "$GUARD" >/dev/null 2>"$TMP/wg.err"; cat "$TMP/wg.err"
 }
 msg="$(wg_stderr '' Edit file_path "$CONV/src/existing.ts")"
 case "$msg" in *"Re-run with WORKTREE_GUARD_OFF=1 set"*) echo "FAIL: block advice still says to re-run with the var set"; echo x >> "$FAIL_MARKER" ;; esac
