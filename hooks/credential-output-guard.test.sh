@@ -91,6 +91,9 @@ must_pass "short value" "TOKEN_TTL=3600"
 must_pass "code" 'GITHUB_TOKEN=process.env.GITHUB_TOKEN ?? ""'
 must_pass "non-secret name" "NEXT_PUBLIC_SITE_URL=https://example.org/some/long/path"
 must_pass "prefix only" "ghp_"
+# A name-mapping file (a repo config) holds variable NAMES, not values (#496).
+must_pass "name mapping JSON" '{"credentials": {"namespaced": {"RT_DATABASE_URL": "DATABASE_URL", "RT_DIRECT_URL": "DIRECT_URL"}}}'
+must_pass "name mapping env" "$(printf 'RT_DATABASE_URL=DATABASE_URL\nSERVICE_TOKEN=GITHUB_TOKEN_VALUE')"
 
 # Fail open on garbage and on other tools.
 printf 'not json' | "$GUARD" >/dev/null 2>&1 || fail "garbage input did not fail open"

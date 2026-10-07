@@ -25,18 +25,22 @@ pulls reads the same one. What it must never be is the *only* source, which is t
 
 ## The probe, and why its signature is specific
 
-A billing stop does not look like a test failure. GitHub accepts the run, never hands it to a runner,
-and marks it failed:
+A billing stop does not look like a test failure. It is recorded in one of two shapes, and the probe
+reads both:
 
-- the run concludes `failure`
-- within a couple of seconds of starting
-- and its jobs executed **zero steps**
+- **`failure`**: GitHub accepts the run, never hands it to a runner, and marks it failed within a
+  couple of seconds of starting, with jobs that executed **zero steps**.
+- **`startup_failure`**: the run is rejected before any job exists (an account lock reads
+  `path: BuildFailed`, an empty `name`, start == end). It has no duration to test, and it is never a
+  test failure, so every one counts as a refusal.
 
 The probe reads one page of `repos/<slug>/actions/runs` and calls it a refusal only when three signals
 hold together, because each alone has an innocent explanation:
 
-1. **several** instant failures — one fast flaky job does not repeat like that;
-2. across **more than one workflow** — a repo does not break every workflow at once;
+1. **several** instant failures or startup failures — one fast flaky job does not repeat like that;
+2. across **more than one workflow** (workflows are told apart by id, since a refused run can have an
+   empty name) — a repo does not break every workflow at once. A run of three or more
+   `startup_failure`s satisfies this on its own, so a repo with a single workflow is still detected;
 3. and the **most recent** run is one of them — otherwise it is history, not the present.
 
 A repo with a single job that fails in two seconds therefore reads as normal, which is correct: that

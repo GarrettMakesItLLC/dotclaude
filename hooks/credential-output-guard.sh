@@ -21,7 +21,8 @@
 #   - `NAME=value` (env-file / `railway variables --kv` shape) or
 #     `"NAME": "value"` (JSON) where NAME is a credential name (…TOKEN, …SECRET,
 #     …PASSWORD, …API_KEY, DATABASE_URL, …) and the value looks real: at least
-#     8 characters, no whitespace, not an expansion, not a placeholder.
+#     8 characters, no whitespace, not an expansion, not a placeholder, not a
+#     bare UPPER_SNAKE variable name.
 #
 # Fail-open: anything it cannot parse passes through unchanged.
 set -uo pipefail
@@ -76,6 +77,10 @@ def real_value(v):
     if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
         v = v[1:-1]
     if len(v) < 8 or re.search(r"\s", v) or re.search(r"[()\[\]{}$`]", v):
+        return False
+    # A bare UPPER_SNAKE identifier is a variable NAME (`"RT_DATABASE_URL":
+    # "DATABASE_URL"` in a name-mapping file), never a credential value.
+    if re.fullmatch(r"[A-Z_][A-Z0-9_]*", v):
         return False
     return not placeholder(v)
 
