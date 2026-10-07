@@ -16,6 +16,9 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export FLEET_MODE_CACHE_DIR="$TMP/cache"
 export FLEET_MODE_NO_REFRESH=1
+# The registry banner reads ~/.npmrc; keep the machine's real switch out of it.
+export DEGRADED_REGISTRY_NPMRC="$TMP/npmrc"
+export GMI_REGISTRY_STATE="$TMP/registry-state" GMI_REGISTRY_HOME="$TMP/registry-store"
 
 REPO="$TMP/repo"; mkdir -p "$REPO"
 git -C "$REPO" init -q
@@ -100,6 +103,27 @@ jq -n --argjson pid "$$" '{repo:"o/r",source:"Organization",id:22,pid:$pid,pr:7,
 rm -rf "$FLEET_MODE_CACHE_DIR"
 out="$(FLEET_MERGE_STATE_DIR="$STATE" run_hook "$TMP/healthy.json")"
 [ -z "$out" ] || { echo "FAIL (live lift): a merge in flight was reported: $out"; fail=1; }
+
+# --- The degraded npm registry switch is reported in normal mode too, merged
+#     with the mode banner when there is one. Port 9 answers nothing, so the
+#     banner must say BROKEN rather than claim a mirror is serving. ---
+printf '%s\n' '# >>> dotclaude degraded-registry (bin/degraded-registry.sh off removes this) >>>' \
+  'registry=http://127.0.0.1:9/' '# <<< dotclaude degraded-registry <<<' > "$DEGRADED_REGISTRY_NPMRC"
+rm -rf "$FLEET_MODE_CACHE_DIR"
+out="$(GMI_REGISTRY_PORT=9 PATH="/usr/bin:/bin" run_hook "$TMP/healthy.json")"
+echo "$out" | python3 -c '
+import json, sys
+ctx = json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]
+assert "DEGRADED REGISTRY BROKEN" in ctx, ctx
+' || { echo "FAIL (registry on): not reported: $out"; fail=1; }
+rm -rf "$FLEET_MODE_CACHE_DIR"
+out="$(GMI_REGISTRY_PORT=9 PATH="/usr/bin:/bin" run_hook "$TMP/refused.json")"
+echo "$out" | python3 -c '
+import json, sys
+ctx = json.load(sys.stdin)["hookSpecificOutput"]["additionalContext"]
+assert "DEGRADED REGISTRY" in ctx and "operating-a-fleet" in ctx, ctx
+' || { echo "FAIL (registry on + degraded): banners not combined"; fail=1; }
+rm -f "$DEGRADED_REGISTRY_NPMRC"
 
 if [ "$fail" = 0 ]; then
   echo "fleet-mode-report: all cases passed"
