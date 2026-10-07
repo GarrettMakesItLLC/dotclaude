@@ -274,6 +274,13 @@ check 0 Bash command "cd $CONV && cd .worktrees/wt && echo hi > notes.md"
   # Should still BLOCK — an expansion PAST the leading segment leaves a real
   # ancestor to climb to, so it is judged normally rather than skipped.
   check 2 Bash command 'echo hi > src/$name.ts'
+
+  # #510: a quoted destination with spaces is ONE argument. Split on whitespace,
+  # its last word ("2-00.mp4") read as a relative target inside the main tree.
+  check 0 Bash command 'cp /tmp/in.mp4 "/tmp/Videos/Karaoke/Jordan Belfort - check timing 1-00 to 2-00.mp4"'
+  check 0 Bash command "mv /tmp/in.mp4 '/tmp/out dir/a b.mp4'"
+  # Should still BLOCK — a quoted RELATIVE destination with spaces lands in this tree.
+  check 2 Bash command 'cp /tmp/in.mp4 "src/a file.ts"'
   exit "$fail"
 ) || fail=1
 
