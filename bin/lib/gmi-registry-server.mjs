@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // gmi-registry-server.mjs — the degraded-mode npm registry for @garrettmakesitllc/*.
 //
-// Run through bin/degraded-registry.sh, never directly. docs/degraded-registry.md
+// Run through bin/degraded-registry.sh, never directly.
+// skills/operating-a-fleet/references/degraded-registry.md
 // has the design. The constraints this file enforces:
 //
 // * The store is a directory of tarballs and nothing else:
@@ -13,7 +14,7 @@
 //   npm records that URL in package-lock.json, so a lockfile written in degraded
 //   mode is byte-identical to one written in normal mode. When the same tarball
 //   bytes are later published to GitHub, that URL resolves there too. With
-//   `replace-registry-host=npm.pkg.github.com` in ~/.npmrc, npm sends the fetch
+//   `replace-registry-host=always` in ~/.npmrc, npm sends the fetch
 //   here instead, to the same path, which this server answers.
 // * A tarball is served only when its sha1 matches the URL. A rebuilt tarball
 //   that differs from the original is never passed off as it.

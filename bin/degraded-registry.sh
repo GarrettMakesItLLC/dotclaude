@@ -15,17 +15,19 @@
 #   degraded-registry.sh sync               commit the store and exchange it with the shared remote
 #   degraded-registry.sh banner             the SessionStart line; silent when off
 #
-# docs/degraded-registry.md has the design. In short:
+# skills/operating-a-fleet/references/degraded-registry.md has the design. In short:
 #
 # THE SWITCH. Each consumer repo's committed .npmrc pins
 # `@garrettmakesitllc:registry=https://npm.pkg.github.com`, and a project .npmrc
 # outranks the user one, so the scope cannot be re-pointed from ~/.npmrc. It does
 # not need to be. `npm ci` fetches each tarball from the lockfile's `resolved`
-# URL, and `replace-registry-host=npm.pkg.github.com` rewrites that host to the
-# DEFAULT registry, which no repo sets. So `on` writes two keys to ~/.npmrc:
+# URL, and `replace-registry-host=always` rewrites that host to the DEFAULT
+# registry, which no repo sets. So `on` writes these keys to ~/.npmrc
+# (`allow-remote=all` is for npm 12 only; npm 10 ignores it):
 #
 #   registry=http://127.0.0.1:4873/
-#   replace-registry-host=npm.pkg.github.com
+#   replace-registry-host=always
+#   allow-remote=all
 #
 # The mirror answers GitHub's own download paths and 307-redirects everything
 # else to registry.npmjs.org. Nothing is committed to any repo, and `off`
