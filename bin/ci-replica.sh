@@ -500,7 +500,7 @@ echo "────────────────────────�
 # The verdict as an artifact, not prose (MuscleBuddy#8955). `fleet-merge.sh`
 # refuses to lift branch protection unless a verdict for the exact head SHA
 # exists, came from a FULL run (no --job), measured a clean tree against the
-# head's own manifest, and failed nothing. A hand-written `ALL GREEN` comment
+# BASE branch's manifest, and failed nothing. A hand-written `ALL GREEN` comment
 # is a report of this file, never a substitute for it.
 VERDICT="$LOG_DIR/verdict.json"
 RESULTS="$RESULTS" PLAN="$PLAN" VERDICT="$VERDICT" RUN_SHA="$RUN_SHA" \
