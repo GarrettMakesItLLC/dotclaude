@@ -5,6 +5,9 @@
 # written per job, and a malformed manifest refused rather than half-run.
 #   bash bin/ci-replica.test.sh
 set -uo pipefail
+# A replica validating this repo exports CI_REPLICA_BASE to every job, this
+# self-test included; the --base cases below must start from a clean slate.
+unset CI_REPLICA_BASE
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CIR="$HERE/ci-replica.sh"
@@ -267,8 +270,14 @@ echo "ci-replica: one run per worktree"
 printf '%s' '{"version":1,"jobs":[{"name":"hold","commands":["while [ ! -e '"$TMP"'/release ]; do sleep 0.1; done"]}]}' > "$ROOT/.claude/ci-replica.json"
 "$CIR" --repo-root "$ROOT" --log-dir "$TMP/logs-hold" >/dev/null 2>&1 &
 HOLD_PID=$!
-for _ in $(seq 1 50); do grep -q "^pid " "$ROOT/.git/ci-replica.lock" 2>/dev/null && break; sleep 0.1; done
-OUT="$("$CIR" --repo-root "$ROOT" --log-dir "$TMP/logs-second" 2>&1)"; RC=$?
+# Wait until the background run actually holds the lock (its own pid in the
+# lock file); on a loaded box manifest parsing alone can take seconds, and a
+# second run started before then would become the holder itself.
+for _ in $(seq 1 600); do grep -q "^pid $HOLD_PID " "$ROOT/.git/ci-replica.lock" 2>/dev/null && break; sleep 0.1; done
+grep -q "^pid $HOLD_PID " "$ROOT/.git/ci-replica.lock" 2>/dev/null || bad "the holding run never took the lock"
+# Release the holder however this case ends, so a regression cannot hang the suite.
+trap 'touch "$TMP/release"; rm -rf "$TMP"' EXIT
+OUT="$(timeout 120 "$CIR" --repo-root "$ROOT" --log-dir "$TMP/logs-second" 2>&1)"; RC=$?
 [ "$RC" = 2 ] && ok "a second run on the same worktree is refused" || bad "concurrent run not refused: rc=$RC $OUT"
 grep -q "another ci-replica run holds" <<<"$OUT" && grep -q "pid $HOLD_PID" <<<"$OUT" \
   && ok "and the refusal names the holder's pid" || bad "refusal does not name the holder: $OUT"
