@@ -190,43 +190,77 @@ function sh(cwd, cmdline, env = {}) {
   });
 }
 
+// Built trees, one per platform commit: several versions are usually tagged on
+// one release commit, and `npm ci` + a full build is minutes each.
+const built = new Map();
+// The tarball's bytes depend on the npm that packed it, not only on the files.
+// Release CI packs with whatever npm its Node 24 bundled that day, so a rebuild
+// tries each candidate packer and keeps the first whose bytes match.
+const PACKERS = (process.env.GMI_REBUILD_PACKERS || 'npm@11 npm@10.8.2 npm@12').split(/\s+/).filter(Boolean);
+
+function builtTree(tag) {
+  const sha = git(PLATFORM, ['rev-parse', `refs/tags/${tag}^{commit}`]).trim();
+  if (built.has(sha)) return built.get(sha);
+  const work = path.join(STATE, 'rebuild', sha.slice(0, 12));
+  rmSync(work, { recursive: true, force: true });
+  mkdirSync(path.dirname(work), { recursive: true });
+  try { git(PLATFORM, ['worktree', 'prune']); } catch { /* best effort */ }
+  execFileSync('git', ['-C', PLATFORM, 'worktree', 'add', '--detach', work, sha], { stdio: 'ignore' });
+  const entry = { work, error: null };
+  built.set(sha, entry);
+  try {
+    // The mirror serves platform's own @gmi/* pins, so the switch need not be
+    // on for a rebuild; only the server has to be up.
+    const reg = `--registry=http://127.0.0.1:${PORT}/ --replace-registry-host=always --allow-remote=all`;
+    sh(work, `npm ci --no-audit --no-fund ${reg}`);
+    sh(work, 'npm run build');
+  } catch (e) {
+    entry.error = `build at ${sha.slice(0, 12)} failed: ${e.message.split('\n')[0]}`;
+  }
+  return entry;
+}
+
+function cleanupBuilds() {
+  for (const { work } of built.values()) {
+    try { execFileSync('git', ['-C', PLATFORM, 'worktree', 'remove', '--force', work], { stdio: 'ignore' }); } catch { /* left for prune */ }
+  }
+}
+
 function rebuild(p) {
   const tag = `@gmi/${short(p.name)}@${p.version}`;
   try { git(PLATFORM, ['rev-parse', '--verify', `refs/tags/${tag}`]); } catch {
     return { ok: false, why: `no tag ${tag} in ${PLATFORM}` };
   }
-  const work = path.join(STATE, 'rebuild', tag.replace(/[@/]/g, '_'));
-  rmSync(work, { recursive: true, force: true });
-  mkdirSync(path.dirname(work), { recursive: true });
-  try { git(PLATFORM, ['worktree', 'prune']); } catch { /* best effort */ }
-  execFileSync('git', ['-C', PLATFORM, 'worktree', 'add', '--detach', work, `refs/tags/${tag}`], { stdio: 'ignore' });
-  const out = path.join(work, '.degraded-pack');
-  mkdirSync(out, { recursive: true });
-  try {
-    // The mirror serves platform's own @gmi/* pins, so the switch need not be
-    // on for a rebuild — only the server has to be up.
-    const reg = `--registry=http://127.0.0.1:${PORT}/ --replace-registry-host=always --allow-remote=all`;
-    sh(work, `npm ci --no-audit --no-fund ${reg}`);
-    sh(work, 'npm run build');
-    sh(work, `npm pack -w ${p.name} --pack-destination ${JSON.stringify(out)}`);
-    const tgz = readdirSync(out).find((f) => f.endsWith('.tgz'));
-    if (!tgz) return { ok: false, why: 'npm pack produced no tarball' };
-    const built = path.join(out, tgz);
-    const got = integrityOf(built, p.integrity.split('-')[0]);
-    if (got === p.integrity) {
-      mkdirSync(path.dirname(storePath(p)), { recursive: true });
-      copyFileSync(built, storePath(p));
-      return { ok: true };
+  const tree = builtTree(tag);
+  if (tree.error) return { ok: false, why: tree.error };
+  const alg = p.integrity.split('-')[0];
+  let last = null;
+  for (const packer of PACKERS) {
+    const out = path.join(tree.work, '.degraded-pack', packer.replace(/[^a-z0-9.]/gi, '_'), short(p.name));
+    rmSync(out, { recursive: true, force: true });
+    mkdirSync(out, { recursive: true });
+    try {
+      sh(tree.work, `corepack ${packer} pack --loglevel=warn -w ${p.name} --pack-destination ${JSON.stringify(out)} >/dev/null`);
+    } catch {
+      continue;
     }
-    const keep = path.join(STATE, 'mismatch', `${short(p.name)}-${p.version}.tgz`);
-    mkdirSync(path.dirname(keep), { recursive: true });
-    copyFileSync(built, keep);
-    return { ok: false, why: `rebuilt from ${tag} but integrity differs (kept at ${keep}, NOT served)`, mismatch: true, rebuiltIntegrity: got };
-  } catch (e) {
-    return { ok: false, why: `rebuild of ${tag} failed: ${e.message.split('\n')[0]}` };
-  } finally {
-    try { execFileSync('git', ['-C', PLATFORM, 'worktree', 'remove', '--force', work], { stdio: 'ignore' }); } catch { /* left for prune */ }
+    const tgz = readdirSync(out).find((f) => f.endsWith('.tgz'));
+    if (!tgz) continue;
+    last = path.join(out, tgz);
+    if (integrityOf(last, alg) === p.integrity) {
+      mkdirSync(path.dirname(storePath(p)), { recursive: true });
+      copyFileSync(last, storePath(p));
+      return { ok: true, packer };
+    }
   }
+  if (!last) return { ok: false, why: `no packer in [${PACKERS.join(' ')}] produced a tarball for ${tag}` };
+  const keep = path.join(STATE, 'mismatch', `${short(p.name)}-${p.version}.tgz`);
+  mkdirSync(path.dirname(keep), { recursive: true });
+  copyFileSync(last, keep);
+  return {
+    ok: false, mismatch: true,
+    why: `rebuilt from ${tag} but no packer in [${PACKERS.join(' ')}] reproduced the published bytes (last attempt kept at ${keep}, NOT served)`,
+  };
 }
 
 // --- commands -------------------------------------------------------------------------
@@ -282,12 +316,14 @@ for (const p of pins) {
   if (opts.rebuild) {
     console.error(`rebuilding ${label} from platform...`);
     const r = rebuild(p);
-    if (r.ok) { report.rebuilt++; continue; }
+    if (r.ok) { report.rebuilt++; console.error(`rebuilt ${label}: bytes match (packed by ${r.packer})`); continue; }
     (r.mismatch ? report.mismatch : report.missing).push(`${label}: ${r.why} <- ${[...p.sources].join(', ')}`);
     continue;
   }
   report.missing.push(`${label}: not in any npm cache (${caches.join(', ')}); re-run with --rebuild <- ${[...p.sources].join(', ')}`);
 }
+
+cleanupBuilds();
 
 let files = 0;
 const pkgRoot = path.join(STORE, 'packages');
