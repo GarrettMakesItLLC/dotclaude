@@ -23,9 +23,13 @@
 #   - The dotclaude config repo itself. Its hooks/skills/settings ARE the live
 #     config (via the ~/.claude symlinks); editing them in a throwaway worktree
 #     would not take effect. Self-identified by locating this script's own repo.
-#   - Any edit when WORKTREE_GUARD_OFF is set to a non-empty value — the escape
-#     hatch for a deliberate main-tree edit or a solo main session. Export it in
-#     your shell profile to opt a whole session out.
+#   - Any edit when WORKTREE_GUARD_OFF is set to a non-empty value in the
+#     SESSION's environment — the owner's escape hatch for a deliberate
+#     main-tree edit or a solo main session, exported before Claude Code starts.
+#     It is a blanket opt-out, so it is read only from the hook's own
+#     environment, never from an inline `WORKTREE_GUARD_OFF=1 cmd` prefix an
+#     agent could type, and every call it lets through says so on stderr: a
+#     leaked export in a shell profile must not be silent.
 #
 # Fail-open by design: unparseable input, no python3, no git, or any ambiguity
 # exits 0 and lets the edit through. A guard that bricks every edit is far worse
@@ -103,10 +107,13 @@ set -uo pipefail
 # Drain stdin first so the producing side never sees a broken pipe, then apply
 # the escape hatch: opt out entirely.
 input="$(cat)"
-[ -n "${WORKTREE_GUARD_OFF:-}" ] && exit 0
+if [ -n "${WORKTREE_GUARD_OFF:-}" ]; then
+  echo "⚠️  dotclaude worktree-guard: OFF — WORKTREE_GUARD_OFF is exported in this session; nothing was checked." >&2
+  exit 0
+fi
 
 # Need python3 to parse the tool_input JSON. No parser -> fail open.
-command -v python3 >/dev/null 2>&1 || exit 0
+command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude worktree-guard: DISABLED — python3 is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
 
 # A linked `node_modules` — checked before anything else, because it is the one
 # write here whose damage lands somewhere the command never names.
@@ -183,7 +190,8 @@ if [ "$link_status" -ne 0 ]; then
   echo "Reason: the node_modules-link check exited $link_status. That is a bug in the guard," >&2
   echo "  not a verdict on your command (#319)." >&2
   [ -s "$link_err" ] && { echo "Check error:" >&2; sed 's/^/    /' "$link_err" >&2; }
-  echo "Fix: repair hooks/worktree-guard.sh. WORKTREE_GUARD_OFF=1 unblocks you meanwhile." >&2
+  echo "Fix: repair hooks/worktree-guard.sh. Meanwhile the owner can export WORKTREE_GUARD_OFF=1" >&2
+  echo "  before starting the session (an inline prefix is not read)." >&2
   rm -f "$link_err"
   exit 2
 fi
@@ -696,9 +704,10 @@ if [ "$extract_status" -ne 0 ] && command -v python3 >/dev/null 2>&1; then
     echo "Extractor error:" >&2
     sed 's/^/    /' "$guard_err" >&2
   fi
-  echo "Fix: repair hooks/worktree-guard.sh. To get unblocked meanwhile, re-run with" >&2
-  echo "  WORKTREE_GUARD_OFF=1 set — and please file the error above, because every" >&2
-  echo "  session on this machine is hitting it." >&2
+  echo "Fix: repair hooks/worktree-guard.sh. Meanwhile the owner can export" >&2
+  echo "  WORKTREE_GUARD_OFF=1 before starting the session (an inline prefix is not" >&2
+  echo "  read) — and please file the error above, because every session on this" >&2
+  echo "  machine is hitting it." >&2
   rm -f "$guard_err"
   exit 2
 fi
@@ -795,7 +804,8 @@ check_one() {
           echo "  target (or the Edit/Write tool with an absolute path)." >&2
         fi
         echo "Policy: ~/dotclaude/CLAUDE.md (Worktree-first). Deliberate?" >&2
-        echo "  Re-run with WORKTREE_GUARD_OFF=1 set, or ask the user to run it via ! prefix." >&2
+        echo "  Ask the user to run it via the ! prefix. (WORKTREE_GUARD_OFF=1 is a session-wide" >&2
+        echo "  opt-out the owner exports before starting Claude Code; an inline prefix is not read.)" >&2
         return 2
       fi
       ;;
@@ -844,7 +854,8 @@ check_one() {
   echo "    git worktree add .worktrees/<short-name> -b feature/<short-name>" >&2
   echo "    cd .worktrees/<short-name>" >&2
   echo "Policy: ~/dotclaude/CLAUDE.md (Worktree-first). Deliberate main-tree edit?" >&2
-  echo "  Re-run with WORKTREE_GUARD_OFF=1 set, or ask the user to run it via ! prefix." >&2
+  echo "  Ask the user to run it via the ! prefix. (WORKTREE_GUARD_OFF=1 is a session-wide" >&2
+  echo "  opt-out the owner exports before starting Claude Code; an inline prefix is not read.)" >&2
   return 2
 }
 

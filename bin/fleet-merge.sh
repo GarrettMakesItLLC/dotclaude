@@ -15,8 +15,13 @@
 #   - exit           == 0 and no job FAILed
 #   - every local job PASSed   (a data-plane job may be NOT-RUN only when named
 #                               with --allow-not-run, which is printed)
-#   - manifestSha256 == sha256 of the head's own manifest, so a verdict from a
-#                       run whose job list differs from the head's cannot pass
+#   - manifestSha256 == sha256 of the BASE branch's manifest, read from GitHub now.
+#                       The job list is the gate, so it comes from the branch being
+#                       merged INTO: a head that drops or neuters a job in its own
+#                       manifest would otherwise produce a verdict that authorizes
+#                       itself. A PR that changes the manifest is still judged by
+#                       the base's: run `ci-replica.sh --manifest <base's copy>` on
+#                       the head, and the new job list gates the PRs after it lands.
 #
 # It then publishes the verdict as a comment on the PR, reads it back, and refuses to
 # lift if that write fails: the replica's verdict.json lives in the validator's
@@ -145,12 +150,13 @@ record_file() {  # record_file <owner/name> <Organization|Repository> <id>
 }
 # pending_records [owner/name] -> paths of dead-owner records
 pending_records() {
-  local f d
-  if [ -n "${1:-}" ]; then d="$(record_dir "$1")"; else d="$STATE_ROOT/*"; fi
-  # shellcheck disable=SC2086
-  for f in $d/*.json; do
-    [ -f "$f" ] || continue
-    record_owner_alive "$f" || echo "$f"
+  local f d dirs
+  if [ -n "${1:-}" ]; then dirs=("$(record_dir "$1")"); else dirs=("$STATE_ROOT"/*); fi
+  for d in "${dirs[@]}"; do
+    for f in "$d"/*.json; do
+      [ -f "$f" ] || continue
+      record_owner_alive "$f" || echo "$f"
+    done
   done
 }
 # restore_record <record.json>: PUT the recorded bypass_actors back, read them
@@ -237,11 +243,15 @@ for a in "${ALLOW[@]+"${ALLOW[@]}"}"; do
   [ "$r" = PASS ] || echo "fleet-merge: NOTE — $a was not measured ($r), excused by --allow-not-run"
 done
 
-head_manifest_sha="$(gh api -H 'Accept: application/vnd.github.raw' \
-  "repos/$REPO/contents/$MANIFEST_PATH?ref=$head_sha" | sha256sum | cut -d' ' -f1)" \
-  || refuse "cannot read $MANIFEST_PATH at $head_sha"
-[ "$(v .manifestSha256)" = "$head_manifest_sha" ] \
-  || refuse "the verdict ran a different manifest than the head's $MANIFEST_PATH"
+# Written to a file, not captured: `$(...)` strips the trailing newline the
+# replica hashed, and a failed read piped into sha256sum hashes nothing and exits 0.
+base_manifest="$(mktemp)"
+gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$MANIFEST_PATH?ref=$base_ref" \
+  > "$base_manifest" 2>/dev/null && [ -s "$base_manifest" ] \
+  || { rm -f "$base_manifest"; refuse "cannot read $MANIFEST_PATH on the base $base_ref; the verdict is judged against the base's manifest, so a base without one has no gate to merge on"; }
+base_manifest_sha="$(sha256sum "$base_manifest" | cut -d' ' -f1)"; rm -f "$base_manifest"
+[ "$(v .manifestSha256)" = "$base_manifest_sha" ] \
+  || refuse "the verdict ran a different manifest than $base_ref's $MANIFEST_PATH. The job list comes from the base, not the head: re-run with \`ci-replica.sh --manifest <$MANIFEST_PATH as of $base_ref>\` on the head"
 
 echo "fleet-merge: verdict OK for PR #$PR @ $head_sha ($(jq '[.jobs[]|select(.result=="PASS")]|length' "$VERDICT") PASS, $(jq '[.jobs[]|select(.result=="NOT-RUN")]|length' "$VERDICT") NOT-RUN)"
 

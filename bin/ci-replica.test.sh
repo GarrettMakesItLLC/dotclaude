@@ -232,6 +232,18 @@ grep -q 'tree-guard' <<<"$OUT" && ok "and it's reported as a tree-guard failure"
 grep -qE 'PASS +leaves-a-mess' <<<"$OUT" && bad "the dirty job must not read PASS" || ok "not reported PASS"
 ( cd "$ROOT" && rm -rf bigdirt )
 
+echo "ci-replica: a tree-guard that cannot run git status is not a clean tree"
+# Both snapshots used to be `git status … || true`: a failing status left two
+# empty strings, which compare equal, and the job read PASS on a tree nobody
+# measured. A corrupt index is one real way status fails.
+run '{"version":1,"jobs":[
+  {"name":"breaks-status","commands":["cp .git/index ../index.bak && echo garbage > .git/index"]}
+]}'
+( cd "$ROOT" && mv ../index.bak .git/index )
+[ "$RC" = 1 ] && ok "a failed git status fails the run" || bad "fail-open on a failed git status: rc=$RC $OUT"
+grep -q 'tree-guard: git status failed' <<<"$OUT" && ok "and says the tree was not measured" || bad "no tree-guard status row: $OUT"
+git -C "$ROOT" status --porcelain >/dev/null || bad "fixture index not restored"
+
 echo "ci-replica: --base reaches every job as CI_REPLICA_BASE"
 # The repo needs a commit for --base to resolve against.
 git -C "$ROOT" -c user.email=t@t -c user.name=t commit --quiet --allow-empty -m base >/dev/null 2>&1

@@ -123,7 +123,9 @@ if [ -f package.json ]; then
   fi
 fi
 
-for tool in git gh python3; do
+# perl too: git-guard, npm-install-guard and worktree-cd-guard parse commands
+# with it, and announce themselves DISABLED without it.
+for tool in git gh python3 perl; do
   if command -v "$tool" >/dev/null 2>&1; then ok "$tool present"; else bad "$tool is not installed" "install $tool — the workflow assumes it"; fi
 done
 if command -v gitleaks >/dev/null 2>&1; then

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# dotclaude git-guard — PreToolUse hook for the Bash tool.
+# dotclaude git-guard — PreToolUse hook for the Bash tool (and, through
+# mcp-tool-adapter.sh, Serena's execute_shell_command).
 #
 # Turns the non-negotiable git rules in ~/dotclaude/CLAUDE.md from prose that
 # Claude follows probabilistically into hard, deterministic blocks. Wired in
@@ -41,9 +42,8 @@ input="$(cat)"
 
 # Extract tool_input.command. jq is NOT guaranteed on every machine, so parse
 # with python3 (ubiquitous on Linux/macOS). No parser -> fail open.
-if ! command -v python3 >/dev/null 2>&1; then
-  exit 0
-fi
+command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude git-guard: DISABLED — python3 is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
+command -v perl >/dev/null 2>&1 || { echo "⚠️  dotclaude git-guard: DISABLED — perl is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
 cmd="$(printf '%s' "$input" | python3 -c 'import json,sys
 try:
     sys.stdout.write(json.load(sys.stdin).get("tool_input", {}).get("command", "") or "")
@@ -86,7 +86,31 @@ block() {
 # `.env.local` mentioned in prose — survives the scrub, and rule 3 blocks the
 # commit on its own message text (#363).
 scrubbed="$(printf '%s' "$cmd" | perl -0777 -pe "s/<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1.*?^[ \t]*\2[ \t]*\$/ /gms" \
-  | perl -0777 -pe "s/'[^']*'/ /gs; s/\"[^\"]*\"/ /gs")"
+  | perl -0777 -pe "s/'[^']*'/ /gs; s/\"[^\"]*\"/ /gs")" \
+  || scrubbed="$cmd"  # a scrub killed under memory pressure leaves "": judge the raw command, never nothing
+
+# escape <NAME> <segment-regex>: is the narrow escape NAME in force for the
+# command segments that need it? Either the session exported it (the hook runs
+# in the session's environment), or every segment of $scrubbed matching
+# <segment-regex> carries `NAME=1` as an env prefix of its own git invocation
+# (`NAME=1 git …`, after any `cd … &&`). The inline form is the one an agent can
+# actually set: the hook process never sees a variable the command assigns, so
+# advice to "set it for this one command" was unreachable without it (#477,
+# #514). Scoped per segment, so the prefix on one git call lifts nothing for
+# another, and matched on $scrubbed, so a message or echo naming the variable
+# lifts nothing at all.
+escape() {
+  [ -n "$(printenv "$1" 2>/dev/null)" ] && return 0
+  printf '%s' "$scrubbed" | ESC_NAME="$1" ESC_RE="$2" perl -0777 -ne '
+    my ($n, $re) = ($ENV{ESC_NAME}, $ENV{ESC_RE});
+    my ($need, $have) = (0, 0);
+    for my $seg (split /(?:;|&&|\|\||\||\n)/) {
+      next unless $seg =~ /$re/;
+      $need++;
+      $have++ if $seg =~ /^\s*(?:\(\s*)?(?:env\s+)?(?:[A-Za-z_]\w*=\S*\s+)*\Q$n\E=1\s+(?:[A-Za-z_]\w*=\S*\s+)*git\s/;
+    }
+    exit(($need && $need == $have) ? 0 : 1);'
+}
 
 # 0) Reckless recursive delete of a root / home / system / parent path. The one
 # non-git rule, so it runs before the git-only gate below. Matched against a
@@ -121,14 +145,14 @@ printf '%s' "$nq" | grep -Eq '(^|[^[:alnum:]_./-])git([[:space:]]|$)' || exit 0
 # deliberately a different, narrower variable than a blanket --no-verify
 # escape hatch, and the bypass is always logged loudly to stderr so it is
 # never silent even though the command itself is allowed through.
-if [ -n "${GIT_GUARD_HOOK_PROVEN_KILLED:-}" ]; then
-  if printf '%s' "$scrubbed" | grep -Eq -- '--no-verify'; then
+if printf '%s' "$scrubbed" | grep -Eq -- '--no-verify'; then
+  if escape GIT_GUARD_HOOK_PROVEN_KILLED '--no-verify'; then
     echo "⚠️  dotclaude git-guard: allowing git --no-verify — GIT_GUARD_HOOK_PROVEN_KILLED is set." >&2
     echo "   This bypasses commit hooks. Only legitimate when the hook was proven OOM-killed" >&2
     echo "   (exit 137 / dmesg 'Killed process'), not when it found a real problem." >&2
+  else
+    block "git --no-verify is forbidden. Fix the failing hook (gitleaks/lint/typecheck) and commit normally — then make a NEW commit. If the push's slow pre-push hook is what keeps dropping the connection (exit 141, ref unmoved), use ~/dotclaude/bin/git-push.sh: it runs the hook first, then pushes with the connection open only for the transfer, and verifies the ref landed. If the hook was OOM-killed by unrelated swarm contention (exit 137, or 'dmesg | grep -i \"killed process\"' names it) rather than finding a real problem, prefix that one git command with GIT_GUARD_HOOK_PROVEN_KILLED=1 (\`GIT_GUARD_HOOK_PROVEN_KILLED=1 git …\`, after any \`cd … &&\`)."
   fi
-elif printf '%s' "$scrubbed" | grep -Eq -- '--no-verify'; then
-  block "git --no-verify is forbidden. Fix the failing hook (gitleaks/lint/typecheck) and commit normally — then make a NEW commit. If the push's slow pre-push hook is what keeps dropping the connection (exit 141, ref unmoved), use ~/dotclaude/bin/git-push.sh: it runs the hook first, then pushes with the connection open only for the transfer, and verifies the ref landed. If the hook was OOM-killed by unrelated swarm contention (exit 137, or 'dmesg | grep -i \"killed process\"' names it) rather than finding a real problem, set GIT_GUARD_HOOK_PROVEN_KILLED=1 for this one command."
 fi
 if printf '%s' "$scrubbed" | grep -Eiq -- '-c[[:space:]=]*core\.hookspath'; then
   block "git -c core.hooksPath=... disables hooks (same effect as --no-verify). Forbidden — fix the hook and retry."
@@ -141,12 +165,12 @@ commit_args="$(printf '%s' "$scrubbed" \
   | perl -0777 -ne 'while (/git\s+commit((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)/gs) { print "$1\n" }')"
 if [ -n "$commit_args" ] \
    && printf '%s' "$commit_args" | grep -Eq '(^|[[:space:]])-[a-zA-Z]*n[a-zA-Z]*([[:space:]]|$)'; then
-  if [ -n "${GIT_GUARD_HOOK_PROVEN_KILLED:-}" ]; then
+  if escape GIT_GUARD_HOOK_PROVEN_KILLED 'git\s+commit\b.*\s-[a-zA-Z]*n[a-zA-Z]*(\s|$)'; then
     echo "⚠️  dotclaude git-guard: allowing git commit -n — GIT_GUARD_HOOK_PROVEN_KILLED is set." >&2
     echo "   This bypasses commit hooks. Only legitimate when the hook was proven OOM-killed" >&2
     echo "   (exit 137 / dmesg 'Killed process'), not when it found a real problem." >&2
   else
-    block "git commit -n bypasses hooks (short for --no-verify). Forbidden — fix the hook and retry. If the hook was OOM-killed by unrelated swarm contention (exit 137, or 'dmesg | grep -i \"killed process\"' names it) rather than finding a real problem, set GIT_GUARD_HOOK_PROVEN_KILLED=1 for this one command."
+    block "git commit -n bypasses hooks (short for --no-verify). Forbidden — fix the hook and retry. If the hook was OOM-killed by unrelated swarm contention (exit 137, or 'dmesg | grep -i \"killed process\"' names it) rather than finding a real problem, prefix that one git command with GIT_GUARD_HOOK_PROVEN_KILLED=1 (\`GIT_GUARD_HOOK_PROVEN_KILLED=1 git …\`, after any \`cd … &&\`)."
   fi
 fi
 
@@ -453,7 +477,7 @@ PY
 )" || discard_report=""
 
 if [ -n "$discard_report" ]; then
-  if [ -n "${GIT_GUARD_ALLOW_DISCARD:-}" ] || printf '%s' "$cmd" | grep -q 'GIT_GUARD_ALLOW_DISCARD=1'; then
+  if escape GIT_GUARD_ALLOW_DISCARD 'git\s.*\b(checkout|switch|restore)\b'; then
     echo "⚠️  dotclaude git-guard: allowing a path-scoped discard — GIT_GUARD_ALLOW_DISCARD is set." >&2
     echo "   This can silently drop uncommitted work in the named path(s). Only legitimate for a" >&2
     echo "   deliberate discard you have already reviewed." >&2
@@ -508,11 +532,13 @@ import os, re, subprocess, sys
 cmd = sys.stdin.read()
 cwd = os.getcwd()
 
+# An env-assignment prefix (`FOO=1 git checkout -B …`, `env X=y git …`) is still
+# that git invocation: matching only a bare `git` let any prefix walk past.
 INV = re.compile(
-    r"(?:^|[;&|]\s*)git\s+(?:-C\s+(\S+)\s+)?"
+    r"(?:^|[;&|(]\s*)\s*(?:env\s+)?(?:[A-Za-z_]\w*=\S*\s+)*git\s+(?:-C\s+(\S+)\s+)?"
     r"(checkout|switch|branch|update-ref)\s+"
     r"((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)",
-    re.S,
+    re.S | re.M,
 )
 
 def targets(sub, rest, current_branch):
@@ -584,13 +610,13 @@ if hit:
 '
   )"
   if [ -n "$wt_hit" ]; then
-    if [ -n "${GIT_GUARD_ALLOW_WORKTREE_STEAL:-}" ]; then
+    if escape GIT_GUARD_ALLOW_WORKTREE_STEAL 'git\s.*\b(checkout|switch|branch|update-ref)\b'; then
       echo "⚠️  dotclaude git-guard: allowing a worktree-branch collision — GIT_GUARD_ALLOW_WORKTREE_STEAL is set." >&2
       echo "   This can silently rewrite another worktree's HEAD out from under whatever is running there." >&2
     else
       hit_branch="$(printf '%s' "$wt_hit" | sed -n 1p)"
       hit_path="$(printf '%s' "$wt_hit" | sed -n 2p)"
-      block "branch '$hit_branch' is checked out in another worktree ($hit_path) — forcing or renaming it here would silently rewrite that worktree's HEAD out from under whatever is running there (#411). Operate on that worktree directly, or if this is genuinely deliberate, set GIT_GUARD_ALLOW_WORKTREE_STEAL=1 for this one command."
+      block "branch '$hit_branch' is checked out in another worktree ($hit_path) — forcing or renaming it here would silently rewrite that worktree's HEAD out from under whatever is running there (#411). Operate on that worktree directly, or if this is genuinely deliberate, prefix that one git command with GIT_GUARD_ALLOW_WORKTREE_STEAL=1 (\`GIT_GUARD_ALLOW_WORKTREE_STEAL=1 git …\`)."
     fi
   fi
 fi

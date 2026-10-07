@@ -129,6 +129,73 @@
             "command": "\"$HOME\"/.claude/hooks/migration-guard.sh"
           }
         ]
+      },
+      {
+        "matcher": "mcp__plugin_serena_serena__execute_shell_command|mcp__serena__execute_shell_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh git-guard"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh worktree-cd-guard"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh npm-install-guard"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh heredoc-guard"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh db-push-guard"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh verify-reminder"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh pr-base-guard"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh secret-read-guard"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh worktree-guard"
+          }
+        ]
+      },
+      {
+        "matcher": "Grep|mcp__plugin_serena_serena__read_file|mcp__serena__read_file|mcp__plugin_serena_serena__search_for_pattern|mcp__serena__search_for_pattern",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh secret-read-guard"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_serena_serena__create_text_file|mcp__serena__create_text_file|mcp__plugin_serena_serena__replace_content|mcp__serena__replace_content|mcp__plugin_serena_serena__replace_in_files|mcp__serena__replace_in_files|mcp__plugin_serena_serena__delete_lines|mcp__serena__delete_lines|mcp__plugin_serena_serena__replace_lines|mcp__serena__replace_lines|mcp__plugin_serena_serena__insert_at_line|mcp__serena__insert_at_line|mcp__plugin_serena_serena__replace_symbol_body|mcp__serena__replace_symbol_body|mcp__plugin_serena_serena__insert_after_symbol|mcp__serena__insert_after_symbol|mcp__plugin_serena_serena__insert_before_symbol|mcp__serena__insert_before_symbol|mcp__plugin_serena_serena__rename_symbol|mcp__serena__rename_symbol|mcp__plugin_serena_serena__safe_delete_symbol|mcp__serena__safe_delete_symbol",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh worktree-guard"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh claim-guard"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh migration-guard"
+          }
+        ]
       }
     ],
     "SubagentStop": [

@@ -209,6 +209,28 @@ check_env 2 1 'git push --force origin main'
 check_env 2 1 'git add .env'
 check_env 2 1 'git -c core.hooksPath=/tmp/x commit -m "y"'
 
+# --- #477/#514: the escape the block message advertises is the inline prefix,
+# because an agent cannot set the hook's own environment. Driven with the var
+# UNSET in the hook env, exactly as the Bash tool delivers it.
+check_env 0 '' 'GIT_GUARD_HOOK_PROVEN_KILLED=1 git commit --no-verify -m "x"'
+check_env 0 '' 'GIT_GUARD_HOOK_PROVEN_KILLED=1 git commit -nm "x"'
+check_env 0 '' 'cd /tmp/wt && GIT_GUARD_HOOK_PROVEN_KILLED=1 git push --no-verify -q origin HEAD'
+check_env 0 '' 'GIT_GUARD_HOOK_PROVEN_KILLED=1 git -C /tmp/wt push --no-verify origin HEAD'
+# ...and lifts nothing it does not prefix, nothing when it is not a prefix,
+# and nothing beyond the --no-verify / -n block.
+check_env 2 '' 'GIT_GUARD_HOOK_PROVEN_KILLED=1 git status && git commit --no-verify -m "x"'
+check_env 2 '' 'GIT_GUARD_HOOK_PROVEN_KILLED=1 git commit --no-verify -m "x" && git push --no-verify'
+check_env 2 '' 'GIT_GUARD_HOOK_PROVEN_KILLED=0 git commit --no-verify -m "x"'
+check_env 2 '' 'echo GIT_GUARD_HOOK_PROVEN_KILLED=1 git; git commit --no-verify -m "x"'
+check_env 2 '' 'git commit --no-verify -m "GIT_GUARD_HOOK_PROVEN_KILLED=1 git"'
+check_env 2 '' 'export GIT_GUARD_HOOK_PROVEN_KILLED=1; git commit --no-verify -m "x"'
+check_env 2 '' 'GIT_GUARD_HOOK_PROVEN_KILLED=1 git push --force origin main'
+# The advice text names the inline form it now honours.
+msg="$(printf '%s' 'git commit --no-verify -m x' \
+  | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
+  | env -u GIT_GUARD_HOOK_PROVEN_KILLED "$GUARD" 2>&1 >/dev/null)"
+case "$msg" in *'prefix that one git command with GIT_GUARD_HOOK_PROVEN_KILLED=1'*) ;; *) echo "FAIL: --no-verify advice does not name the inline prefix: $msg"; fail=1 ;; esac
+
 # --- #363: heredoc scrub must consume a `<<-'EOF'` heredoc nested inside a
 # `$(...)` command substitution even when the closing delimiter is indented
 # (the `<<-` form strips leading tabs and allows an indented terminator).
@@ -279,6 +301,9 @@ git -C "$discard_repo" -c user.email=t@t -c user.name=t commit -q --allow-empty 
   check 2 'git checkout tracked.txt'
   check 2 'git checkout .'
   check 2 'GIT_GUARD_ALLOW_DISCARD=0 git checkout tracked.txt'
+  check 2 'GIT_GUARD_ALLOW_DISCARD=1 git status && git checkout -- tracked.txt'
+  check 2 'echo "GIT_GUARD_ALLOW_DISCARD=1" && git checkout -- tracked.txt'
+  check 0 'git status && GIT_GUARD_ALLOW_DISCARD=1 git checkout -- tracked.txt'
   check 0 'GIT_GUARD_ALLOW_DISCARD=1 git checkout -- tracked.txt'
 
   # The tree the discard LANDS in is the one judged: `git -C` and a leading
@@ -373,6 +398,9 @@ git -C "$wt_repo" worktree add -q "$wt_repo/.worktrees/w2" -b feature/other 2>/d
   check 2 'git branch -m integration/w3 integration/perf'
   check 2 'git branch -M integration/w3 integration/perf'
   check 2 'git update-ref refs/heads/integration/w3 HEAD'
+  # An env prefix is still that git call.
+  check 2 'FOO=1 git checkout -B integration/w3 origin/main'
+  check 2 'cd . && env A=b git branch -f integration/w3 HEAD'
   # Safe forms: w2's OWN branch, or a brand-new one, is nobody else's tree.
   check 0 'git checkout -b brand-new-branch'
   check 0 'git branch -f feature/other HEAD'
@@ -419,6 +447,10 @@ check_worktree_steal_env() {
   cd "$wt_repo/.worktrees/w2" || exit 1
   check_worktree_steal_env 0 1 'git checkout -B integration/w3 origin/main'
   check_worktree_steal_env 2 '' 'git checkout -B integration/w3 origin/main'
+  # The advertised inline form (#514), scoped to the git call it prefixes.
+  check_worktree_steal_env 0 '' 'GIT_GUARD_ALLOW_WORKTREE_STEAL=1 git checkout -B integration/w3 origin/main'
+  check_worktree_steal_env 2 '' 'GIT_GUARD_ALLOW_WORKTREE_STEAL=1 git fetch && git checkout -B integration/w3 origin/main'
+  check_worktree_steal_env 2 '' 'git checkout -B integration/w3 origin/main # GIT_GUARD_ALLOW_WORKTREE_STEAL=1 git'
 ) || fail=1
 rm -rf "$(dirname "$wt_repo")"
 

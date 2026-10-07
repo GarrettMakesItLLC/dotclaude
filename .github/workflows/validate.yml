@@ -295,6 +295,12 @@ jobs:
     # so gating on the individual jobs would let a PR merge unverified. This
     # job needs them all and fails on any non-success result, and adding or
     # splitting a job never means editing the branch ruleset.
+    #
+    # Inline rather than `GarrettMakesItLLC/ci/actions/ci-success`: this repo's
+    # merge gate takes no dependency on another repo's movable `v1` tag, so a
+    # bad publish there cannot open or wedge the gate here. Catching a regression
+    # in the published action is the ci repo's own self-check's job. It is the
+    # strict form: anything but `success`, `skipped` included, fails.
     name: CI Success
     if: always() && github.event_name == 'pull_request'
     needs: [validate, config-drift, commitlint, mcp-github]
