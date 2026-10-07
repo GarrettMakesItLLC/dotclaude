@@ -49,6 +49,19 @@ try:
     sys.stdout.write(json.load(sys.stdin).get("tool_input", {}).get("command", "") or "")
 except Exception:
     pass' 2>/dev/null)"
+parse_rc=$?
+
+# A parser that DIED on a real payload is not "no command". python3 is
+# OOM-killed or SIGBUSed routinely under swarm memory pressure, and treating
+# its empty output as an empty command let every rule below go unchecked, so
+# --no-verify, a force-push to main and a .env commit all passed (#524). The
+# parser itself swallows malformed JSON and exits 0, so a non-zero exit here
+# means the process was killed: fail closed, and the agent retries.
+if [ "$parse_rc" -ne 0 ] && [ -n "$input" ]; then
+  echo "⛔ dotclaude git-guard could not read this command: its parser exited $parse_rc (killed under memory pressure?), so nothing was checked." >&2
+  echo "Retry the same command; it is blocked only because it could not be judged (#524)." >&2
+  exit 2
+fi
 
 [ -z "$cmd" ] && exit 0
 

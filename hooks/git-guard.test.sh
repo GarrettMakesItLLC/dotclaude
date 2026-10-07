@@ -27,9 +27,13 @@ trap 'rm -f "$FAIL_MARKER"' EXIT
 check() {
   local want="$1" cmd="$2"
   local got
-  printf '%s' "$cmd" \
-    | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))' \
-    | "$GUARD" >/dev/null 2>&1
+  local payload
+  # Build the payload first and check it: a JSON wrapper killed under load fed
+  # the guard nothing, and the case then read as the guard allowing it (#524).
+  payload="$(printf '%s' "$cmd" \
+    | python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.stdin.read()}}))')" \
+    || { echo "FAIL: could not build the payload for: $cmd"; echo x >> "$FAIL_MARKER"; return; }
+  printf '%s' "$payload" | "$GUARD" >/dev/null 2>&1
   got=$?
   if [ "$got" != "$want" ]; then
     echo "FAIL: want exit $want, got $got for: $cmd"
@@ -453,6 +457,23 @@ check_worktree_steal_env() {
   check_worktree_steal_env 2 '' 'git checkout -B integration/w3 origin/main # GIT_GUARD_ALLOW_WORKTREE_STEAL=1 git'
 ) || fail=1
 rm -rf "$(dirname "$wt_repo")"
+
+# A parser killed on a real payload fails closed (#524): shim python3 so the
+# guard's extraction dies the way an OOM kill does, on a should-block command.
+SHIM="$(mktemp -d)"
+cat > "$SHIM/python3" <<'SH'
+#!/usr/bin/env bash
+# Die the way an OOM kill does, whenever the guard runs it.
+kill -9 $$
+SH
+chmod +x "$SHIM/python3"
+PAYLOAD='{"tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}'
+printf '%s' "$PAYLOAD" | PATH="$SHIM:$PATH" "$GUARD" >/dev/null 2>&1; got=$?
+if [ "$got" != 2 ]; then
+  echo "FAIL: a killed parser must fail closed (want 2, got $got)"
+  echo x >> "$FAIL_MARKER"
+fi
+rm -rf "$SHIM"
 
 if [ -s "$FAIL_MARKER" ]; then
   echo "git-guard: $(wc -l < "$FAIL_MARKER" | tr -d ' ') case(s) FAILED"
