@@ -32,7 +32,6 @@ print(json.dumps({"tool_name":sys.argv[1],"tool_input":{sys.argv[2]:sys.argv[3]}
   if [ "$got" != "$want" ]; then
     echo "FAIL: want $want, got $got for $tool $key=$path off='$off'"
     fail=1
-  echo x >> "$FAIL_MARKER"
     echo x >> "$FAIL_MARKER"
   fi
 }
@@ -105,6 +104,19 @@ check 2 Edit file_path "$GCONV/src/app.ts"
 # Should ALLOW
 check 0 Edit  file_path "$CONV/.worktrees/wt/x.ts"   # inside a linked worktree
 check 0 Edit  file_path "$CONV/src/existing.ts" 1     # escape hatch set
+# The blanket opt-out is the owner's, set in the session's environment: an
+# inline prefix is not read, the block advice says so rather than advertising a
+# prefix that cannot work, and an honoured opt-out is never silent (#514, #517).
+check 2 Bash command "WORKTREE_GUARD_OFF=1 sed -i 's/a/b/' $CONV/src/existing.ts"
+wg_stderr() {  # wg_stderr <off> <tool> <key> <path>
+  python3 -c 'import json,sys; print(json.dumps({"tool_name":sys.argv[1],"tool_input":{sys.argv[2]:sys.argv[3]}}))' "$2" "$3" "$4" \
+    | WORKTREE_GUARD_OFF="$1" "$GUARD" 2>&1 >/dev/null
+}
+msg="$(wg_stderr '' Edit file_path "$CONV/src/existing.ts")"
+case "$msg" in *"Re-run with WORKTREE_GUARD_OFF=1 set"*) echo "FAIL: block advice still says to re-run with the var set"; echo x >> "$FAIL_MARKER" ;; esac
+case "$msg" in *"inline prefix is not read"*) ;; *) echo "FAIL: block advice does not say how the opt-out is really set: $msg"; echo x >> "$FAIL_MARKER" ;; esac
+msg="$(wg_stderr 1 Edit file_path "$CONV/src/existing.ts")"
+case "$msg" in *"worktree-guard: OFF"*) ;; *) echo "FAIL: an honoured WORKTREE_GUARD_OFF is silent"; echo x >> "$FAIL_MARKER" ;; esac
 check 0 Edit  file_path "$PLAIN/src/app.ts"           # repo doesn't use the convention
 check 0 Write file_path "$TMP/loose.txt"              # not in any git repo
 check 0 Edit  file_path "$HERE/../CLAUDE.md"          # the dotclaude config repo itself

@@ -22,7 +22,8 @@
 # ALWAYS ALLOWED (exit 0):
 #   - Any branch that does not match `issue-<N>`.
 #   - Any repo whose `origin` is not on github.com, or has no origin.
-#   - Any edit when CLAIM_GUARD_OFF is set to a non-empty value.
+#   - Any edit when CLAIM_GUARD_OFF is set to a non-empty value in the session's
+#     environment (logged to stderr; an inline prefix is not read).
 #   - Anything the API cannot answer within the timeout — see fail-open below.
 #
 # Fail-open by design: no python3/git/gh, unparseable input, a slow or
@@ -44,7 +45,12 @@ set -uo pipefail
 # Drain stdin first so the producing side never sees a broken pipe, then apply
 # the escape hatch: opt out entirely.
 input="$(cat)"
-[ -n "${CLAIM_GUARD_OFF:-}" ] && exit 0
+# Blanket opt-out, read only from the session's environment (never an inline
+# prefix an agent could type), and never silent: a leaked export must show.
+if [ -n "${CLAIM_GUARD_OFF:-}" ]; then
+  echo "⚠️  dotclaude claim-guard: OFF — CLAIM_GUARD_OFF is exported in this session; nothing was checked." >&2
+  exit 0
+fi
 
 # Need python3 to parse the hook payload and to talk REST. No parser -> fail open.
 command -v python3 >/dev/null 2>&1 || exit 0
@@ -166,5 +172,6 @@ echo "    issue_claim(repo: \"$slug\", number: $issue)" >&2
 echo "  If the claim fails as already-claimed, another machine holds it — pick different work." >&2
 echo "  Survey what is already in flight first with work_in_flight." >&2
 echo "Policy: ~/dotclaude/CLAUDE.md (Work tracking). Deliberate unclaimed edit?" >&2
-echo "  Re-run with CLAIM_GUARD_OFF=1 set, or ask the user to run it via ! prefix." >&2
+echo "  Ask the user to run it via the ! prefix. (CLAIM_GUARD_OFF=1 is a session-wide" >&2
+echo "  opt-out the owner exports before starting Claude Code; an inline prefix is not read.)" >&2
 exit 2

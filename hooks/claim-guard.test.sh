@@ -109,6 +109,17 @@ check 2 Edit file_path "$TMP/halfclaimed/src/app.ts"
 
 # --- escape hatch on an otherwise-blocking edit -> allow
 check 0 Edit file_path "$TMP/unclaimed/src/app.ts" 1
+# The opt-out is the owner's session-wide export: advice says so, and an
+# honoured opt-out is never silent (#514, #517).
+cg_stderr() {  # cg_stderr <off> <path>
+  python3 -c 'import json,sys; print(json.dumps({"session_id":"s1","tool_name":"Edit","tool_input":{"file_path":sys.argv[1]}}))' "$2" \
+    | CLAIM_GUARD_OFF="$1" "$GUARD" 2>&1 >/dev/null
+}
+msg="$(cg_stderr '' "$TMP/unclaimed/src/app.ts")"
+case "$msg" in *"Re-run with CLAIM_GUARD_OFF=1 set"*) echo "FAIL: claim-guard advice still says to re-run with the var set"; fail=1 ;; esac
+case "$msg" in *"inline prefix is not read"*) ;; *) echo "FAIL: claim-guard advice does not say how the opt-out is really set: $msg"; fail=1 ;; esac
+msg="$(cg_stderr 1 "$TMP/unclaimed/src/app.ts")"
+case "$msg" in *"claim-guard: OFF"*) ;; *) echo "FAIL: an honoured CLAIM_GUARD_OFF is silent"; fail=1 ;; esac
 
 # --- branches that do not encode an issue -> allow (must never block ordinary work)
 repo "$TMP/scratch" "chore/tidy-up" "https://github.com/octo/repo.git"
