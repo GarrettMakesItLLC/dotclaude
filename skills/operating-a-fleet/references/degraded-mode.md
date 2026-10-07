@@ -42,6 +42,7 @@ once, merged once.
    a SIGKILL skips the restore trap. The next `fleet-merge.sh` restores any record whose pid is dead
    before it does anything else; `fleet-merge.sh --restore-pending [--repo OWNER/NAME]` does it
    explicitly, and the SessionStart banner names any lift still pending.
+   On a private free-plan repo GitHub answers the rules endpoint with an "Upgrade to GitHub Pro" 403; that is read as "no gating rulesets", so nothing is lifted and the merge is still pinned to the verdict SHA (any other 403/404 still aborts).
    The merge method defaults to `merge` for a promotion (head `dev`/`develop`/`staging`/`release/*`
    into `main`/`master`/`production`/`release/*`) and `squash` otherwise, because a squash onto `main`
    shares no history with `dev` and the next promotion conflicts on every file both touched;

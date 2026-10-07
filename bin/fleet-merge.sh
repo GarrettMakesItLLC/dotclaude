@@ -23,6 +23,10 @@
 # throwaway worktree, so without this a merged head has no file to check afterwards.
 # The comment is the durable record; `#8137`'s ALL GREEN cites it, not a bare hash.
 #
+# (A private repo on a plan without rulesets answers the rules endpoint with the
+# "Upgrade to GitHub Pro" 403; that is read as "no gating rulesets", so nothing is
+# lifted and the merge is still pinned to the verdict SHA.)
+#
 # Then it lifts every ruleset on the base branch that carries a merge gate
 # (required checks, merge queue, pull request rule) by adding an OrganizationAdmin
 # bypass, merges pinned to the verdict SHA, restores each ruleset's original
@@ -244,7 +248,19 @@ echo "fleet-merge: verdict OK for PR #$PR @ $head_sha ($(jq '[.jobs[]|select(.re
 # Rulesets on the base branch that gate a merge. Organization-level ones are
 # the trap: lifting only the repo's leaves "Required status check ... is failing"
 # naming a rule the repo cannot see.
-rules="$(gh api "repos/$REPO/rules/branches/$base_ref")" || die "cannot read rules for $base_ref"
+# A private repo on a plan without rulesets answers this one 403: it has no
+# rulesets to lift, so the base is ungated. Any other failure still aborts.
+rules_err="$(mktemp)"
+if ! rules="$(gh api "repos/$REPO/rules/branches/$base_ref" 2>"$rules_err")"; then
+  if grep -qF 'Upgrade to GitHub Pro or make this repository public to enable this feature' "$rules_err" \
+     && grep -qF 'HTTP 403' "$rules_err"; then
+    echo "fleet-merge: $REPO's plan has no rulesets (GitHub answered 403 \"Upgrade to GitHub Pro\"); treating $base_ref as ungated, nothing to lift"
+    rules='[]'
+  else
+    cat "$rules_err" >&2; rm -f "$rules_err"; die "cannot read rules for $base_ref"
+  fi
+fi
+rm -f "$rules_err"
 mapfile -t targets < <(jq -r '
   [.[] | select(.type=="required_status_checks" or .type=="merge_queue" or .type=="pull_request")
        | "\(.ruleset_source_type)\t\(.ruleset_id)"] | unique | .[]' <<<"$rules")

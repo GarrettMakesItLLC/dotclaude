@@ -54,7 +54,12 @@ case "$path" in
   */issues/comments/*) jq -r .body "$STUB_DIR/comment.json" ;;
   */pulls/*) printf '{"head":{"sha":"%s","ref":"%s"},"base":{"ref":"%s"},"state":"open"}\n' "$STUB_HEAD" "${STUB_HEAD_REF:-feat/x}" "${STUB_BASE_REF:-dev}" ;;
   */contents/*) cat "$STUB_DIR/manifest" ;;
-  */rules/branches/*) echo '[{"type":"merge_queue","ruleset_source_type":"Repository","ruleset_id":11},{"type":"required_status_checks","ruleset_source_type":"Organization","ruleset_id":22},{"type":"deletion","ruleset_source_type":"Repository","ruleset_id":33}]' ;;
+  */rules/branches/*)
+    if [ -n "${STUB_RULES_ERR:-}" ]; then
+      echo "{\"message\":\"$STUB_RULES_ERR\",\"status\":\"${STUB_RULES_STATUS:-403}\"}"
+      echo "gh: $STUB_RULES_ERR (HTTP ${STUB_RULES_STATUS:-403})" >&2; exit 1
+    fi
+    echo '[{"type":"merge_queue","ruleset_source_type":"Repository","ruleset_id":11},{"type":"required_status_checks","ruleset_source_type":"Organization","ruleset_id":22},{"type":"deletion","ruleset_source_type":"Repository","ruleset_id":33}]' ;;
   */rulesets/*) id="$(basename "$path")"
                 if [ -f "$STUB_DIR/state-$id.json" ]; then cat "$STUB_DIR/state-$id.json"; else echo '{"bypass_actors":[]}'; fi ;;
   *) echo '{}' ;;
@@ -165,6 +170,27 @@ verdict '.'; : > "$TMP/calls"; rm -f "$TMP"/state-*.json
 OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" STUB_COMMENT_FAIL=1 \
   "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" 2>&1)"; RC=$?
 [ "$RC" = 1 ] && [ "$(writes)" = 0 ] && ok "a failed publish refuses with zero ruleset writes" || bad "failed publish: rc=$RC writes=$(writes) $OUT"
+
+echo "fleet-merge: a free-plan private repo (rules endpoint 403 \"Upgrade to GitHub Pro\") has no gating rulesets"
+UPGRADE='Upgrade to GitHub Pro or make this repository public to enable this feature'
+verdict '.'; : > "$TMP/calls"; rm -f "$TMP"/state-*.json; rm -rf "$TMP/state"
+OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" STUB_RULES_ERR="$UPGRADE" \
+  "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" 2>&1)"; RC=$?
+[ "$RC" = 0 ] && ok "merges instead of aborting" || bad "rc=$RC $OUT"
+[ "$(grep -c 'has no rulesets' <<<"$OUT")" = 1 ] && ok "logs the ungated base once" || bad "log: $OUT"
+grep -q -- "-X PUT repos/o/r/pulls/7/merge -f sha=$HEAD" "$TMP/calls" && ok "the merge is pinned to the verdict SHA" || bad "unpinned: $(cat "$TMP/calls")"
+[ "$(grep -c -- '-X PUT' "$TMP/calls")" = 1 ] && ! grep -q 'rulesets/' "$TMP/calls" && ok "no ruleset is read, lifted or restored" || bad "ruleset calls: $(cat "$TMP/calls")"
+grep -q -- '-X POST' "$TMP/calls" && ok "the verdict is still published" || bad "no verdict comment"
+echo "fleet-merge: any other 403 or 404 on the rules endpoint still fails"
+for c in 'Resource not accessible by integration|403' 'Not Found|404' "$UPGRADE|404"; do
+  verdict '.'; : > "$TMP/calls"; rm -f "$TMP"/state-*.json
+  OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" STUB_RULES_ERR="${c%%|*}" STUB_RULES_STATUS="${c##*|}" \
+    "$FM" 7 --repo o/r --verdict "$TMP/verdict.json" 2>&1)"; RC=$?
+  [ "$RC" = 2 ] && grep -q 'cannot read rules for dev' <<<"$OUT" && [ "$(writes)" = 0 ] && ! grep -q -- '-X POST' "$TMP/calls" \
+    && ok "${c%%|*} (HTTP ${c##*|}) aborts with no write" || bad "${c}: rc=$RC writes=$(writes) $OUT"
+done
+verdict '.'; run --dry-run
+[ "$RC" = 0 ] && ok "the gated path is unchanged by the stub's new branch" || bad "rc=$RC"
 
 echo "fleet-merge: a failed merge still restores"
 verdict '.'; : > "$TMP/calls"; rm -f "$TMP"/state-*.json
