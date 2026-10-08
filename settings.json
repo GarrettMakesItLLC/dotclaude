@@ -83,6 +83,10 @@
           {
             "type": "command",
             "command": "\"$HOME\"/.claude/hooks/db-push-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/pooler-readonly-guard.sh"
           }
         ]
       },
@@ -155,6 +159,10 @@
           },
           {
             "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh pooler-readonly-guard"
+          },
+          {
+            "type": "command",
             "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh verify-reminder"
           },
           {
@@ -216,6 +224,15 @@
             "type": "command",
             "command": "\"$HOME\"/.claude/hooks/worktree-bootstrap.sh"
           },
+          {
+            "type": "command",
+            "command": "\"$HOME\"/.claude/hooks/credential-output-guard.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_serena_serena__execute_shell_command|mcp__serena__execute_shell_command",
+        "hooks": [
           {
             "type": "command",
             "command": "\"$HOME\"/.claude/hooks/credential-output-guard.sh"

@@ -25,6 +25,10 @@
 # reads it as "${CI_REPLICA_BASE:-origin/dev}" (or its own default). A
 # promotion head sits ON its default base, so its range is empty and a scan of
 # it passes having read nothing; gate one with --base origin/main.
+# Without --base no job sees one: a CI_REPLICA_BASE inherited from the
+# caller (an outer replica run with --base, whose job runs this one) is
+# removed, so the base a job measures against is always the one this run was
+# given.
 #
 # Exit 0 when no job FAILed, 1 when any did, 2 on a bad manifest or usage.
 set -uo pipefail
@@ -308,6 +312,8 @@ if [ -n "$BASE" ]; then
   git -C "$ROOT" rev-parse --verify --quiet "$BASE^{commit}" >/dev/null \
     || die "--base '$BASE' is not a commit in $ROOT (fetch it first?)"
   export CI_REPLICA_BASE="$BASE"
+else
+  unset CI_REPLICA_BASE
 fi
 
 echo "ci-replica: $MANIFEST"
