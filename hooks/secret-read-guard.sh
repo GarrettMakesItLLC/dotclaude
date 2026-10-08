@@ -28,7 +28,8 @@
 #   - A `Bash` command whose JOB is to print a credential, when its stdout
 #     reaches the transcript: `*db-url.sh` (staging-db-url.sh), `railway
 #     variables`, `vercel env pull /dev/stdout`, `gh auth token`, `supabase …
-#     api-keys`, bare `printenv`/`env`/`export -p`/`set`, `printenv <SECRET>`,
+#     api-keys`, a curl of the Supabase Management API's `/postgrest`,
+#     `/config/auth` or `/api-keys`, bare `printenv`/`env`/`export -p`/`set`, `printenv <SECRET>`,
 #     and `echo`/`printf` of a credential-named variable. Allowed when captured
 #     by `$(…)`, redirected to a file or /dev/null, or piped into a sink that
 #     prints no value (wc, a checksum, grep -q/-c/-l, `head -c N` with N <= 8,
@@ -393,11 +394,16 @@ if hit:
 #   - piped into a sink that prints no value: wc, a checksum, grep -q/-c/-l,
 #     `head -c N`/`cut -c-N` with N <= 8 (a prefix), or a redacting sed.
 SECRET_NAME = re.compile(
-    r"(SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|API_?KEY|PRIVATE_KEY|SERVICE_ROLE|"
+    r"(SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|_PASS\b|API_?KEY|PRIVATE_KEY|SERVICE_ROLE|"
     r"ACCESS_KEY|DATABASE_URL|DB_URL|DIRECT_URL|CONNECTION_STRING|DSN|CREDENTIAL)",
     re.I,
 )
 SUBST_MARK = "__SECRET_SUBST__"
+# Management API endpoints whose response body carries secrets: `jwt_secret`
+# (postgrest), every `*_secret`/`smtp_pass` (config/auth), and the keys (#479).
+SUPABASE_SECRET_API = re.compile(
+    r"api\.supabase\.com/v1/projects/[^/\s\"']+/(?:postgrest|config/auth|api-keys)(?![\w/-])"
+)
 WRAPPERS = {"env", "command", "builtin", "time", "nohup", "sudo", "exec", "!"}
 
 
@@ -459,6 +465,8 @@ def emitter(stage):
         return "`gh auth status --show-token` prints a GitHub token"
     if w == "supabase" and "api-keys" in plain:
         return "`supabase … api-keys` prints the project's service-role key"
+    if w in ("curl", "wget", "http", "https", "xh") and any(SUPABASE_SECRET_API.search(a) for a in args):
+        return "the Supabase Management API's postgrest, config/auth and api-keys endpoints return the project's JWT secret and auth secrets"
     if w == "printenv":
         if not plain:
             return "bare `printenv` prints every variable, credentials included"
