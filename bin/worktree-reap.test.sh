@@ -175,6 +175,8 @@ mkdir -p "$REPO/elsewhere"
 out="$(sweep --apply "$REPO/elsewhere")"; rc=$?
 [ -d "$REPO/elsewhere" ] && [ "$rc" = 2 ] && ok "arbitrary directory refused" || bad "arbitrary dir: rc=$rc $out"
 
+marker="$(bash -c 'source "$1"; printf "%s" "$AGENT_WORKTREE_LOCK_MARKER"' _ "$HERE/lib/agent-worktree-lock.sh")"
+
 # --- helpers for the cases below ---
 
 # with_gh <stub-body> [args...]: a sweep with a stub `gh` whose body is given.
@@ -326,6 +328,104 @@ grep -q readlink "$TDIR/calls.log" 2>/dev/null && bad "scan ran despite WORKTREE
 (cd "$REPO" && env -u WORKTREE_REAP_SKIP_PROC_SCAN PATH="$TDIR:$PATH" "$REAP" >/dev/null 2>&1)
 grep -q readlink "$TDIR/calls.log" 2>/dev/null \
   && ok "the scan runs when the skip is not set" || bad "scan did not run"
+
+# --- the starting-up floor ---
+# A claim branch is created AT the trunk's head, so before its first commit it
+# reads as already merged; only age separates it from an abandoned empty tree.
+aged() { local age="$1"; shift; (cd "$REPO" && WORKTREE_REAP_MIN_AGE_SECS="$age" "$REAP" "$@" 2>&1); }
+make_repo dev
+git -C "$REPO" worktree add -q "$REPO/.worktrees/starting-up" -b starting-up 2>/dev/null
+git -C "$REPO" push -q origin starting-up 2>/dev/null
+git -C "$REPO" fetch -q origin
+out="$(aged 900 --apply)"
+grep -q "KEEP  $REPO/.worktrees/starting-up" <<<"$out" && grep -q "starting up" <<<"$out" \
+  && git -C "$REPO" worktree list | grep -q "starting-up" \
+  && ok "a just-created tree with no commits is kept" || bad "starting up: $out"
+out="$(aged 0)"
+grep -q "REAP  $REPO/.worktrees/starting-up" <<<"$out" \
+  && ok "the same tree is reapable once past the floor" || bad "past floor: $out"
+aged 0 --apply >/dev/null
+git -C "$REPO" worktree list | grep -q "starting-up" \
+  && bad "abandoned empty tree survived --apply" || ok "an abandoned empty tree is removed"
+
+make_repo dev
+git -C "$REPO" worktree add -q "$REPO/.worktrees/clean-pushed" -b clean-pushed 2>/dev/null
+git -C "$REPO" push -q origin clean-pushed 2>/dev/null
+git -C "$REPO" fetch -q origin
+out="$(sweep --apply)"
+git -C "$REPO" worktree list | grep -q "clean-pushed" \
+  && bad "a merged, clean, pushed tree survived: $out" || ok "a merged, clean, pushed tree is removed"
+
+# --- the idle floor ---
+# live_looking <name>: clean, pushed, merged into the trunk, nothing running in
+# it; the shape of a live agent between two commands.
+live_looking() {
+  local wt="$REPO/.worktrees/$1"
+  git -C "$REPO" worktree add -q "$wt" -b "$1" 2>/dev/null
+  echo work >"$wt/f.txt"
+  git -C "$wt" add -A
+  git -C "$wt" commit -q -m work
+  git -C "$wt" push -q -u origin "$1" 2>/dev/null
+  git -C "$REPO" fetch -q origin
+  git -C "$REPO" merge -q --ff-only "$1" 2>/dev/null
+  git -C "$REPO" push -q origin dev 2>/dev/null
+  git -C "$REPO" fetch -q --prune origin
+}
+backdate() {
+  local admin f
+  admin="$(git -C "$1" rev-parse --absolute-git-dir)"
+  for f in "$admin" "$admin/logs/HEAD" "$admin/index"; do [ -e "$f" ] && touch -d '2 hours ago' "$f"; done
+}
+idle() { (cd "$REPO" && WORKTREE_REAP_MIN_IDLE_SECS=3600 "$REAP" "$@" 2>&1); }
+
+make_repo dev
+live_looking live
+out="$(idle)"
+grep -Eq "KEEP  $REPO/.worktrees/live — active [0-9]+s ago" <<<"$out" \
+  && ok "a recently touched tree is kept however finished it looks" || bad "idle floor: $out"
+backdate "$REPO/.worktrees/live"
+out="$(idle)"
+grep -q "REAP  $REPO/.worktrees/live" <<<"$out" \
+  && ok "the idle floor is not a blanket refusal: a quiet tree is reapable" || bad "quiet tree: $out"
+out="$(idle)"
+grep -q "REAP  $REPO/.worktrees/live" <<<"$out" \
+  && ok "a second sweep does not read its own footprint as activity" || bad "second sweep: $out"
+
+make_repo dev
+live_looking named
+out="$(idle --apply "$REPO/.worktrees/named")"
+grep -q "removed $REPO/.worktrees/named" <<<"$out" \
+  && ok "an explicitly named path skips the idle floor" || bad "named, idle: $out"
+
+# --- a vanished trunk tracking ref is recorded, then restored by the fetch ---
+make_repo dev
+git -C "$REPO" update-ref -d refs/remotes/origin/dev
+out="$(sweep)"
+grep -q "refs/remotes/origin/dev was missing" <<<"$out" \
+  && grep -q "refs/remotes/origin/dev missing at sweep start" "$REPO/.git/origin-trunk-vanished.log" \
+  && git -C "$REPO" rev-parse --verify -q refs/remotes/origin/dev >/dev/null \
+  && ok "a vanished origin/dev is logged and restored" || bad "vanished ref: $out"
+make_repo dev
+out="$(sweep)"
+! grep -q "was missing" <<<"$out" && [ ! -e "$REPO/.git/origin-trunk-vanished.log" ] \
+  && ok "silent when the trunk ref is present" || bad "spurious vanished report: $out"
+
+# --- the lock text is written once and matched everywhere it is sourced ---
+# The reason dotclaude's setup-worktree.sh applies comes from a repo's manifest
+# `worktree.lockWorktree`; every such value shipped here must contain the marker
+# the reaper matches, or its own trees read as hand-locked and the sweep stalls.
+ROOT_DIR="$(cd "$HERE/.." && pwd)"
+grep -q 'manifest_get worktree.lockWorktree' "$ROOT_DIR/bin/setup-worktree.sh" \
+  && grep -q 'worktree lock --reason "$reason"' "$ROOT_DIR/bin/setup-worktree.sh" \
+  && ok "setup-worktree.sh locks with the manifest's lockWorktree" || bad "setup-worktree.sh no longer locks from the manifest"
+checked=0
+while IFS= read -r f; do
+  while IFS= read -r val; do
+    checked=$((checked + 1))
+    [[ "$val" == *"$marker"* ]] || bad "$f: lockWorktree \"$val\" lacks the reaper's marker \"$marker\""
+  done < <(sed -n 's/.*"lockWorktree": *"\([^"]*\)".*/\1/p' "$ROOT_DIR/$f")
+done < <(git -C "$ROOT_DIR" ls-files | grep -v '\.test\.sh$' | grep -E '\.(md|json|sh)$')
+[ "$checked" -ge 1 ] && ok "every shipped lockWorktree value ($checked) contains the marker" || bad "no lockWorktree value found to check"
 
 # --- the lock reason documented for repo.json is the one the reaper owns ---
 reason="$(bash -c 'source "$1"; printf "%s" "$AGENT_WORKTREE_LOCK_REASON"' _ "$HERE/lib/agent-worktree-lock.sh")"
