@@ -52,7 +52,7 @@
 #
 # KNOWN GAPS (by design — don't expand this into a regex arms race):
 #   - Not a real shell parse: segments are split on `;`/`&&`/`||`/`|`/newline
-#     and tokenized with shlex. A secrets path built at runtime from a
+#     outside quotes and tokenized with shlex. A secrets path built at runtime from a
 #     variable (`f="$SECRETS_DIR/gmi.env"; cat "$f"`) is invisible to this —
 #     same class of gap as worktree-guard's write-target scan.
 #   - `cp`/`mv`/`scp` of a secrets file are not blocked — they don't print the
@@ -92,6 +92,65 @@ tool = obj.get("tool_name", "")
 ti = obj.get("tool_input", {}) or {}
 
 EXCLUDED_SUFFIXES = (".env.example", ".env.sample", ".env.template")
+
+
+def split_unquoted(s, stages=False):
+    """Split a command on `&&`/`||`/`;`/newline (or, with stages=True, on a
+    lone `|`), skipping separators inside quotes or after a backslash. A `|`
+    inside a quoted awk/grep regex is an alternation, not a pipe, and an `env`
+    alternative in it is not a command (#485)."""
+    out, buf, q, i, n = [], [], None, 0, len(s)
+    while i < n:
+        ch = s[i]
+        if q:
+            buf.append(ch)
+            if ch == "\\" and q == '"' and i + 1 < n:
+                buf.append(s[i + 1])
+                i += 2
+                continue
+            if ch == q:
+                q = None
+            i += 1
+            continue
+        if ch == "\\" and i + 1 < n:
+            buf.append(s[i:i + 2])
+            i += 2
+            continue
+        if ch in "'\"":
+            q = ch
+            buf.append(ch)
+            i += 1
+            continue
+        two = s[i:i + 2]
+        if stages:
+            if two == "||":
+                buf.append(two)
+                i += 2
+                continue
+            if ch == "|":
+                out.append("".join(buf))
+                buf = []
+                i += 1
+                continue
+        elif two in ("&&", "||"):
+            out.append("".join(buf))
+            buf = []
+            i += 2
+            continue
+        elif ch in ";\n":
+            out.append("".join(buf))
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    out.append("".join(buf))
+    return out
+
+
+def segments(s):
+    """Every pipeline stage of every statement, quote-aware."""
+    return [st for stmt in split_unquoted(s) for st in split_unquoted(stmt, stages=True)]
 
 def is_secret_path(tok):
     if not tok:
@@ -241,7 +300,7 @@ def grep_non_path_indexes(toks, cmd_idx):
 
 
 hit = None
-for seg in re.split(r"&&|\|\||\||;|\n", cmd):
+for seg in segments(cmd):
     seg = seg.strip()
     if not seg:
         continue
@@ -467,16 +526,15 @@ def strip_substitutions(c):
         if not m:
             break
         inner = m.group(1) if m.group(1) is not None else m.group(2)
-        emits = any(emitter(st) for stmt in re.split(r"&&|\|\||;|\n", inner)
-                    for st in re.split(r"(?<!\|)\|(?!\|)", stmt))
+        emits = any(emitter(st) for st in segments(inner))
         c = c[:m.start()] + (SUBST_MARK if emits else "__SUBST__") + c[m.end():]
     return c
 
 
 def find_emit(c):
     flat = strip_substitutions(strip_heredocs(c).replace("\\\n", " "))
-    for stmt in re.split(r"&&|\|\||;|\n", flat):
-        stages = [st.strip() for st in re.split(r"(?<!\|)\|(?!\|)", stmt)]
+    for stmt in split_unquoted(flat):
+        stages = [st.strip() for st in split_unquoted(stmt, stages=True)]
         for i, st in enumerate(stages):
             why = emitter(st)
             if not why:

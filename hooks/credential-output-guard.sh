@@ -20,7 +20,9 @@
 #
 # Credential-shaped means:
 #   - a URL with a non-empty password: postgres(ql)/mysql/mariadb/mongodb/
-#     redis/amqp `scheme://user:pass@host`;
+#     redis/amqp `scheme://user:pass@host`, unless the host is reserved for
+#     testing (example.com/.net/.org, *.test, *.example, *.invalid) and the
+#     password is not a live value;
 #   - a token with a known prefix: sk-ant-, sk_live_/rk_live_, AIza, ghp_/gho_/
 #     ghs_/ghu_/ghr_, github_pat_, sbp_, AKIA;
 #   - a private-key BODY: the base64 lines under a `-----BEGIN … PRIVATE
@@ -118,11 +120,18 @@ def unquote(v):
     return v
 
 
+def name_shaped(v):
+    """A bare UPPER_SNAKE identifier with an underscore is a variable NAME
+    (`"MB_PROD_DATABASE_URL": "DATABASE_URL"` in a repo.json name map), never a
+    credential value, even when some secret-named variable happens to hold it."""
+    return re.fullmatch(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+", v) is not None
+
+
 def live_values():
     """Values of live credentials: secret-named env vars and the secrets files."""
     vals = set()
     for k, v in os.environ.items():
-        if SECRET_NAME.search(k) and len(v) >= 8:
+        if SECRET_NAME.search(k) and len(v) >= 8 and not name_shaped(v):
             vals.add(v)
     home = os.path.expanduser("~")
     pats = [".config/secrets/*.env", ".musclebuddy/*.env", ".redthread/*.env"]
@@ -134,7 +143,7 @@ def live_values():
                         m = re.match(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$", line.rstrip("\n"))
                         if m and SECRET_NAME.search(m.group(1)):
                             v = unquote(m.group(2))
-                            if len(v) >= 8:
+                            if len(v) >= 8 and not name_shaped(v):
                                 vals.add(v)
             except OSError:
                 continue
@@ -148,6 +157,14 @@ def fixture_shaped(v):
     if re.fullmatch(r"(?:gh[pousr]_|github_pat_|sbp_|sk-ant-|sk_live_|rk_live_|AIza)[A-Za-z0-9_\-]{0,19}", v):
         return True
     return bool(re.fullmatch(r"[a-z]+(?:[-_][a-z]+)+", v))
+
+
+def fixture_host(host):
+    """An RFC 2606 / 6761 reserved host — example.com/.net/.org, or a .test,
+    .example or .invalid name — which no real database answers on, so a URL to
+    it is a test fixture rather than a leak."""
+    h = (host or "").lower().rstrip(".")
+    return bool(re.search(r"(?:^|\.)example\.(?:com|net|org)$|\.(?:test|example|invalid)$", h))
 
 
 def real_value(v):
@@ -197,6 +214,8 @@ def scan(text, found):
 
     def url(m):
         if placeholder(m.group(3)):
+            return m.group(0)
+        if fixture_host(m.group(4)) and unquote(m.group(3)) not in LIVE:
             return m.group(0)
         found.append("a %s password for %s@%s" % (m.group(1).rstrip(":/"), m.group(2), m.group(4) or "?"))
         return "%s%s:<redacted>@%s" % (m.group(1), m.group(2), m.group(4))

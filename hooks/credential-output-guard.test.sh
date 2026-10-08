@@ -32,7 +32,9 @@ FAKE_HOME="$(mktemp -d)"
 trap 'rm -f "$FAIL_MARKER"; rm -rf "$FAKE_HOME"' EXIT
 FAKE_LIVE="live-secret-words"
 mkdir -p "$FAKE_HOME/.config/secrets"
-printf 'NODE_AUTH_TOKEN=%s\n' "$FAKE_LIVE" >"$FAKE_HOME/.config/secrets/fake.env"
+printf 'NODE_AUTH_TOKEN=%s\nALIAS_DATABASE_URL=DATABASE_URL\n' "$FAKE_LIVE" >"$FAKE_HOME/.config/secrets/fake.env"
+# A live secret-named variable whose value is itself a variable NAME (#484, #494).
+export ALIAS_DIRECT_URL=DIRECT_URL
 export HOME="$FAKE_HOME"
 
 # run <stdout> [stderr] — prints the hook's JSON (empty when it passes).
@@ -121,6 +123,18 @@ must_pass "dict repr, non-secret keys" "{'contactEmail': 'r@example.org', 'demoA
 must_pass "dict repr, placeholder" "{'demoAccountPassword': 'your-password-here'}"
 # #478's false positive: a name mapping in a repo manifest.
 must_pass "repo.json name mapping" '{"MB_PROD_DATABASE_URL": "DATABASE_URL", "MB_PROD_DIRECT_URL": "DIRECT_URL"}'
+# The same map when a live variable or a secrets-file entry holds that name as
+# its value: a name is never a credential (#481, #483, #484, #487, #494).
+must_pass "name mapping vs live names" '{"ADVOS_DATABASE_URL": "DATABASE_URL", "ADVOS_DIRECT_URL": "DIRECT_URL"}'
+must_pass "name mapping env vs live names" "$(printf 'X_DATABASE_URL=DATABASE_URL\nX_DIRECT_URL=DIRECT_URL')"
+
+# A URL to a host reserved for testing is a fixture (#481), unless its password
+# is a live credential.
+must_pass "example.com fixture URL" "postgresql://postgres.sandboxref:${FAKE_PW}@pooler.example.com:6543/postgres"
+must_pass ".test fixture URL" "redis://default:${FAKE_PW}@cache.test:6379"
+must_pass ".invalid fixture URL" "postgres://u:${FAKE_PW}@db.internal.invalid/x"
+must_redact "live password on a fixture host" "postgresql://u:${FAKE_LIVE}@db.example.com/x" "$FAKE_LIVE" "postgresql password"
+must_redact "example-ish real host" "postgresql://u:${FAKE_PW}@example.com.attacker.net/x" "$FAKE_PW" "postgresql password"
 
 # Private-key bodies. FAKE_* bodies are a key's fixed DER prefix (structure, not
 # key material) followed by filler.
