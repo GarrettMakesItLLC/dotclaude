@@ -192,6 +192,11 @@ sweep --apply >/dev/null
 [ ! -d "$REPO/.worktrees/own" ] && [ -d "$REPO/.worktrees/hand" ] \
   && ok "own lock reaped, hand lock kept" || bad "lock handling: own=$([ -d "$REPO/.worktrees/own" ] && echo kept) hand=$([ -d "$REPO/.worktrees/hand" ] && echo kept)"
 
+# --- an unanswerable unpushed count reads as unpushed, never as zero ---
+fn="$(sed -n '/^unpushed_count() {/,/^}/p' "$REAP")"
+grep -q '|| echo unknown' <<<"$fn" && ! grep -q '|| echo 0' <<<"$fn" \
+  && ok "unpushed_count fails closed" || bad "unpushed_count must print unknown on error"
+
 # --- --help prints the header only ---
 out="$("$REAP" --help)"
 grep -q "Usage:" <<<"$out" && ! grep -q "^set -" <<<"$out" && ok "--help prints the usage header" || bad "--help output"
