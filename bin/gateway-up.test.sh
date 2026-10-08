@@ -66,7 +66,7 @@ check "no keys explains the escape hatch" "--allow-missing" "$out"
 
 # --- One key present, the rest waived by name: compose exactly that class. ---
 echo 'export GEMINI_API_KEY=test-cheap-key' > "$TMP/secrets/cheap.env"
-out="$("$UP" --dry-run --allow-missing frontier --allow-missing frontier-light --allow-missing local 2>&1)"; rc=$?
+out="$("$UP" --dry-run --allow-missing frontier --allow-missing frontier-light --allow-missing light --allow-missing local 2>&1)"; rc=$?
 [ "$rc" = 0 ] || { echo "FAIL (cheap only): exit $rc"; echo "$out"; fail=1; }
 check "cheap only" "classes: cheap" "$out"
 check "cheap only reports the waivers" "skipped: frontier:" "$out"
@@ -103,6 +103,8 @@ check "frontier composed" "model_name: frontier" "$body"
 check "frontier falls back within its own class" '{"frontier": ["frontier-light"]}' "$body"
 absent "frontier must never fall back to cheap" '{"frontier": ["cheap"]}' "$body"
 absent "cheap has no live fallback target here" '{"cheap": ["local"]}' "$body"
+check "light composed on the Anthropic key" "model: anthropic/claude-haiku-5-5" "$body"
+absent "light must never fall back to cheap" '{"light": ["cheap"]}' "$body"
 
 # --- The composed document is valid YAML with a model_list. ---
 python3 - "$CONFIG" <<'PY' || { echo "FAIL: composed config is not valid YAML"; fail=1; }
