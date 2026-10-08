@@ -36,8 +36,9 @@ not the coding sessions themselves.
       ▼
   LiteLLM proxy   127.0.0.1:4000
       │  routes by TASK CLASS, not vendor
-      ├── frontier        → Anthropic API   claude-opus-5
-      ├── frontier-light  → Anthropic API   claude-sonnet-5
+      ├── frontier        → Anthropic API   claude-opus-5-5
+      ├── frontier-light  → Anthropic API   claude-sonnet-5-5
+      ├── light           → Anthropic API   claude-haiku-5-5
       ├── cheap           → Gemini API      gemini-3.8-flash
       └── local           → Ollama          qwen2.5-coder:7b   (127.0.0.1:11434)
 ```
@@ -120,6 +121,8 @@ will not announce itself as a routing decision when it does.
 | **Anything touching auth** | `frontier` | Sessions, tokens, RLS, permission checks. |
 | **Anything touching health data** | `frontier` | Regulated, and the blast radius is a person rather than a build. |
 | **Migrations and backfills** | `frontier` | Often irreversible, and always against real rows. |
+| Mechanical edits a test or typecheck verifies: renames, dependency bumps, a test following an existing pattern | `light` | The check, not the model, is what catches a wrong answer — and below 100k input tokens Haiku 5.5 costs a fraction of `frontier-light`. Never for review, auth, money, health data or migrations: those stay on the frontier rows above whatever their size. |
+| Triage, summaries and drafts over private repo content | `light` | Same job as the `cheap` rows, but the content stays with Anthropic. |
 | Bounded frontier work: one-file refactors, a single well-specified fix, a focused review of a small diff | `frontier-light` | Same grade of judgment, smaller job. This is the default for frontier work that fits in one head. |
 
 Two rules keep the table honest:
@@ -127,7 +130,7 @@ Two rules keep the table honest:
 1. **When it is genuinely unclear which side something falls on, it is
    frontier.** The cheap classes exist to absorb volume, not to win arguments.
 2. **Fallbacks never cross down.** `frontier` degrades to `frontier-light` and
-   no further. `cheap` and `local` degrade into each other. A `frontier`
+   no further; `light` has no fallback. `cheap` and `local` degrade into each other. A `frontier`
    request with no working Anthropic key returns an error; it does not return a
    flash model's opinion about a migration with the word "frontier" in the
    response envelope.
