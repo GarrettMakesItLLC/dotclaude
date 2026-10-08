@@ -91,90 +91,127 @@ for t in rest:
     break
 ' 2>/dev/null)" || exit 0
 
-[ -z "$target" ] && exit 0
-
-# Resolve a relative target against the SHELL's cwd from the payload, not the
-# project dir: an agent inside `.worktrees/a` that creates `.worktrees/b` would
-# otherwise resolve to `.worktrees/a/.worktrees/b`, find nothing, and give up.
 project_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
-case "$target" in
-  /*) ;;
-  *) target="${payload_cwd:-$project_dir}/$target" ;;
-esac
-[ -d "$target" ] || exit 0
+# The SHELL's cwd from the payload, not the project dir: an agent inside
+# `.worktrees/a` that creates `.worktrees/b` would otherwise resolve to
+# `.worktrees/a/.worktrees/b`, find nothing, and give up.
+base_cwd="${payload_cwd:-$project_dir}"
 
-# The script belongs to the repo the WORKTREE was created in, which is not
-# necessarily the session's project (#312). A session whose project is
-# MuscleBuddy running `cd ~/workspace/platform && git worktree add …` created a
-# platform worktree and then primed it with MuscleBuddy's setup script —
-# installing the wrong repo's dependencies into it, or, when MuscleBuddy had a
-# script and platform did not, priming a tree that should have been left alone.
-#
-# Ask git which repo actually owns the new worktree. `--show-toplevel` from
-# inside it gives the worktree's own root; `--git-common-dir` resolves to the
-# MAIN checkout's `.git`, whose parent is the repo whose `bin/` holds the
-# script — a linked worktree does not carry one of its own.
-# Falls back to the project dir when git cannot answer — an unusual layout, or
-# a target that is not in a repo at all. That is the prior behaviour, so this
-# is never worse than before, only better where git does know.
-owner_repo="$(git -C "$target" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
-if [ -n "$owner_repo" ]; then
-  owner_repo="$(dirname "$owner_repo")"
-else
-  owner_repo="$project_dir"
+messages=""
+
+# Prime ONE worktree: choose the script that belongs to the repo that owns it,
+# launch it DETACHED, and append a note to $messages. Returns 1, silently, when
+# the tree cannot be primed, 2 when the repo is not opted in (no script).
+prime_one() {
+  local target="$1" owner_repo self_dir shared_script script wt_git_dir log rc_file
+  [ -d "$target" ] || return 1
+
+  # The script belongs to the repo the WORKTREE was created in, which is not
+  # necessarily the session's project (#312): ask git which repo owns it.
+  # `--git-common-dir` resolves to the MAIN checkout's `.git`, whose parent is
+  # the repo whose `bin/` holds the script. Falls back to the project dir when
+  # git cannot answer.
+  owner_repo="$(git -C "$target" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+  if [ -n "$owner_repo" ]; then
+    owner_repo="$(dirname "$owner_repo")"
+  else
+    owner_repo="$project_dir"
+  fi
+  [ -d "$owner_repo" ] || return 1
+
+  # A manifest opts the repo into dotclaude's shared script. The worktree's own
+  # copy is read first — it is tracked, so it is the branch's — then the main
+  # checkout's.
+  self_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+  shared_script="$self_dir/../bin/setup-worktree.sh"
+  if { [ -f "$target/.claude/repo.json" ] || [ -f "$owner_repo/.claude/repo.json" ]; } && [ -x "$shared_script" ]; then
+    script="$(cd "$(dirname "$shared_script")" && pwd)/setup-worktree.sh"
+  else
+    script="$owner_repo/bin/setup-worktree.sh"
+  fi
+  [ -x "$script" ] || return 2   # not opted in: inert, not a failure
+
+  # Run it DETACHED (#408): priming can queue for minutes behind
+  # `bin/with-check-lock.sh`, longer than this hook's own time budget, and a
+  # kill partway leaves a half-primed tree. The log and rc marker live in the
+  # WORKTREE's own git-dir (`--git-dir`, the per-worktree admin dir) so
+  # concurrent primings never collide. The repo's pre-push
+  # `setup-worktree --check` catches an incomplete result.
+  wt_git_dir="$(git -C "$target" rev-parse --path-format=absolute --git-dir 2>/dev/null)"
+  [ -n "$wt_git_dir" ] || wt_git_dir="$target"
+  log="$wt_git_dir/worktree-bootstrap.log"
+  rc_file="$wt_git_dir/worktree-bootstrap.rc"
+  rm -f "$rc_file" 2>/dev/null || true
+
+  # Every path is its own argv entry, so a space or quote can't break the
+  # redirection.
+  (
+    nohup sh -c '"$1" "$2" > "$3" 2>&1; echo $? > "$4"' _ \
+      "$script" "$target" "$log" "$rc_file" >/dev/null 2>&1 &
+  )
+
+  messages="${messages}dotclaude worktree-bootstrap: priming $target in the background with $script.
+Log: $log
+Done when: $rc_file exists and reads 0. Until then, do not trust a typecheck, lint or test result from that worktree.
+"
+  return 0
+}
+
+resolved=""
+if [ -n "$target" ]; then
+  case "$target" in
+    /*) resolved="$target" ;;
+    *) resolved="$base_cwd/$target" ;;
+  esac
 fi
-[ -d "$owner_repo" ] || exit 0
 
-# A manifest opts the repo into dotclaude's shared script. The worktree's own
-# copy is read first — it is tracked, so it is the branch's — then the main
-# checkout's.
-self_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-shared_script="$self_dir/../bin/setup-worktree.sh"
-if { [ -f "$target/.claude/repo.json" ] || [ -f "$owner_repo/.claude/repo.json" ]; } && [ -x "$shared_script" ]; then
-  script="$(cd "$(dirname "$shared_script")" && pwd)/setup-worktree.sh"
+# The target is parsed from the LITERAL command string, so a shell variable
+# (`for d in …; do git worktree add .worktrees/$d …; done`) never resolves and
+# the tree it created would go unprimed with no message (#497). When the
+# target is empty, contains `$`/a backtick, or names no directory, sweep the
+# repo's linked worktrees instead: prime every one with neither a rc marker nor
+# `node_modules`, and name any that cannot be primed.
+if [ -n "$resolved" ] && [ -d "$resolved" ] && case "$target" in *'$'*|*'`'*) false ;; *) true ;; esac; then
+  prime_one "$resolved" || true
 else
-  script="$owner_repo/bin/setup-worktree.sh"
+  case "$command_str" in
+    *'$'*|*'`'*) ;;
+    *) exit 0 ;;   # a plain add whose target simply is not there: nothing to do
+  esac
+  unprimed=""
+  wt_path=""
+  first=1
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) wt_path="${line#worktree }" ;;
+      "")
+        if [ -n "$wt_path" ]; then
+          if [ "$first" = 1 ]; then
+            first=0   # the main checkout is not a linked worktree
+          else
+            wt_gd="$(git -C "$wt_path" rev-parse --path-format=absolute --git-dir 2>/dev/null)"
+            if [ -d "$wt_path" ] && [ -n "$wt_gd" ] \
+               && [ ! -e "$wt_gd/worktree-bootstrap.rc" ] && [ ! -d "$wt_path/node_modules" ]; then
+              prime_one "$wt_path"
+              [ $? = 1 ] && unprimed="${unprimed}  $wt_path
+"
+            fi
+          fi
+        fi
+        wt_path=""
+        ;;
+    esac
+  done < <(git -C "$base_cwd" worktree list --porcelain 2>/dev/null; echo)
+  if [ -n "$unprimed" ]; then
+    messages="${messages}dotclaude worktree-bootstrap: the worktree target in this command could not be resolved (shell variable?) and these linked worktrees have no bootstrap marker and no node_modules, and could not be primed. Run setup-worktree.sh by hand:
+${unprimed}"
+  fi
 fi
-[ -x "$script" ] || exit 0
 
-# Run it DETACHED (#408). This hook fires as a PostToolUse hook, which has a
-# time budget of its own — and `bin/setup-worktree.sh` can queue for minutes
-# behind `bin/with-check-lock.sh` on a busy box (observed 13+ min behind two
-# typechecks, and 11 min behind another session's `npm ci --writer`). Running
-# it inline meant the hook's OWN budget ended first and killed the script
-# partway, and the comment that used to sit here said the exit was surfaced —
-# but a kill for exceeding the hook's timeout never reaches that branch at
-# all. Three worktrees in one session came out without their Tailwind
-# `@source` mirror this way, and the first sign was the pre-push hook failing
-# `setup-worktree --check` on a push that had queued for two hours.
-#
-# The log and rc marker live in the WORKTREE's own git-dir (`--git-dir`, not
-# `--git-common-dir` — the per-worktree admin dir a linked worktree gets, not
-# the shared one), so they travel with the worktree and never collide across
-# concurrent `git worktree add` calls priming different trees at once.
-#
-# No exit code to check here — that is the whole point of detaching. The
-# repo's own pre-push `--check` (named in the module doc above) already
-# catches an incomplete result; this only has to say where to look.
-wt_git_dir="$(git -C "$target" rev-parse --path-format=absolute --git-dir 2>/dev/null)"
-[ -n "$wt_git_dir" ] || wt_git_dir="$target"
-log="$wt_git_dir/worktree-bootstrap.log"
-rc_file="$wt_git_dir/worktree-bootstrap.rc"
-rm -f "$rc_file" 2>/dev/null || true
-
-# `sh -c '... "$1" "$2" ...' _ "$script" "$target" "$log" "$rc_file"` passes
-# every path as its own argv entry rather than interpolating it into the
-# command string, so a space or quote in any of them can't break the
-# redirection — the usual reason to prefer this form over building a string.
-(
-  nohup sh -c '"$1" "$2" > "$3" 2>&1; echo $? > "$4"' _ \
-    "$script" "$target" "$log" "$rc_file" >/dev/null 2>&1 &
-)
+[ -n "$messages" ] || exit 0
 
 python3 -c '
 import json, sys
 print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": sys.argv[1]}}))
-' "dotclaude worktree-bootstrap: priming $target in the background with $script.
-Log: $log
-Done when: $rc_file exists and reads 0. Until then, do not trust a typecheck, lint or test result from that worktree." 2>/dev/null || true
+' "$messages" 2>/dev/null || true
 exit 0
