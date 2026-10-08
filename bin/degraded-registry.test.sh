@@ -34,7 +34,7 @@ echo 'module.exports = 42;' >"$TMP/pkg/index.js"
 
 # --- the ~/.npmrc block ----------------------------------------------------------
 printf 'engine-strict=true\n' >"$DEGRADED_REGISTRY_NPMRC"
-"$CLI" on >/dev/null 2>&1
+on_out="$("$CLI" on 2>&1)" || echo "  \`on\` failed: $on_out"
 check "on writes registry" "grep -qx 'registry=${BASE}/' '$DEGRADED_REGISTRY_NPMRC'"
 check "on writes host rewrite" "grep -qx 'replace-registry-host=always' '$DEGRADED_REGISTRY_NPMRC'"
 check "on keeps other lines" "grep -qx 'engine-strict=true' '$DEGRADED_REGISTRY_NPMRC'"
@@ -50,6 +50,12 @@ check "banner silent when off" "[ -z \"\$('$CLI' banner)\" ]"
 rm -f "$DEGRADED_REGISTRY_NPMRC"
 "$CLI" on >/dev/null 2>&1; "$CLI" off >/dev/null 2>&1
 check "off leaves no empty npmrc" "[ ! -e '$DEGRADED_REGISTRY_NPMRC' ]"
+# A mirror that misses its startup budget fails `on` loudly and writes nothing (#545).
+# shellcheck disable=SC2034  # read by the check below, through eval
+budget_out="$(DEGRADED_REGISTRY_START_SECS=0 "$CLI" on 2>&1)"; budget_rc=$?
+check "a missed startup budget fails on" "[ $budget_rc -ne 0 ] && grep -q 'within 0s' <<<\"\$budget_out\""
+check "and writes no block" "[ ! -e '$DEGRADED_REGISTRY_NPMRC' ] || ! grep -q '^registry=' '$DEGRADED_REGISTRY_NPMRC'"
+"$CLI" off >/dev/null 2>&1
 printf 'registry=https://example.invalid/\n' >"$DEGRADED_REGISTRY_NPMRC"
 check "on refuses a foreign registry= line" "! '$CLI' on >/dev/null 2>&1"
 rm -f "$DEGRADED_REGISTRY_NPMRC"
