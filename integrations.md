@@ -340,10 +340,21 @@ claude mcp add --scope user --transport http upload-post \
   --header 'Authorization: ApiKey ${UPLOAD_POST_API_KEY}'
 ```
 
+`list_scheduled` takes no profile, date or field filter and does not paginate:
+with hundreds of jobs queued its answer is far past what fits in a tool result. Read
+the queue through a file instead — `GET https://api.upload-post.com/api/uploadposts/schedule`
+with the same `Authorization: ApiKey …` header, saved to the scratchpad, then
+project the fields you need (`jq '[.scheduled_posts[] | {job_id, scheduled_date, profile_username, platforms}]'`).
+Where a repo schedules through its own system (MuscleBuddy → RedThread), read
+that system's queue rather than Upload-Post's.
+
 ## Per-machine secrets
 
-Set in `~/.claude/settings.local.json` (gitignored) under `env`, or export in
-your shell. Never in the symlinked `settings.json`.
+Set in `~/.claude/settings.local.json` (gitignored) under `env`. Never in the
+symlinked `settings.json`. A shell-profile export is not enough: an MCP header
+like upload-post's is expanded from Claude's own environment at startup, and a
+scheduled or non-interactive session starts without the profile (#529).
+`bin/doctor.sh` warns when the upload-post key is missing there.
 
 | Env var | Used by | Where to get it |
 |---------|---------|-----------------|
