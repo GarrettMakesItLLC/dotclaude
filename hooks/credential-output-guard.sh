@@ -98,13 +98,15 @@ KEY_BODY = re.compile(
 # A maximal base64 run long enough to be key material, not a word or a path.
 B64_RUN = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/]{16,}={0,2}(?![A-Za-z0-9+/=_.-])")
 SECRET_NAME = re.compile(
-    r"(SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|API_?KEY|PRIVATE_KEY|SERVICE_ROLE|"
+    r"(SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|_PASS\b|API_?KEY|PRIVATE_KEY|SERVICE_ROLE|"
     r"ACCESS_KEY|DATABASE_URL|DB_URL|DIRECT_URL|CONNECTION_STRING|DSN|CREDENTIAL)",
     re.I,
 )
 KV_LINE = re.compile(r"(?m)^([ \t]*(?:export[ \t]+)?)([A-Za-z_][A-Za-z0-9_]*)=([^\n]*)$")
-# A quoted value after `:` or `=`, its key bare or quoted in either style.
-KV_PAIR = re.compile(r"""(?<![A-Za-z0-9_])(["']?)([A-Za-z_][A-Za-z0-9_]*)\1\s*[:=]\s*(["'])((?:(?!\3)[^\\\n]|\\.)*)\3""")
+# A quoted value after `:` or `=`, its key bare or quoted in either style. The
+# closing quote may be missing: `curl … | cut -c1-200` cuts a JSON response
+# mid-value, and the secret's prefix is still printed (#479).
+KV_PAIR = re.compile(r"""(?<![A-Za-z0-9_])(["']?)([A-Za-z_][A-Za-z0-9_]*)\1\s*[:=]\s*(["'])((?:(?!\3)[^\\\n]|\\.)*)(?:\3|(?=\n)|\Z)""")
 PLACEHOLDER = re.compile(r"redacted|\*\*\*|xxxx|changeme|change-me|your[_-]|placeholder|example|\.\.\.|…", re.I)
 
 
@@ -172,6 +174,11 @@ def real_value(v):
     if v in LIVE:
         return True
     if fixture_shaped(v):
+        return False
+    # A short lowercase-hex string is a digest's fingerprint (the Supabase
+    # Management API prints `external_apple_secret` as a hash prefix), not a
+    # secret: every credential shape this guard protects is longer (#479).
+    if re.fullmatch(r"[0-9a-f]{8,16}", v):
         return False
     if len(v) < 8 or re.search(r"\s", v) or re.search(r"[()\[\]{}$`]", v):
         return False

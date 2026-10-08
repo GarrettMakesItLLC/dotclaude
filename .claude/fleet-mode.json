@@ -1,7 +1,5 @@
 {
-  "mode": "degraded",
+  "mode": "normal",
   "issue": "GarrettMakesItLLC/dotclaude#437",
-  "authorized_by": "garrett",
-  "since": "2026-10-06",
   "owedVerdicts": ".claude/owed-verdicts.json"
 }
