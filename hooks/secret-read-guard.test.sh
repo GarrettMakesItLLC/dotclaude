@@ -162,6 +162,14 @@ check 0 Bash command 'NODE_AUTH_TOKEN="$(gh auth token)" npm ci'
 check 0 Bash command 'gh auth status'
 check 0 Bash command 'env | grep -c TOKEN'
 check 0 Bash command 'env FOO=1 npm test'
+# The Supabase Management API returns the JWT secret and auth secrets (#479).
+check 2 Bash command 'curl -s https://api.supabase.com/v1/projects/$ref/postgrest -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" | cut -c1-200'
+check 2 Bash command 'curl -s "https://api.supabase.com/v1/projects/abc/config/auth" -H "Authorization: Bearer $T"'
+check 2 Bash command 'curl -s https://api.supabase.com/v1/projects/abc/api-keys?reveal=true -H "Authorization: Bearer $T"'
+check 0 Bash command 'curl -s https://api.supabase.com/v1/projects/abc/postgrest -H "Authorization: Bearer $T" > /tmp/pg.json'
+check 0 Bash command 'curl -s https://api.supabase.com/v1/projects/abc/postgrest -H "Authorization: Bearer $T" | wc -c'
+check 0 Bash command 'curl -s https://api.supabase.com/v1/projects/abc/database/query -H "Authorization: Bearer $T"'
+check 0 Bash command 'curl -s https://api.supabase.com/v1/projects/abc/config/auth/sso -H "Authorization: Bearer $T"'
 # A `|` inside a quoted regex is an alternation, not a pipe (#485).
 check 0 Bash command "awk '/^diff --git a\\/(src\\/lib\\/(supabase-keys|env|supabase)\\.ts)/{p=1} p' x.diff | head -400"
 check 0 Bash command 'grep -E "token|env|printenv" notes.md'

@@ -123,6 +123,12 @@ must_pass "dict repr, non-secret keys" "{'contactEmail': 'r@example.org', 'demoA
 must_pass "dict repr, placeholder" "{'demoAccountPassword': 'your-password-here'}"
 # #478's false positive: a name mapping in a repo manifest.
 must_pass "repo.json name mapping" '{"MB_PROD_DATABASE_URL": "DATABASE_URL", "MB_PROD_DIRECT_URL": "DIRECT_URL"}'
+# A JSON response cut mid-value still prints the secret's prefix (#479).
+must_redact "truncated jwt_secret" "{\"db_schema\":\"public\",\"jwt_secret\":\"$FAKE_VAL" "$FAKE_VAL" "the value of jwt_secret"
+must_redact "smtp_pass" "{\"smtp_pass\":\"$FAKE_VAL\",\"smtp_port\":\"587\"}" "$FAKE_VAL" "the value of smtp_pass"
+# A short hex digest fingerprint is not a secret (#479).
+must_pass "hex fingerprint" '{"external_apple_secret":"3f9a1c2b7d4e"}'
+must_pass "pass-through name" '{"bypass_cache":"enabled-for-all-routes"}'
 # The same map when a live variable or a secrets-file entry holds that name as
 # its value: a name is never a credential (#481, #483, #484, #487, #494).
 must_pass "name mapping vs live names" '{"ADVOS_DATABASE_URL": "DATABASE_URL", "ADVOS_DIRECT_URL": "DIRECT_URL"}'
