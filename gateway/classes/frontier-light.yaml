@@ -3,7 +3,7 @@
   # class so a degraded answer is still an answer from a frontier model.
   - model_name: frontier-light
     litellm_params:
-      model: anthropic/claude-sonnet-5
+      model: anthropic/claude-sonnet-5-5
       api_key: os.environ/ANTHROPIC_API_KEY
     model_info:
       mode: chat

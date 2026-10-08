@@ -10,6 +10,8 @@
 # `frontier-light` — still Anthropic, still frontier-grade judgment — and
 # never to `cheap`, because a silent downgrade of a code review or a migration
 # to a flash model is indistinguishable from a correct answer until it is not.
+# `light` has no fallback: it is Anthropic's small tier, and `cheap` is a
+# different vendor with a different data-handling story.
 # `cheap` and `local` degrade into each other freely: same trust tier, and an
 # outage there should not stall a label census.
 #
@@ -17,5 +19,6 @@
 # docs/agent-gateway.md. Keep the two in step.
 frontier|ANTHROPIC_API_KEY|frontier-light|
 frontier-light|ANTHROPIC_API_KEY||
+light|ANTHROPIC_API_KEY||
 cheap|GEMINI_API_KEY|local|
 local||cheap|http://127.0.0.1:11434/api/tags

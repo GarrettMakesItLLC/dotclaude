@@ -1,0 +1,12 @@
+  # light — Anthropic's small tier. Below 100k input tokens it prices at a
+  # fraction of frontier-light, so it takes the bounded, verifiable work that
+  # used to ride on Sonnet out of habit: mechanical edits a test or typecheck
+  # checks, pattern-following tests, triage and summaries of private repo
+  # content that should stay with Anthropic rather than go to `cheap`.
+  # No fallback: it degrades neither down into `cheap` nor silently up.
+  - model_name: light
+    litellm_params:
+      model: anthropic/claude-haiku-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      mode: chat
