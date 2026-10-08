@@ -242,11 +242,22 @@ else
   ok 'DATABASE_URL not exported (opt in per command)'
 fi
 
+# NODE_AUTH_TOKEN is judged by what the registry does with it, not by where it
+# came from: one GET for a @garrettmakesitllc package. The token travels on
+# curl's stdin config, so it never reaches argv or this output.
+# DOCTOR_PACKAGES_PROBE_URL points the probe at a local server in the self-test.
 if [ -f .npmrc ] && grep -q NODE_AUTH_TOKEN .npmrc; then
-  if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
-    ok 'NODE_AUTH_TOKEN set (GitHub Packages installs can authenticate)'
+  if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+    warn 'NODE_AUTH_TOKEN is unset — `npm ci` exits 0 having silently omitted every auth-gated package' 'export a token that can read @garrettmakesitllc packages (e.g. `. ~/.config/secrets/gmi.env`)'
   else
-    warn 'NODE_AUTH_TOKEN is unset — `npm ci` exits 0 having silently omitted every auth-gated package' 'source ~/.config/secrets/gmi.env (the PAT with read:packages) — never `gh auth token`'
+    probe_url="${DOCTOR_PACKAGES_PROBE_URL:-https://npm.pkg.github.com/@garrettmakesitllc%2fpatterns}"
+    pkg_status="$(printf 'header = "Authorization: Bearer %s"\n' "$NODE_AUTH_TOKEN" \
+      | curl -s -o /dev/null -w '%{http_code}' --max-time 8 -K - "$probe_url" 2>/dev/null)" || pkg_status=''
+    case "$pkg_status" in
+      200) ok 'NODE_AUTH_TOKEN reads @garrettmakesitllc packages (registry answered 200)' ;;
+      401|403) warn "NODE_AUTH_TOKEN is rejected by the GitHub Packages registry (HTTP $pkg_status) — \`npm ci\` would exit 0 with every auth-gated package missing" 'export a token with read:packages that has not expired or been revoked; the source does not matter, the registry GET does' ;;
+      *) note "NODE_AUTH_TOKEN set, but the registry check was inconclusive (HTTP ${pkg_status:-none})" ;;
+    esac
   fi
 fi
 

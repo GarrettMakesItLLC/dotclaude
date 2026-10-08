@@ -34,9 +34,9 @@
 #                from ~/.config/secrets/gmi.env), so falling back to the ambient
 #                shell is correct. Never widened to other keys: a repo-shaped
 #                name in the ambient shell is probably another project's value.
-#   githubToken  true: export GITHUB_TOKEN from `gh auth token`. Never
-#                NODE_AUTH_TOKEN — the `gh` OAuth token has no `read:packages`,
-#                and GitHub Packages answers it 403.
+#   githubToken  true: export GITHUB_TOKEN from `gh auth token`. This never
+#                writes NODE_AUTH_TOKEN; that is a separate credential that
+#                doctor.sh verifies against the registry.
 #   railway      { service, environment, projectId?, fallback: [keys] } — a key
 #                in `fallback` missing from every local source is read from that
 #                Railway service (bin/lib/railway.sh: GraphQL with a project
@@ -208,7 +208,7 @@ if [ "$github_token" = true ]; then
   [ -n "$gh_token" ] || gh_token="${GITHUB_TOKEN:-}"
   gh_token="${gh_token%%$'\n'*}"
   if [ -n "$gh_token" ]; then
-    printf '\n# GitHub API token for scripts that read GITHUB_TOKEN. NOT the GitHub Packages\n# token: that is NODE_AUTH_TOKEN, from ~/.config/secrets/gmi.env.\nexport GITHUB_TOKEN=%q\n' "$gh_token" >>"$TMP"
+    printf '\n# GitHub API token for scripts that read GITHUB_TOKEN. NOT the GitHub Packages\n# token: that is NODE_AUTH_TOKEN (bin/doctor.sh verifies it).\nexport GITHUB_TOKEN=%q\n' "$gh_token" >>"$TMP"
     emitted+=(GITHUB_TOKEN)
   else
     skipped+=(GITHUB_TOKEN)
