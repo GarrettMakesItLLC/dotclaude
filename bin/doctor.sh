@@ -287,6 +287,20 @@ else
   warn 'no flock — with-check-lock.sh runs every check UNBOUNDED' 'install util-linux; concurrent checks OOM-kill each other'
 fi
 
+# The upload-post MCP's header is `ApiKey ${UPLOAD_POST_API_KEY}`, expanded from
+# Claude's own environment at startup. Only `~/.claude/settings.local.json`
+# `env` reaches every session: a scheduled or non-interactive one starts without
+# the profile that sources the secrets file, so the header goes out empty and
+# every call answers "Invalid API key" (#529). Name only, never the value.
+if claude_mcp_has_upload_post="$(python3 -c "import json,os; print('upload-post' in json.load(open(os.path.expanduser('~/.claude.json'))).get('mcpServers',{}))" 2>/dev/null)" \
+   && [ "$claude_mcp_has_upload_post" = True ]; then
+  if python3 -c "import json,os,sys; sys.exit(0 if json.load(open(os.path.expanduser('~/.claude/settings.local.json'))).get('env',{}).get('UPLOAD_POST_API_KEY') else 1)" 2>/dev/null; then
+    ok 'UPLOAD_POST_API_KEY is in ~/.claude/settings.local.json env (every session gets it)'
+  else
+    warn 'the upload-post MCP is registered but UPLOAD_POST_API_KEY is not in ~/.claude/settings.local.json env — a non-interactive session sends an empty key' 'add it there (integrations.md, "API-key HTTP MCPs"); a shell profile export does not reach scheduled sessions'
+  fi
+fi
+
 hooks_path="$(git config core.hooksPath 2>/dev/null || true)"
 if [ -n "$hooks_path" ]; then
   if [ -d "$ROOT/$hooks_path" ] || [ -d "$hooks_path" ]; then
