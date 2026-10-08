@@ -101,6 +101,7 @@ if pair is None:
 rest = toks[pair + 2:]
 skip_next = False
 flags_with_arg = {"-b", "-B", "--reason", "--lock"}
+found = ""
 for t in rest:
     if skip_next:
         skip_next = False
@@ -110,16 +111,41 @@ for t in rest:
         continue
     if t.startswith("-"):
         continue
-    print(t)
+    found = t
     break
+# The directory a relative target is relative to, when the command names one:
+# `git -C <dir> worktree add <rel>`, or a `cd <dir>` earlier in the same
+# command. Without it the target resolves against the session cwd, which may be
+# another repo entirely.
+base = ""
+g = pair - 1
+while g >= 0 and toks[g].rsplit("/", 1)[-1] != "git":
+    g -= 1
+for k in range(g + 1, pair):
+    if toks[k - 1] == "-C":
+        base = toks[k]
+if not base:
+    for k in range(g):
+        if toks[k] == "cd" and (k == 0 or toks[k - 1] in ("&&", ";", "||")) and k + 1 < g:
+            base = toks[k + 1]
+print(found + "\t" + base)
 ' 2>/dev/null)" || exit 0
 [ "$target" != "__NO_WORKTREE_ADD__" ] || exit 0
+target_base="${target#*	}"
+target="${target%%	*}"
 
 project_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
 # The SHELL's cwd from the payload, not the project dir: an agent inside
 # `.worktrees/a` that creates `.worktrees/b` would otherwise resolve to
 # `.worktrees/a/.worktrees/b`, find nothing, and give up.
 base_cwd="${payload_cwd:-$project_dir}"
+# `git -C <dir>` / a leading `cd <dir>` moves the base, when <dir> is literal.
+case "$target_base" in
+  "" | *'$'* | *'`'*) ;;
+  "~"*) [ -d "$HOME${target_base#\~}" ] && base_cwd="$HOME${target_base#\~}" ;;
+  /*) [ -d "$target_base" ] && base_cwd="$target_base" ;;
+  *) [ -d "$base_cwd/$target_base" ] && base_cwd="$base_cwd/$target_base" ;;
+esac
 
 messages=""
 
@@ -199,15 +225,17 @@ fi
 # The target is parsed from the LITERAL command string, so a shell variable
 # (`for d in …; do git worktree add .worktrees/$d …; done`) never resolves and
 # the tree it created would go unprimed with no message (#497). When the
-# target is empty, contains `$`/a backtick, or names no directory, sweep the
-# repo's linked worktrees instead: prime every one with neither a rc marker nor
-# `node_modules`, and name any that cannot be primed.
+# target ITSELF (or the directory it is relative to) is a shell expansion,
+# sweep the repo's linked worktrees instead: prime every one with neither a rc
+# marker nor `node_modules`, and name any that cannot be primed. A `$`
+# elsewhere in the command is not a reason to sweep (#530): the sweep starts an
+# install in every unprimed tree, and those belong to other agents.
 if [ -n "$resolved" ] && [ -d "$resolved" ] && case "$target" in *'$'*|*'`'*) false ;; *) true ;; esac; then
   prime_one "$resolved" || true
 else
-  case "$command_str" in
+  case "$target$target_base" in
     *'$'*|*'`'*) ;;
-    *) exit 0 ;;   # a plain add whose target simply is not there: nothing to do
+    *) exit 0 ;;   # a literal target that simply is not there: nothing to do
   esac
   unprimed=""
   wt_path=""

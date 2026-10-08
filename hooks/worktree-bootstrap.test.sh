@@ -299,6 +299,33 @@ tries=100; while [ ! -s "$TMP/loop-calls" ] && [ $tries -gt 0 ]; do sleep 0.05; 
 [ "$(cat "$TMP/loop-calls")" = "$LOOP/.worktrees/w5" ] \
   || { echo "FAIL (#530): git -C … -c … worktree add did not prime w5: $(cat "$TMP/loop-calls")"; fail=1; }
 
+# A real `worktree add` whose target is literal but unresolvable from the
+# session cwd, in a command with an unrelated `$`, must not sweep (#530): the
+# session sits in LOOP while the add happens in another repo via `cd`.
+OTHER_R="$TMP/other-repo"
+mk_repo "$OTHER_R" OTHER
+git -C "$LOOP" worktree add --quiet "$LOOP/.worktrees/w6" -b feat/w6   # unprimed
+: > "$TMP/loop-calls"; : > "$TMP/OTHER-calls" 2>/dev/null
+CLAUDE_PROJECT_DIR="$LOOP" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))
+' "W=\$HOME/x; cd $OTHER_R && git worktree add .worktrees/nope -b feat/nope" "$LOOP" \
+  | CLAUDE_PROJECT_DIR="$LOOP" "$HOOK" >/dev/null 2>&1
+sleep 0.3
+[ -s "$TMP/loop-calls" ] && { echo "FAIL (#530): an unrelated \$ swept LOOP: $(cat "$TMP/loop-calls")"; fail=1; }
+# A leading `cd <dir> &&` and `git -C <dir>` both set the base for a relative target.
+git -C "$OTHER_R" worktree add --quiet "$OTHER_R/.worktrees/c1" -b feat/c1
+git -C "$OTHER_R" worktree add --quiet "$OTHER_R/.worktrees/c2" -b feat/c2
+for c in "cd $OTHER_R && git worktree add .worktrees/c1 -b feat/c1" "git -C $OTHER_R worktree add .worktrees/c2 -b feat/c2"; do
+  rm -f "$RECORD"
+  out="$(CLAUDE_PROJECT_DIR="$LOOP" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))
+' "$c" "$LOOP" | CLAUDE_PROJECT_DIR="$LOOP" "$HOOK" 2>/dev/null)"
+  want="$OTHER_R/.worktrees/c1"; case "$c" in *c2*) want="$OTHER_R/.worktrees/c2" ;; esac
+  grep -qF "priming $want" <<<"$out" || { echo "FAIL (#530 base): '$c' did not prime $want: $out"; fail=1; }
+done
+
 # --- #533: a repo with no manifest whose own bin/setup-worktree.sh IS
 # dotclaude's shared script (dotclaude itself) is not opted in: no priming
 # message, so no rc marker the agent is told to wait for.
