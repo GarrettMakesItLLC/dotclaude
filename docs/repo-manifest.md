@@ -54,7 +54,7 @@ in the environment overrides discovery (the self-tests use it).
 | `workspaceDirs` | dirs | Where workspace packages live. Default `["apps", "packages"]`. |
 | `workspaceScope` | scope | `mirror`: link `node_modules/<scope>/*` to THIS worktree's packages. `install`: the link farm cleared before install. |
 | `linkRootBin` | bool | `mirror`: per-binary links for the main checkout's `node_modules/.bin`. |
-| `lockWorktree` | string | `git worktree lock` reason, so generic sweeps cannot remove a live tree. |
+| `lockWorktree` | string | `git worktree lock` reason, so generic sweeps cannot remove a live tree. Use `agent session worktree — remove via bin/worktree-reap.sh`: `bin/worktree-reap.sh` recognises that text as its own lock and looks past it; any other reason reads as a person's hands-off. |
 | `prismaGenerate` | command | Run after dependencies, e.g. `npx prisma generate`. |
 | `graphify` | bool | Build `graphify-out/` best-effort. |
 | `postSteps` | commands | Run last, in the worktree, with the step environment below exported. |
@@ -160,7 +160,7 @@ MuscleBuddy's manifest, verbatim.
     "strategy": "mirror",
     "envFiles": ["apps/web/.env.local", "apps/server/.env.local"],
     "linkRootBin": true,
-    "lockWorktree": "agent session worktree — remove via bin/worktree-reap.sh (#4238)",
+    "lockWorktree": "agent session worktree — remove via bin/worktree-reap.sh",
     "prismaGenerate": "bin/prisma-client-fresh.sh",
     "postSteps": ["bin/worktree-tailwind-sources.sh"],
     "checkSteps": ["bin/worktree-tailwind-sources.sh --check"]

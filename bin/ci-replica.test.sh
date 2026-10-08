@@ -298,6 +298,18 @@ run '{"version":1,"jobs":[{"name":"daemon","commands":["(sleep 30 &) ; true"]}]}
 run '{"version":1,"jobs":[{"name":"next","commands":["true"]}]}'
 [ "$RC" = 0 ] && ok "a process a job leaves running does not hold the lock" || bad "leftover child kept the lock: rc=$RC $OUT"
 
+echo "ci-replica: waits for an in-flight worktree bootstrap (#493)"
+# A bootstrap log with no rc marker is a priming still installing into the tree.
+echo priming > "$ROOT/.git/worktree-bootstrap.log"
+OUT="$(CI_REPLICA_BOOTSTRAP_WAIT=1 "$CIR" --repo-root "$ROOT" --log-dir "$TMP/logs-boot" 2>&1)"; RC=$?
+[ "$RC" = 2 ] && grep -q "has not finished priming" <<<"$OUT" \
+  && ok "a run is refused while the bootstrap never finishes" || bad "ran during a bootstrap: rc=$RC $OUT"
+( sleep 2; echo 0 > "$ROOT/.git/worktree-bootstrap.rc" ) &
+OUT="$(CI_REPLICA_BOOTSTRAP_WAIT=30 "$CIR" --repo-root "$ROOT" --log-dir "$TMP/logs-boot2" 2>&1)"; RC=$?
+[ "$RC" = 0 ] && grep -q "still priming" <<<"$OUT" \
+  && ok "a run waits for the bootstrap, then proceeds" || bad "did not wait then run: rc=$RC $OUT"
+rm -f "$ROOT/.git/worktree-bootstrap.log" "$ROOT/.git/worktree-bootstrap.rc"
+
 echo "ci-replica: the shipped example manifest is valid"
 EXAMPLE="$(cd "$HERE/.." && pwd)/skills/operating-a-fleet/references/ci-replica.example.json"
 if [ -f "$EXAMPLE" ]; then

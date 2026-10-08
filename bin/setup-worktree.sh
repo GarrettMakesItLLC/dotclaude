@@ -203,7 +203,28 @@ if [ "$strategy" = install ]; then
       (cd "$target" && sh -c "$install_cmd")
     fi
   }
+  # An install command that is not `npm ci` (a pinned `npx npm@11 install`, say)
+  # can rewrite a tracked lockfile in a different npm's shape, which dirties a
+  # tree that must stay clean — a validator's frozen-SHA worktree (#493). Note
+  # which lockfiles are clean now, and put back any the install rewrites.
+  clean_locks=()
+  for lf in package-lock.json npm-shrinkwrap.json; do
+    if [ -f "$target/$lf" ] && git -C "$target" ls-files --error-unmatch -- "$lf" >/dev/null 2>&1 \
+       && git -C "$target" diff --quiet -- "$lf" 2>/dev/null; then
+      clean_locks+=("$lf")
+    fi
+  done
+  restore_locks() {
+    local lf
+    for lf in ${clean_locks[@]+"${clean_locks[@]}"}; do
+      if ! git -C "$target" diff --quiet -- "$lf" 2>/dev/null; then
+        git -C "$target" checkout -- "$lf" 2>/dev/null \
+          && say "restored $lf: '$install_cmd' rewrote it, and it was clean before the install"
+      fi
+    done
+  }
   say "installing dependencies: $install_cmd"
+  trap restore_locks EXIT
   if ! do_install; then
     warn "first install failed — clearing node_modules and retrying once…"
     find "$target" -type d -name node_modules -prune -exec rm -rf {} +
@@ -213,6 +234,8 @@ if [ "$strategy" = install ]; then
       exit 1
     fi
   fi
+  restore_locks
+  trap - EXIT
   verify_scopes || exit 1
 fi
 

@@ -322,6 +322,18 @@ complete OAuth.
 Supabase and Vercel also exist as claude.ai connectors. Use the **plugin** MCPs
 for both — one source per service, so tool names stay predictable.
 
+Google is the other way round: use the **claude.ai** connectors above, never the
+`small-business` plugin's `google-drive`, `google-calendar` or `gmail` servers
+(`mcp__plugin_small-business_google-*`, `…_gmail__*`). Those servers
+authenticate by dynamic client registration, which Google's auth server refuses
+(`Incompatible auth server: does not support dynamic client registration`), so
+they never load working tools whatever `/mcp` does. When a session has no
+`mcp__claude_ai_Google_Drive__*` tools, the Drive connector is not connected on
+that machine — connect it with `/mcp` (or claude.ai → Settings → Connectors);
+the plugin's Drive server is not a fallback. Without either, a calendar event
+can be created through the owner's Chrome profile with a
+`calendar.google.com/calendar/r/eventedit?text=…&dates=…` prefill URL.
+
 ## API-key HTTP MCPs — registered by `bootstrap.sh`
 
 Remote HTTP servers that authenticate with a static key instead of OAuth. The
