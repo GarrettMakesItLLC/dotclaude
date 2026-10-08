@@ -175,6 +175,158 @@ mkdir -p "$REPO/elsewhere"
 out="$(sweep --apply "$REPO/elsewhere")"; rc=$?
 [ -d "$REPO/elsewhere" ] && [ "$rc" = 2 ] && ok "arbitrary directory refused" || bad "arbitrary dir: rc=$rc $out"
 
+# --- helpers for the cases below ---
+
+# with_gh <stub-body> [args...]: a sweep with a stub `gh` whose body is given.
+with_gh() {
+  local body="$1" d; shift
+  d="$(mktemp -d)"; ROOTS+=("$d")
+  printf '#!/bin/sh\n%s\n' "$body" >"$d/gh"
+  chmod +x "$d/gh"
+  (cd "$REPO" && PATH="$d:$PATH" "$REAP" "$@" 2>&1)
+}
+
+# squash_shape <name>: a clean tree whose commit is on no remote and not in the
+# trunk, the shape a squash merge leaves behind.
+squash_shape() {
+  git -C "$REPO" worktree add -q "$REPO/.worktrees/$1" -b "$1" 2>/dev/null
+  echo work >"$REPO/.worktrees/$1/work.txt"
+  git -C "$REPO/.worktrees/$1" add work.txt
+  git -C "$REPO/.worktrees/$1" commit -q -m work
+}
+
+# --- merged-PR waiver ---
+make_repo dev
+squash_shape finished
+out="$(with_gh 'exit 1')"
+grep -Eq "KEEP  .*finished — unpushed" <<<"$out" \
+  && ok "gh unable to answer keeps an unpushed tree" || bad "gh failure: $out"
+out="$(with_gh "printf ''")"
+grep -Eq "KEEP  .*finished — unpushed" <<<"$out" \
+  && ok "no merged PR keeps an unpushed tree" || bad "no PR: $out"
+out="$(with_gh "printf 'MERGED'")"
+grep -q "REAP  $REPO/.worktrees/finished" <<<"$out" \
+  && ok "a MERGED pull request releases an unpushed tree" || bad "merged PR: $out"
+for state in OPEN CLOSED merged MERGED_SOMETHING; do
+  out="$(with_gh "printf '%s' '$state'")"
+  grep -Eq "KEEP  .*finished — unpushed" <<<"$out" \
+    && ok "PR state $state is not accepted as merged" || bad "state $state: $out"
+done
+echo scratch >"$REPO/.worktrees/finished/scratch.txt"
+out="$(with_gh "printf 'MERGED'")"
+grep -Eq "KEEP  .*finished — dirty" <<<"$out" \
+  && ok "a dirty tree is kept even when its PR merged" || bad "dirty+merged: $out"
+
+# --- finished-PR-head waiver ---
+# folded_shape <contains|unrelated>: commits only reachable from refs/pull/7/head
+# while the trunk has since rewritten the same file, so reverse-apply fails.
+folded_shape() {
+  local wt="$REPO/.worktrees/folded"
+  git -C "$REPO" worktree add -q "$wt" -b folded 2>/dev/null
+  echo "batch work" >"$wt/work.txt"
+  git -C "$wt" add work.txt
+  git -C "$wt" commit -q -m "batch work"
+  if [ "$1" = contains ]; then
+    git -C "$wt" commit -q --allow-empty -m "integration resolution"
+    git -C "$wt" push -q origin HEAD:refs/pull/7/head 2>/dev/null
+    git -C "$wt" reset -q --hard HEAD~1
+  else
+    git -C "$REPO" push -q origin dev:refs/pull/7/head 2>/dev/null
+  fi
+  echo "rewritten by a later wave" >"$REPO/work.txt"
+  git -C "$REPO" add work.txt
+  git -C "$REPO" commit -q -m "later wave"
+  git -C "$REPO" push -q origin dev 2>/dev/null
+}
+search_gh() { printf 'case "$*" in *--search*) printf "%%s\\n" "%s" ;; esac\nexit 0' "$1"; }
+
+make_repo dev
+folded_shape contains
+out="$(with_gh "$(search_gh '')")"
+grep -Eq "KEEP  .*folded — unpushed" <<<"$out" \
+  && ok "no finished PR found keeps a folded tree" || bad "folded, empty search: $out"
+out="$(with_gh "$(search_gh 7)")"
+grep -q "REAP  $REPO/.worktrees/folded" <<<"$out" && [ -z "$(git -C "$REPO" for-each-ref refs/worktree-reap)" ] \
+  && ok "HEAD inside a finished PR head releases it, leaving no scratch ref" || bad "folded, PR 7: $out"
+out="$(with_gh "$(search_gh MERGED)")"
+grep -Eq "KEEP  .*folded — unpushed" <<<"$out" \
+  && ok "a non-numeric search answer keeps the tree" || bad "folded, non-numeric: $out"
+
+make_repo dev
+folded_shape unrelated
+out="$(with_gh "$(search_gh 7)")"
+grep -Eq "KEEP  .*folded — unpushed" <<<"$out" \
+  && ok "an unrelated PR head keeps the tree" || bad "folded, unrelated head: $out"
+
+# --- .claude/worktrees, nested at any depth ---
+LOCK_REASON="$(bash -c 'source "$1"; printf "%s" "$AGENT_WORKTREE_LOCK_REASON"' _ "$HERE/lib/agent-worktree-lock.sh")"
+add_agent_tree() {
+  mkdir -p "$(dirname "$REPO/$1")"
+  git -C "$REPO" worktree add -q "$REPO/$1" -b "$2" 2>/dev/null
+  git -C "$REPO" worktree lock --reason "$LOCK_REASON" "$REPO/$1"
+}
+
+make_repo dev
+add_agent_tree .claude/worktrees/rma-1/issue-1 issue-1
+out="$(sweep)"
+grep -q "REAP  $REPO/.claude/worktrees/rma-1/issue-1" <<<"$out" \
+  && ok "a .claude/worktrees tree is swept" || bad ".claude/worktrees sweep: $out"
+
+make_repo dev
+git -C "$REPO" worktree add -q "$REPO/.worktrees/issue-9" -b issue-9 2>/dev/null
+add_agent_tree .worktrees/issue-9/.claude/worktrees/issue-9/issue-10 issue-10
+out="$(sweep --apply)"
+grep -q "removed $REPO/.worktrees/issue-9/.claude/worktrees/issue-9/issue-10" <<<"$out" \
+  && grep -q "removed $REPO/.worktrees/issue-9\$" <<<"$out" && grep -q "2 removed" <<<"$out" \
+  && ! git -C "$REPO" worktree list --porcelain | grep -q '.claude/worktrees' \
+  && ok "a nested worktree is removed child first, then its parent" || bad "nested: $out"
+
+make_repo dev
+add_agent_tree .claude/worktrees/gone/issue-2 issue-2
+rm -rf "$REPO/.claude/worktrees/gone/issue-2"
+out="$(sweep --apply)"
+if grep -q "unlocked so prune can clear its registration" <<<"$out" \
+  && ! git -C "$REPO" worktree list --porcelain | grep -q "gone/issue-2" \
+  && git -C "$REPO" worktree add -q "$REPO/.worktrees/reuse" issue-2 2>/dev/null; then
+  ok "a vanished registration is unlocked and pruned, freeing its branch"
+else bad "vanished registration: $out"; fi
+
+make_repo dev
+mkdir -p "$REPO/.claude/worktrees/handheld"
+git -C "$REPO" worktree add -q "$REPO/.claude/worktrees/handheld/issue-3" -b issue-3 2>/dev/null
+git -C "$REPO" worktree lock --reason "hands off, bisecting" "$REPO/.claude/worktrees/handheld/issue-3"
+rm -rf "$REPO/.claude/worktrees/handheld/issue-3"
+out="$(sweep --apply)"
+grep -q "carries a lock this sweep did not place" <<<"$out" \
+  && git -C "$REPO" worktree list --porcelain | grep -q "handheld/issue-3" \
+  && ok "a hand-locked vanished registration is left alone" || bad "hand-locked vanished: $out"
+
+# --- the /proc cwd scan ---
+make_repo dev
+finished_tree running
+(cd "$REPO/.worktrees/running" && exec sleep 300) &
+HOLDER=$!
+out="$(cd "$REPO" && env -u WORKTREE_REAP_SKIP_PROC_SCAN "$REAP" 2>&1)"
+grep -q "KEEP  $REPO/.worktrees/running — in use — pid $HOLDER" <<<"$out" \
+  && ok "a tree with a live process cwd is kept, naming the pid" || bad "in use: $out"
+out="$(cd "$REPO" && env -u WORKTREE_REAP_SKIP_PROC_SCAN "$REAP" --apply --force "$REPO/.worktrees/running" 2>&1)"
+[ -d "$REPO/.worktrees/running" ] \
+  && ok "--force does not waive an in-use tree" || bad "force removed an in-use tree: $out"
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+out="$(cd "$REPO" && env -u WORKTREE_REAP_SKIP_PROC_SCAN "$REAP" 2>&1)"
+grep -q "REAP  $REPO/.worktrees/running" <<<"$out" \
+  && ok "the same tree is reapable once the process exits" || bad "after exit: $out"
+
+TDIR="$(mktemp -d)"; ROOTS+=("$TDIR")
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s/calls.log"\nexec "%s" "$@"\n' "$TDIR" "$(command -v timeout)" >"$TDIR/timeout"
+chmod +x "$TDIR/timeout"
+(cd "$REPO" && PATH="$TDIR:$PATH" "$REAP" >/dev/null 2>&1)
+grep -q readlink "$TDIR/calls.log" 2>/dev/null && bad "scan ran despite WORKTREE_REAP_SKIP_PROC_SCAN=1" \
+  || ok "WORKTREE_REAP_SKIP_PROC_SCAN=1 bypasses the scan outright"
+(cd "$REPO" && env -u WORKTREE_REAP_SKIP_PROC_SCAN PATH="$TDIR:$PATH" "$REAP" >/dev/null 2>&1)
+grep -q readlink "$TDIR/calls.log" 2>/dev/null \
+  && ok "the scan runs when the skip is not set" || bad "scan did not run"
+
 # --- the lock reason documented for repo.json is the one the reaper owns ---
 reason="$(bash -c 'source "$1"; printf "%s" "$AGENT_WORKTREE_LOCK_REASON"' _ "$HERE/lib/agent-worktree-lock.sh")"
 marker="$(bash -c 'source "$1"; printf "%s" "$AGENT_WORKTREE_LOCK_MARKER"' _ "$HERE/lib/agent-worktree-lock.sh")"
