@@ -161,7 +161,7 @@ verify_scopes() {
   done < <(manifest_get worktree.requireScopes || true)
   [ "${#missing[@]}" -eq 0 ] && return 0
   warn "node_modules is missing ${missing[*]} after install — an auth-gated scope did not resolve. npm reports success on that."
-  warn "NODE_AUTH_TOKEN must be the GitHub Packages PAT (~/.config/secrets/gmi.env), never \`gh auth token\`."
+  warn "NODE_AUTH_TOKEN must be non-empty and able to read the scope's packages; \`~/.claude/bin/doctor.sh\` checks it with a registry GET."
   return 1
 }
 
@@ -209,7 +209,7 @@ if [ "$strategy" = install ]; then
     find "$target" -type d -name node_modules -prune -exec rm -rf {} +
     if ! do_install; then
       warn "install failed — resolve it, then re-run: ~/.claude/bin/setup-worktree.sh $target"
-      [ -n "${NODE_AUTH_TOKEN:-}" ] || warn "NODE_AUTH_TOKEN is unset — auth-gated packages need it (~/.config/secrets/gmi.env)."
+      [ -n "${NODE_AUTH_TOKEN:-}" ] || warn "NODE_AUTH_TOKEN is unset — auth-gated packages need it."
       exit 1
     fi
   fi
@@ -583,7 +583,7 @@ fi
 if [ -z "${NODE_AUTH_TOKEN:-}" ] && [ "$strategy" = mirror ] \
   && ! grep -qs '^export NODE_AUTH_TOKEN=.' "$HOME/.config/secrets/gmi.env" ${state_dir:+"$state_dir/agent.env"}; then
   warn "no GitHub Packages token in this shell or in ~/.config/secrets/gmi.env — an \`npm ci\` here would silently omit"
-  warn "every auth-gated package. Put the PAT (read:packages) in ~/.config/secrets/gmi.env, then start a new shell."
+  warn "every auth-gated package. Export a NODE_AUTH_TOKEN that can read packages (e.g. in ~/.config/secrets/gmi.env), then start a new shell."
 fi
 
 say "$target ready ($strategy)."

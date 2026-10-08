@@ -88,7 +88,7 @@ A staging database URL is **minted, never pasted**: `export STAGING_DATABASE_URL
 
 ## 3. GitHub Packages (`@gmi/*`)
 
-`.npmrc` authenticates with `${NODE_AUTH_TOKEN}`, which must be the **PAT from `~/.config/secrets/gmi.env`** (`ghp_…`, `read:packages`). `gh auth token` (`gho_…`) has no packages scope and the registry answers it 403 — never `export NODE_AUTH_TOKEN=$(gh auth token)`. An EMPTY token is worse than a wrong one: `npm ci` exits 0 having silently omitted every `@gmi/*` package, surfacing later as TS2307 on files nobody touched. `npm-install-guard.sh` refuses an install with an empty or rejected token. Measure the ambient value when debugging a 403: `printenv NODE_AUTH_TOKEN | head -c 4`.
+`.npmrc` authenticates with `${NODE_AUTH_TOKEN}`, which must be non-empty and able to read `@garrettmakesitllc` packages. The source does not matter (a PAT in `~/.config/secrets/gmi.env`, or a `gh` token that carries the packages scope); `doctor.sh` checks it with a registry GET. An EMPTY token is worse than a rejected one: `npm ci` exits 0 having silently omitted every `@gmi/*` package, surfacing later as TS2307 on files nobody touched. `npm-install-guard.sh` refuses an install with an empty or rejected token. When debugging a 401/403, run `doctor.sh` rather than inspecting the token.
 
 ## 4. CLIs that are missing, or present and broken
 
@@ -111,4 +111,4 @@ Prefer the MCP — its availability does not vary by box: Supabase, Railway, Ver
 - `export DATABASE_URL=…` for the rest of a session instead of per command.
 - `cat`-ing a secrets file, or printing a value to prove it exists.
 - A 401 from an MCP debugged as a bad key before checking the variable is set.
-- `NODE_AUTH_TOKEN=$(gh auth token)`.
+- Exporting a `NODE_AUTH_TOKEN` without checking that the registry accepts it.

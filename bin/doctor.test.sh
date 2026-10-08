@@ -67,4 +67,34 @@ touch "$R/.worktrees/w/hard"
 RUN_DIR="$R/.worktrees/w" run
 grep -q 'no root .env — correct in a worktree' <<<"$OUT" && ! grep -q '! .env missing' <<<"$OUT" && ok "noted, not warned" || bad "$OUT"
 
+echo "doctor: NODE_AUTH_TOKEN is judged by a registry GET, not by its source"
+cat >"$TMP/registry.py" <<'PY'
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        auth = self.headers.get("Authorization")
+        self.send_response(200 if auth == "Bearer tok_good" else 403 if auth else 401); self.end_headers()
+srv = HTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1], "w").write(str(srv.server_address[1]))
+srv.serve_forever()
+PY
+python3 "$TMP/registry.py" "$TMP/port" & REG=$!
+trap 'kill "$REG" 2>/dev/null; rm -rf "$TMP"' EXIT
+for _ in $(seq 1 50); do [ -s "$TMP/port" ] && break; sleep 0.1; done
+PROBE_PORT="$(cat "$TMP/port")"
+export DOCTOR_PACKAGES_PROBE_URL="http://127.0.0.1:$PROBE_PORT/pkg" NO_PROXY=127.0.0.1 no_proxy=127.0.0.1
+echo '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' >"$R/.npmrc"
+tokrun() { OUT="$(cd "$R" && NODE_AUTH_TOKEN="$1" "$DOC" 2>&1)"; }
+tokrun tok_good
+grep -q 'NODE_AUTH_TOKEN reads @garrettmakesitllc packages' <<<"$OUT" && ok "an accepted token passes" || bad "good: $OUT"
+tokrun tok_bad_value
+grep -q 'NODE_AUTH_TOKEN is rejected.*HTTP 403' <<<"$OUT" && ok "a rejected token warns with the status" || bad "bad: $OUT"
+! grep -q 'tok_bad_value' <<<"$OUT" && ok "the token is never printed" || bad "token leaked: $OUT"
+OUT="$(cd "$R" && env -u NODE_AUTH_TOKEN "$DOC" 2>&1)"
+grep -q 'NODE_AUTH_TOKEN is unset' <<<"$OUT" && ok "an empty token warns" || bad "unset: $OUT"
+OUT="$(cd "$R" && NODE_AUTH_TOKEN=tok_good DOCTOR_PACKAGES_PROBE_URL=http://127.0.0.1:1/x "$DOC" 2>&1)"
+grep -q 'registry check was inconclusive' <<<"$OUT" && ok "an unreachable registry is inconclusive, not a rejection" || bad "unreachable: $OUT"
+
 exit "$fail"

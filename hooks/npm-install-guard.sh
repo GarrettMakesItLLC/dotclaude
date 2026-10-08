@@ -224,9 +224,9 @@ if ((fetches)) && [ -n "$npmrc" ]; then
   if [ -n "$inline" ]; then
     case "$inline" in
       '$('*|'`'*)
-        # `$(gh auth token)` is the one substitution this repo's docs warn about
-        # by name — that credential carries no `read:packages`, and GitHub
-        # Packages answers it 403 (MuscleBuddy#4017, MuscleBuddy#7449). It is also side-effect-free,
+        # `$(gh auth token)` is the one substitution the probe special-cases:
+        # the `gh` token may lack `read:packages`, and GitHub Packages then
+        # answers it 403. It is also side-effect-free,
         # so it is EVALUATED rather than waved past as opaque: the whole point
         # of the probe below is to catch a token that exists and does not work,
         # and this is the most common way to acquire one.
@@ -276,15 +276,11 @@ That does not fail. npm reports "added N packages", exits 0, and omits every
 @garrettmakesitllc-scoped package — so the tree builds until something imports
 \`@gmi/*\`, then reports TS2307 on files you never touched (MuscleBuddy#3964).
 
-Use the token that actually reads GitHub Packages — the PAT in gmi.env:
+Export a token that can read GitHub Packages, then re-run. For example:
 
   . ~/.config/secrets/gmi.env && <your command>
 
-NOT \`gh auth token\`. That credential carries no \`read:packages\` scope and
-npm.pkg.github.com answers it 403, so it lands right back here (MuscleBuddy#4017, MuscleBuddy#7449).
-Check which one you actually hold:
-
-  printenv NODE_AUTH_TOKEN | head -c 4   # ghp_ is the PAT; gho_ is gh's
+\`~/.claude/bin/doctor.sh\` reports whether the registry accepts the token you hold.
 EOF
     exit 2
   fi
@@ -359,20 +355,15 @@ node_modules upward, so this corrupts the MAIN checkout and breaks typecheck,
 lint and test in EVERY worktree on this box — surfacing later as a missing
 \`@gmi/*\` package on files you never touched (MuscleBuddy#3976).
 
-The effective token is the PAT from ~/.config/secrets/gmi.env, which .bashrc
-sources last — NOT necessarily \`gh auth token\`. Check what you actually have:
+Confirm what the shell holds, without printing it:
 
+  ~/.claude/bin/doctor.sh              # registry GET with the token in scope
   gh auth status                       # is the ACTIVE account's token the valid one?
-  printenv NODE_AUTH_TOKEN | head -c 8 # which credential is really in scope?
 
-A \`gho_\` prefix is the answer on its own: that is \`gh\`'s own token, it carries
-no \`read:packages\`, and this registry answers it 403 every time (MuscleBuddy#4017, MuscleBuddy#7449).
-Pick up the PAT instead, then re-run:
+A token that was revoked or expired, or that lacks \`read:packages\`, is answered
+401/403 here. Export a token the registry accepts, then re-run:
 
   . ~/.config/secrets/gmi.env && <your command>
-
-If the PAT itself is what was rejected, it has expired — mint a new one with
-\`read:packages\`, and write it to ~/.config/secrets/gmi.env.
 
 This verdict is cached for an hour per token.
 EOF
