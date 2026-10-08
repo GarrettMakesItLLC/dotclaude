@@ -222,6 +222,49 @@ grep -q 'bin/setup-worktree.sh' <<<"$out" && ! grep -q "$MAN/bin" <<<"$out" \
   || { echo "FAIL (manifest): hook did not name the shared script: $out"; fail=1; }
 [ "$(cat "$mrc" 2>/dev/null)" = 0 ] || { echo "FAIL (manifest): shared script rc=$(cat "$mrc" 2>/dev/null) log=$(cat "${mrc%.rc}.log" 2>/dev/null)"; fail=1; }
 
+
+# --- #497: a target that is a shell variable (a for-loop) never resolves from
+# the literal command string. The hook must sweep the repo's linked worktrees
+# and prime every one lacking a rc marker and node_modules, leave primed ones
+# alone, and stay inert for a repo with no setup script.
+LOOP="$TMP/loop-repo"
+mk_repo "$LOOP" LOOP
+for d in w1 w2 w3; do git -C "$LOOP" worktree add --quiet "$LOOP/.worktrees/$d" -b "feat/$d"; done
+mkdir -p "$LOOP/.worktrees/w2/node_modules"          # already installed
+git -C "$LOOP/.worktrees/w3" rev-parse --path-format=absolute --git-dir \
+  | { read -r gd; echo 0 > "$gd/worktree-bootstrap.rc"; }   # already bootstrapped
+: > "$TMP/loop-calls"
+cat > "$LOOP/bin/setup-worktree.sh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$1" >> "$TMP/loop-calls"
+EOF
+loop_out="$(CLAUDE_PROJECT_DIR="$LOOP" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))
+' 'for d in w1 w2 w3; do git worktree add -q .worktrees/$d -b feat/$d; done' "$LOOP" \
+  | CLAUDE_PROJECT_DIR="$LOOP" "$HOOK" 2>/dev/null)"
+[ $? = 0 ] || { echo "FAIL (loop): hook exited non-zero"; fail=1; }
+tries=100; while [ ! -s "$TMP/loop-calls" ] && [ $tries -gt 0 ]; do sleep 0.05; tries=$((tries-1)); done
+sleep 0.3
+[ "$(cat "$TMP/loop-calls")" = "$LOOP/.worktrees/w1" ] \
+  || { echo "FAIL (loop): wanted only w1 primed, got: $(cat "$TMP/loop-calls")"; fail=1; }
+grep -q "$LOOP/.worktrees/w1" <<<"$loop_out" \
+  || { echo "FAIL (loop): no priming message naming w1: $loop_out"; fail=1; }
+
+# A loop in a repo with no setup script stays silent (inert, not opted in).
+# stays silent.
+NOS="$TMP/loop-noscript"
+mkdir -p "$NOS"; git init --quiet "$NOS"
+git -C "$NOS" config user.email t@t; git -C "$NOS" config user.name t
+echo x > "$NOS/f"; git -C "$NOS" add -A; git -C "$NOS" commit --quiet -m init
+git -C "$NOS" worktree add --quiet "$NOS/.worktrees/w1" -b feat/w1
+nos_out="$(CLAUDE_PROJECT_DIR="$NOS" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))
+' 'for d in w1; do git worktree add -q .worktrees/$d; done' "$NOS" \
+  | CLAUDE_PROJECT_DIR="$NOS" "$HOOK" 2>/dev/null)"
+[ -z "$nos_out" ] || { echo "FAIL (loop, no script): wanted silence, got: $nos_out"; fail=1; }
+
 if [ "$fail" = 0 ]; then
   echo "worktree-bootstrap: all cases passed"
 fi
