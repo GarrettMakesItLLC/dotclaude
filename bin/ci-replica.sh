@@ -306,6 +306,21 @@ if ! flock -n 9; then
 fi
 printf 'pid %s since %s: %s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${ORIG_ARGS:-(no args)}" > "$RUN_LOCK"
 
+# A worktree created moments ago is still being primed by worktree-bootstrap
+# (a log, no rc marker yet), and that priming installs into the same
+# node_modules a job is about to read (#493). Wait for it rather than race it.
+BOOT_WAIT="${CI_REPLICA_BOOTSTRAP_WAIT:-600}"
+if [ -e "$GIT_DIR_ABS/worktree-bootstrap.log" ] && [ ! -e "$GIT_DIR_ABS/worktree-bootstrap.rc" ]; then
+  echo "ci-replica: worktree-bootstrap is still priming $ROOT; waiting up to ${BOOT_WAIT}s for $GIT_DIR_ABS/worktree-bootstrap.rc" >&2
+  waited=0
+  while [ ! -e "$GIT_DIR_ABS/worktree-bootstrap.rc" ] && [ "$waited" -lt "$BOOT_WAIT" ]; do
+    sleep 5
+    waited=$((waited + 5))
+  done
+  [ -e "$GIT_DIR_ABS/worktree-bootstrap.rc" ] \
+    || die "worktree-bootstrap has not finished priming $ROOT after ${BOOT_WAIT}s (see $GIT_DIR_ABS/worktree-bootstrap.log); a run now would race its install"
+fi
+
 # A base that does not resolve would make every diff-scoped command fail on
 # `git merge-base`, which reads as a finding about the diff. Refuse it here.
 if [ -n "$BASE" ]; then
