@@ -66,14 +66,37 @@ try:
     toks = shlex.split(sys.stdin.read())
 except Exception:
     sys.exit(0)
-# `worktree` immediately followed by `add`, so the loose shell prefilter above
-# cannot be satisfied by the two words appearing anywhere in a command — a
-# commit message, or `git worktree list && mkdir add`.
+# Global options that take a separate value: `git -C <dir> worktree add`.
+VALUED = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+
+
+def git_invocation(i):
+    """True when toks[i] (`worktree`) is the git subcommand: walking back over
+    global options and their values reaches a `git` word."""
+    j = i - 1
+    while j >= 0:
+        t = toks[j]
+        if t.rsplit("/", 1)[-1] == "git":
+            return True
+        if t.startswith("-") or (j > 0 and toks[j - 1] in VALUED):
+            j -= 1
+            continue
+        return False
+    return False
+
+
+# `git … worktree add` as a real invocation, so the loose shell prefilter above
+# cannot be satisfied by the words appearing anywhere — a commit message,
+# `git worktree list && mkdir add`, or a `git add` run inside a `.worktrees/`
+# path (#530). With no such invocation there is nothing to prime and nothing to
+# sweep for.
 pair = next(
-    (i for i in range(len(toks) - 1) if toks[i] == "worktree" and toks[i + 1] == "add"),
+    (i for i in range(len(toks) - 1)
+     if toks[i] == "worktree" and toks[i + 1] == "add" and git_invocation(i)),
     None,
 )
 if pair is None:
+    print("__NO_WORKTREE_ADD__")
     sys.exit(0)
 rest = toks[pair + 2:]
 skip_next = False
@@ -90,6 +113,7 @@ for t in rest:
     print(t)
     break
 ' 2>/dev/null)" || exit 0
+[ "$target" != "__NO_WORKTREE_ADD__" ] || exit 0
 
 project_dir="${CLAUDE_PROJECT_DIR:-$PWD}"
 # The SHELL's cwd from the payload, not the project dir: an agent inside
@@ -128,6 +152,13 @@ prime_one() {
     script="$(cd "$(dirname "$shared_script")" && pwd)/setup-worktree.sh"
   else
     script="$owner_repo/bin/setup-worktree.sh"
+    # With no manifest, the repo's own script is dotclaude's SHARED one when the
+    # repo is dotclaude itself, and that script refuses a repo with no manifest
+    # (rc 1), so the tree could never read "done" (#533). Not opted in.
+    if [ -x "$script" ] && [ -x "$shared_script" ] \
+       && [ "$(readlink -f "$script")" = "$(readlink -f "$shared_script")" ]; then
+      return 2
+    fi
   fi
   [ -x "$script" ] || return 2   # not opted in: inert, not a failure
 

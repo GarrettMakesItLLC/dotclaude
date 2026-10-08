@@ -80,6 +80,26 @@ rm -f "$R/NO_SCOPE"
 run "$R"
 [ "$RC" = 0 ] && grep -q 'main checkout, nothing to bootstrap' <<<"$OUT" && ok "the main checkout is left alone" || bad "main: $OUT"
 
+# An install that rewrites a clean tracked lockfile has it put back (#493); a
+# lockfile the branch had already edited is left as the branch had it.
+echo '{"lockfileVersion": 3}' >"$R/package-lock.json"
+git -C "$R" add package-lock.json && git -C "$R" commit -q -m lock
+cat >>"$R/install-stub.sh" <<'S'
+[ -f "$MAIN_TREE/REWRITE_LOCK" ] && echo '{"rewritten": "by npm 11"}' >package-lock.json
+true
+S
+git -C "$R" worktree add -q "$R/.worktrees/b" -b b
+WB="$R/.worktrees/b"
+touch "$R/REWRITE_LOCK"
+run "$WB"
+[ "$RC" = 0 ] && git -C "$WB" diff --quiet -- package-lock.json && grep -q 'restored package-lock.json' <<<"$OUT" \
+  && ok "a clean lockfile the install rewrote is restored" || bad "lock restore: rc=$RC dirty=$(git -C "$WB" diff --stat) $OUT"
+echo '{"branch": "edit"}' >"$WB/package-lock.json"
+run "$WB"
+grep -q '"rewritten"' "$WB/package-lock.json" && ! grep -q 'restored package-lock.json' <<<"$OUT" \
+  && ok "a lockfile the branch had edited is not restored" || bad "dirty lock: $(cat "$WB/package-lock.json") $OUT"
+rm -f "$R/REWRITE_LOCK"
+
 # --------------------------------------------------------------------------
 echo "setup-worktree: mirror strategy"
 M="$TMP/mir"
