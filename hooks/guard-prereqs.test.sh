@@ -49,6 +49,7 @@ worktree-cd-guard|python3|Bash|command|cd /tmp && echo x > f
 worktree-cd-guard|perl|Bash|command|cd /tmp && echo x > f
 heredoc-guard|python3|Bash|command|cat <<EOF
 db-push-guard|python3|Bash|command|npx prisma db push
+pooler-readonly-guard|python3|Bash|command|psql -c "SET default_transaction_read_only = on"
 pr-base-guard|python3|Bash|command|gh pr create --base main
 secret-read-guard|python3|Read|file_path|/home/x/.config/secrets/a.env
 worktree-guard|python3|Edit|file_path|/tmp/x.ts

@@ -34,6 +34,8 @@ check 2 git-guard "${S2}execute_shell_command" "$TMP" '{"command":"git commit --
 check 0 git-guard "${S}execute_shell_command" "$TMP" '{"command":"git status"}'
 check 2 secret-read-guard "${S}execute_shell_command" "$TMP" '{"command":"cat ~/.config/secrets/gmi.env"}'
 check 2 db-push-guard "${S}execute_shell_command" "$TMP" '{"command":"DIRECT_URL=postgresql://u:p@db.prodref.example.co:5432/postgres npx prisma db push"}'
+check 2 pooler-readonly-guard "${S}execute_shell_command" "$TMP" '{"command":"PGOPTIONS=\"-c default_transaction_read_only=on\" psql \"$DATABASE_URL\" -c \"select 1\""}'
+check 0 pooler-readonly-guard "${S}execute_shell_command" "$TMP" '{"command":"psql \"$DATABASE_URL\" -c \"BEGIN READ ONLY; select 1; ROLLBACK;\""}'
 check 2 heredoc-guard "${S}execute_shell_command" "$TMP" "$(printf '{"command":%s}' "$(python3 -c 'import json; print(json.dumps("cat > f <<EOF\n$(whoami)\nEOF"))')")"
 
 echo "mcp-tool-adapter: Serena's reads and the Grep tool are judged as reads"
@@ -74,7 +76,7 @@ echo "mcp-tool-adapter: settings.json registers every guard for every capable to
 python3 - "$HERE/../settings.json" <<'PY' || fail=1
 import json, re, sys
 cfg = json.load(open(sys.argv[1]))
-SHELL_GUARDS = {"git-guard", "worktree-cd-guard", "npm-install-guard", "heredoc-guard", "db-push-guard",
+SHELL_GUARDS = {"git-guard", "worktree-cd-guard", "npm-install-guard", "heredoc-guard", "db-push-guard", "pooler-readonly-guard",
                 "pr-base-guard", "secret-read-guard", "worktree-guard"}
 READ_GUARDS = {"secret-read-guard"}
 WRITE_GUARDS = {"worktree-guard", "claim-guard", "migration-guard"}
