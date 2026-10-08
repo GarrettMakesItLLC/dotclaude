@@ -162,6 +162,12 @@ check 0 Bash command 'NODE_AUTH_TOKEN="$(gh auth token)" npm ci'
 check 0 Bash command 'gh auth status'
 check 0 Bash command 'env | grep -c TOKEN'
 check 0 Bash command 'env FOO=1 npm test'
+# A `|` inside a quoted regex is an alternation, not a pipe (#485).
+check 0 Bash command "awk '/^diff --git a\\/(src\\/lib\\/(supabase-keys|env|supabase)\\.ts)/{p=1} p' x.diff | head -400"
+check 0 Bash command 'grep -E "token|env|printenv" notes.md'
+check 0 Bash command "rg 'a|env' src && echo done"
+check 2 Bash command "echo 'a|b' && env"
+check 2 Bash command "grep -c 'x|y' f; env | sort"
 check 0 Bash command 'set -euo pipefail'
 check 0 Bash command 'export FOO=bar'
 check 0 Bash command 'bash bin/staging-db-url.test.sh'
