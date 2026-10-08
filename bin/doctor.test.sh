@@ -83,7 +83,8 @@ PY
 python3 "$TMP/registry.py" "$TMP/port" & REG=$!
 trap 'kill "$REG" 2>/dev/null; rm -rf "$TMP"' EXIT
 for _ in $(seq 1 50); do [ -s "$TMP/port" ] && break; sleep 0.1; done
-export DOCTOR_PACKAGES_PROBE_URL="http://127.0.0.1:$(cat "$TMP/port")/pkg" NO_PROXY=127.0.0.1 no_proxy=127.0.0.1
+PROBE_PORT="$(cat "$TMP/port")"
+export DOCTOR_PACKAGES_PROBE_URL="http://127.0.0.1:$PROBE_PORT/pkg" NO_PROXY=127.0.0.1 no_proxy=127.0.0.1
 echo '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' >"$R/.npmrc"
 tokrun() { OUT="$(cd "$R" && NODE_AUTH_TOKEN="$1" "$DOC" 2>&1)"; }
 tokrun tok_good
