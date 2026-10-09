@@ -15,8 +15,16 @@
 #    runtime secrets do not go here — they live where the server reads them, and a
 #    second copy only widens the leak surface.
 #
-#    Add one with `--no-sensitive`:
-#        vercel env add OPS_MY_SECRET production --no-sensitive
+#    The channel lives on Vercel's `development` target, which is never applied
+#    to a deployment, and ideally in a project of its own (`ops.vercelProject`)
+#    with no Git connection, so no build ever runs with it. A Production or
+#    Preview variable is in the environment of every build of that project —
+#    every install script and bundler plugin can read it — so the channel
+#    refuses to pull from either.
+#
+#    Add one with `--no-sensitive`, against the channel's project:
+#        VERCEL_ORG_ID=<orgId> VERCEL_PROJECT_ID=<projectId> \
+#          vercel env add OPS_MY_SECRET development --no-sensitive
 #    `vercel env add` marks a variable sensitive by default, and a sensitive
 #    variable cannot be read back: the pull returns the literal `[SENSITIVE]`,
 #    eleven characters that authenticate as garbage rather than failing as
@@ -71,7 +79,15 @@ name="$(manifest_get name || basename "$main_tree")"
 prefix="$(manifest_get envPrefix || true)"
 state_dir_raw="$(manifest_get stateDir)" || die "manifest has no stateDir"
 STATE_DIR="$(manifest_path_expand "$state_dir_raw")"
-ENVIRONMENT="${1:-$(manifest_get ops.vercelEnvironment || echo production)}"
+ENVIRONMENT="${1:-$(manifest_get ops.vercelEnvironment || echo development)}"
+OPS_PROJECT_ID="$(manifest_get ops.vercelProject.projectId || true)"
+OPS_ORG_ID="$(manifest_get ops.vercelProject.orgId || true)"
+if [ -n "$OPS_PROJECT_ID$OPS_ORG_ID" ] && { [ -z "$OPS_PROJECT_ID" ] || [ -z "$OPS_ORG_ID" ]; }; then
+  die "ops.vercelProject needs both projectId and orgId."
+fi
+# The command a fix-it message prints, aimed at the channel's own project.
+CHANNEL_VERCEL="vercel"
+[ -z "$OPS_PROJECT_ID" ] || CHANNEL_VERCEL="VERCEL_ORG_ID=$OPS_ORG_ID VERCEL_PROJECT_ID=$OPS_PROJECT_ID vercel"
 
 mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
@@ -81,7 +97,9 @@ did_anything=0
 
 vercel_pull() {
   local env="$1" out="$2"
-  if [ ! -f "$main_tree/.vercel/project.json" ]; then
+  if [ -n "${VERCEL_PROJECT_ID:-}" ]; then
+    : # the caller named the project; the checkout's .vercel link is not consulted
+  elif [ ! -f "$main_tree/.vercel/project.json" ]; then
     echo "ops-pull: $main_tree/.vercel/project.json is missing — run 'vercel link' in the main checkout first." >&2
     return 1
   fi
@@ -89,6 +107,14 @@ vercel_pull() {
   if ! "${VERCEL[@]}" env pull "$out" --environment="$env" --yes >/dev/null 2>&1; then
     echo "ops-pull: 'vercel env pull --environment=$env' failed — run 'vercel login' and 'vercel link' in $main_tree." >&2
     return 1
+  fi
+}
+
+channel_pull() { # ENV OUT — the OPS_ channel, from its own project when the manifest names one
+  if [ -n "$OPS_PROJECT_ID" ]; then
+    VERCEL_ORG_ID="$OPS_ORG_ID" VERCEL_PROJECT_ID="$OPS_PROJECT_ID" vercel_pull "$1" "$2"
+  else
+    vercel_pull "$1" "$2"
   fi
 }
 
@@ -110,7 +136,16 @@ trap 'rm -f "$TMP" "$CLOUD_TMP"' EXIT
 # ---------------------------------------------------------------------------
 if [ "$(manifest_get ops.channel || echo false)" = true ]; then
   did_anything=1
-  if vercel_pull "$ENVIRONMENT" "$TMP"; then
+  case "$ENVIRONMENT" in
+    production | preview)
+      echo "ops-pull: the OPS_ channel will not read Vercel [$ENVIRONMENT] — a deploy target is in the" >&2
+      echo "  environment of every build, so a secret there is readable by every dependency's install" >&2
+      echo "  script. Keep the channel on 'development', in its own project (ops.vercelProject)." >&2
+      channel_ok=0
+      ;;
+    *) channel_ok=1 ;;
+  esac
+  if [ "$channel_ok" = 1 ] && channel_pull "$ENVIRONMENT" "$TMP"; then
     mapfile -t unset_always < <(manifest_get ops.unsetAlways || true)
     mapfile -t file_secret_json < <(manifest_get ops.fileSecrets || true)
     file_secret_names=()
@@ -130,7 +165,7 @@ print(v if isinstance(v, str) else v["name"])' "$fs")")
       if grep -qE "^OPS_${shadow}=" "$TMP"; then
         echo "ops-pull: OPS_${shadow} would export a bare ${shadow}, which overrides this machine's" >&2
         echo "  interactive CLI login and reports the failure as a broken login. Rename it:" >&2
-        echo "    vercel env rm OPS_${shadow} ${ENVIRONMENT} && vercel env add OPS_${prefix:+${prefix}_}${shadow} ${ENVIRONMENT} --no-sensitive" >&2
+        echo "    ${CHANNEL_VERCEL} env rm OPS_${shadow} ${ENVIRONMENT} && ${CHANNEL_VERCEL} env add OPS_${prefix:+${prefix}_}${shadow} ${ENVIRONMENT} --no-sensitive" >&2
         refused=1
       fi
     done
@@ -138,11 +173,18 @@ print(v if isinstance(v, str) else v["name"])' "$fs")")
       [ -n "$n" ] || continue
       if grep -qE "^OPS_${n}=" "$TMP"; then
         echo "ops-pull: OPS_${n} is on this repo's ops.unsetAlways list — it must not be a shell variable" >&2
-        echo "  here at all. Remove it from Vercel:  vercel env rm OPS_${n} ${ENVIRONMENT}" >&2
+        echo "  here at all. Remove it from Vercel:  ${CHANNEL_VERCEL} env rm OPS_${n} ${ENVIRONMENT}" >&2
         refused=1
       fi
     done
 
+    if ! grep -qE '^OPS_[A-Za-z0-9_]+=' "$TMP"; then
+      # An empty pull is a mis-pointed channel (wrong project or environment), not
+      # an empty one: overwriting ops.env would strip every agent shell of its keys.
+      echo "ops-pull: Vercel [$ENVIRONMENT] returned no OPS_ variables — the channel is pointed at the" >&2
+      echo "  wrong project or environment. The existing ops.env was left as it was." >&2
+      refused=1
+    fi
     if [ "$refused" = 1 ]; then
       failed=1
     else
@@ -200,7 +242,7 @@ print(v["name"]); print(v.get("path", "")); print(v.get("mustContain", ""))
         done < <(grep -oE '\{[A-Za-z0-9_]+\}' <<<"$fs_path" | tr -d '{}' | sort -u)
         if [ -n "$missing_var" ]; then
           echo "ops-pull: OPS_${fs_name} names its file by OPS_${missing_var}, which is not on the channel — add it:" >&2
-          echo "    vercel env add OPS_${missing_var} ${ENVIRONMENT} --no-sensitive" >&2
+          echo "    ${CHANNEL_VERCEL} env add OPS_${missing_var} ${ENVIRONMENT} --no-sensitive" >&2
           failed=1
           continue
         fi
@@ -212,7 +254,7 @@ print(v["name"]); print(v.get("path", "")); print(v.get("mustContain", ""))
         if [ -n "$fs_must" ] && ! grep -qF -- "$fs_must" "$dest" 2>/dev/null; then
           rm -f "$dest"
           echo "ops-pull: OPS_${fs_name} did not decode to a file containing '$fs_must' — re-encode it:" >&2
-          echo "    base64 -w0 <file> | vercel env add OPS_${fs_name} ${ENVIRONMENT} --no-sensitive --force" >&2
+          echo "    base64 -w0 <file> | ${CHANNEL_VERCEL} env add OPS_${fs_name} ${ENVIRONMENT} --no-sensitive --force" >&2
           failed=1
         else
           echo "ops-pull: wrote $dest"
@@ -227,7 +269,7 @@ print(v["name"]); print(v.get("path", "")); print(v.get("mustContain", ""))
         echo "ops-pull: these are marked SENSITIVE in Vercel and cannot be read back, so they were left out" >&2
         echo "  rather than written as the literal '[SENSITIVE]'. Re-add each from a machine that has the value:" >&2
         for n in $unreadable; do
-          echo "    vercel env add OPS_${n} ${ENVIRONMENT} --no-sensitive --force" >&2
+          echo "    ${CHANNEL_VERCEL} env add OPS_${n} ${ENVIRONMENT} --no-sensitive --force" >&2
         done
         failed=1
       fi

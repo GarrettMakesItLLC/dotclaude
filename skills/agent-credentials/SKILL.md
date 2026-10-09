@@ -64,7 +64,7 @@ The appendix says what each points at — often a live production database, with
 
 **How an agent-only secret is provisioned**, in this order:
 
-1. **Vercel, `OPS_`-prefixed, `--no-sensitive`** — `vercel env add OPS_MY_KEY production --no-sensitive` (and preview, development). `ops-pull.sh` lands it in `ops.env` on every machine. This is the route for anything an agent needs that the app does not. Never name one `OPS_RAILWAY_TOKEN`/`OPS_VERCEL_TOKEN` — a bare export shadows the CLI login; `ops-pull.sh` refuses it.
+1. **Vercel, `OPS_`-prefixed, `--no-sensitive`, `development` only, in the channel's own project** — `VERCEL_ORG_ID=<orgId> VERCEL_PROJECT_ID=<projectId> vercel env add OPS_MY_KEY development --no-sensitive`, the ids from the manifest's `ops.vercelProject`. `ops-pull.sh` lands it in `ops.env` on every machine. Never `production` or `preview`: a deploy target is in the environment of every build, where any dependency's install script can read it, and `ops-pull.sh` refuses to read the channel from one. This is the route for anything an agent needs that the app does not. Never name one `OPS_RAILWAY_TOKEN`/`OPS_VERCEL_TOKEN` — a bare export shadows the CLI login; `ops-pull.sh` refuses it.
 2. **Railway** — only for a key the deployed server reads.
 3. **The vendor dashboard** — only the owner can reach it.
 
@@ -72,7 +72,7 @@ The appendix says what each points at — often a live production database, with
 
 **A key only the owner can mint** (an AI Studio key, a store API key) is one irreducible owner step, then one command: a script that reads the key from a prompt or stdin (never an argument — shell history keeps it), authenticates it against the vendor BEFORE storing it, writes it to the channel, pulls, and compares. A key that is wrong must fail at the first step, not three steps later inside a render.
 
-**A file-shaped secret** (a signing key, an env bundle) rides the channel base64-encoded as `OPS_<NAME>_B64` and is listed in the manifest's `ops.fileSecrets`: `ops-pull.sh` decodes it to a mode-600 file under `<stateDir>` and never exports it. Encode with `base64 -w0 <file> | vercel env add OPS_<NAME>_B64 production --no-sensitive`.
+**A file-shaped secret** (a signing key, an env bundle) rides the channel base64-encoded as `OPS_<NAME>_B64` and is listed in the manifest's `ops.fileSecrets`: `ops-pull.sh` decodes it to a mode-600 file under `<stateDir>` and never exports it. Encode with `base64 -w0 <file> | VERCEL_ORG_ID=<orgId> VERCEL_PROJECT_ID=<projectId> vercel env add OPS_<NAME>_B64 development --no-sensitive`.
 
 ### An MCP whose key is unset fails as if the key were WRONG
 

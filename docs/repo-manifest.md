@@ -36,7 +36,8 @@ in the environment overrides discovery (the self-tests use it).
 
 | Field | Type | Meaning |
 |---|---|---|
-| `vercelEnvironment` | string | Environment pulled; default `production`. The first argument overrides it. |
+| `vercelEnvironment` | string | Environment pulled; default `development`. The first argument overrides it. The channel refuses `production` and `preview`: a deploy target is in the environment of every build. |
+| `vercelProject` | `{ projectId, orgId }` | The Vercel project holding the channel, in place of the checkout's `.vercel` link. A project with no Git connection never builds, so nothing but `ops-pull.sh` reads it. `vercelKeys` still read the linked project. |
 | `channel` | bool | Pull the `OPS_*` channel into `<stateDir>/ops.env`, sourced from `~/.bashrc`. |
 | `unsetAlways` | keys | Refused on the channel and `unset` in `ops.env`, so an inherited export dies too. |
 | `fileSecrets` | list of name or `{ name, path?, mustContain? }` | `OPS_<name>` values that are files: never exported; with `path`, base64-decoded to `<stateDir>/<path>` (mode 600). `{VAR}` in `path` is filled from `OPS_VAR`. A decoded file lacking `mustContain` is deleted. |
