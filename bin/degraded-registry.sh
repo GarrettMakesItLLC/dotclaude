@@ -85,11 +85,15 @@ start_server() {
     nohup setsid node "$SERVER" >>"$LOG" 2>&1 </dev/null &
     echo $! >"$PIDFILE"
   )
-  for _ in $(seq 1 25); do
+  # A cold node start on a loaded machine (a shared box, a CI runner) can take
+  # several seconds; a short budget makes `on` die before it writes the block.
+  local budget="${DEGRADED_REGISTRY_START_SECS:-15}" waited=0
+  while [ "$waited" -lt $((budget * 5)) ]; do
     serving && return 0
     sleep 0.2
+    waited=$((waited + 1))
   done
-  die "the mirror did not come up on $URL (log: $LOG)"
+  die "the mirror did not come up on $URL within ${budget}s (log: $LOG)"
 }
 
 stop_server() {
