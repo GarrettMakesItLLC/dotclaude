@@ -26,7 +26,7 @@ cat >"$TMP/bin/vercel" <<'S'
 #!/usr/bin/env bash
 [ "$1" = env ] && [ "$2" = pull ] || exit 2
 env_name="${4#--environment=}"
-cp "$VERCEL_FIXTURE_DIR/$env_name.env" "$3"
+cp "$VERCEL_FIXTURE_DIR/${VERCEL_PROJECT_ID:+$VERCEL_PROJECT_ID/}$env_name.env" "$3"
 S
 cat >"$TMP/bin/railway" <<'S'
 #!/usr/bin/env bash
@@ -58,7 +58,7 @@ manifest <<'J'
              { "name": "KEY_P8_B64", "path": "signing/AuthKey_{KEY_ID}.p8", "mustContain": "BEGIN PRIVATE KEY" }] } }
 J
 pem="$(printf -- '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n' | base64 -w0)"
-cat >"$VERCEL_FIXTURE_DIR/production.env" <<E
+cat >"$VERCEL_FIXTURE_DIR/development.env" <<E
 OPS_MONITOR_KEY="m-123"
 OPS_UPLOAD_POST_API_KEY="u-456"
 OPS_STALE="[SENSITIVE]"
@@ -98,19 +98,55 @@ cp "$TMP/bashrc.keep" "$HOME/.bashrc"
 
 echo "ops-pull: a file secret that does not decode to what it must contain is deleted"
 bad_pem="$(printf 'not a key' | base64 -w0)"
-sed -i "s|^OPS_KEY_P8_B64=.*|OPS_KEY_P8_B64=\"$bad_pem\"|; /OPS_STALE/d" "$VERCEL_FIXTURE_DIR/production.env"
+sed -i "s|^OPS_KEY_P8_B64=.*|OPS_KEY_P8_B64=\"$bad_pem\"|; /OPS_STALE/d" "$VERCEL_FIXTURE_DIR/development.env"
 run
 [ "$RC" = 1 ] && [ ! -f "$KEYF" ] && grep -q 'did not decode' <<<"$OUT" && ok "removed and reported" || bad "rc=$RC $OUT"
 
 echo "ops-pull: a var that would shadow a CLI login is refused, and nothing is written"
 rm -f "$OPS"
-echo 'OPS_RAILWAY_TOKEN="abc"' >>"$VERCEL_FIXTURE_DIR/production.env"
+echo 'OPS_RAILWAY_TOKEN="abc"' >>"$VERCEL_FIXTURE_DIR/development.env"
 run
 [ "$RC" = 1 ] && [ ! -f "$OPS" ] && grep -q 'OPS_RAILWAY_TOKEN would export a bare' <<<"$OUT" && ok "refused" || bad "rc=$RC $OUT"
-sed -i '/OPS_RAILWAY_TOKEN/d' "$VERCEL_FIXTURE_DIR/production.env"
-echo 'OPS_DM_RAILWAY_TOKEN="abc"' >>"$VERCEL_FIXTURE_DIR/production.env"
+sed -i '/OPS_RAILWAY_TOKEN/d' "$VERCEL_FIXTURE_DIR/development.env"
+echo 'OPS_DM_RAILWAY_TOKEN="abc"' >>"$VERCEL_FIXTURE_DIR/development.env"
 run
 [ "$RC" = 1 ] && grep -q 'ops.unsetAlways' <<<"$OUT" && ok "an unsetAlways name on the channel is refused" || bad "rc=$RC $OUT"
+
+echo "ops-pull: the channel refuses a deploy target, and leaves ops.env alone"
+manifest <<'J'
+{ "name": "Demo", "envPrefix": "DM", "stateDir": "~/.demo", "ops": { "channel": true, "vercelEnvironment": "production" } }
+J
+echo '# kept' >"$OPS"
+printf 'OPS_MONITOR_KEY="m-123"\n' >"$VERCEL_FIXTURE_DIR/production.env"
+run
+[ "$RC" = 1 ] && grep -q 'will not read Vercel \[production\]' <<<"$OUT" && [ "$(cat "$OPS")" = '# kept' ] && ok "production refused" || bad "rc=$RC $OUT"
+OUT="$(cd "$REPO" && "$OP" preview 2>&1)"; RC=$?
+[ "$RC" = 1 ] && grep -q 'will not read Vercel \[preview\]' <<<"$OUT" && ok "preview refused, also as an argument" || bad "rc=$RC $OUT"
+
+echo "ops-pull: an empty channel is a mis-pointed one, and ops.env is kept"
+manifest <<'J'
+{ "name": "Demo", "envPrefix": "DM", "stateDir": "~/.demo", "ops": { "channel": true } }
+J
+printf 'VITE_NOT_OPS="x"\n' >"$VERCEL_FIXTURE_DIR/development.env"
+run
+[ "$RC" = 1 ] && grep -q 'returned no OPS_ variables' <<<"$OUT" && [ "$(cat "$OPS")" = '# kept' ] && ok "refused, ops.env untouched" || bad "rc=$RC $OUT"
+
+echo "ops-pull: ops.vercelProject pulls the channel from its own project, without the checkout's link"
+manifest <<'J'
+{ "name": "Demo", "envPrefix": "DM", "stateDir": "~/.demo",
+  "ops": { "channel": true, "vercelProject": { "projectId": "prj_ops", "orgId": "team_x" } } }
+J
+mkdir -p "$VERCEL_FIXTURE_DIR/prj_ops"
+printf 'OPS_MONITOR_KEY="from-ops-project"\n' >"$VERCEL_FIXTURE_DIR/prj_ops/development.env"
+mv "$REPO/.vercel/project.json" "$TMP/project.json.keep"
+run
+mv "$TMP/project.json.keep" "$REPO/.vercel/project.json"
+[ "$RC" = 0 ] && grep -q '^export MONITOR_KEY="from-ops-project"$' "$OPS" && ok "read from the named project" || bad "rc=$RC $OUT"
+manifest <<'J'
+{ "name": "Demo", "stateDir": "~/.demo", "ops": { "channel": true, "vercelProject": { "projectId": "prj_ops" } } }
+J
+run
+[ "$RC" = 1 ] && grep -q 'needs both projectId and orgId' <<<"$OUT" && ok "a half-named project is refused" || bad "rc=$RC $OUT"
 
 echo "ops-pull: cloud values land in cloud.env, unsourced, under mapped names"
 manifest <<'J'
