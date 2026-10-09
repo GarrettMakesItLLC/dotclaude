@@ -45,7 +45,7 @@ pnpm-debug.log*
 
 # Context-graph tools (rules/context-tools.md, integrations.md): regenerable
 # local data, kept fresh by the post-merge/post-checkout hooks + CI instead
-# of being committed.
+# of being committed. `.serena/` is ignored whole: Serena rewrites project.yml
+# whenever its version changes, which would leave every checkout permanently dirty.
 graphify-out/
-.serena/cache/
-.serena/*.local.yml
+.serena/

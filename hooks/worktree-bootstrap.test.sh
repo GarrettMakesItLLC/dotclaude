@@ -265,6 +265,85 @@ print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":s
   | CLAUDE_PROJECT_DIR="$NOS" "$HOOK" 2>/dev/null)"
 [ -z "$nos_out" ] || { echo "FAIL (loop, no script): wanted silence, got: $nos_out"; fail=1; }
 
+# --- #530: only a real `git … worktree add` primes or sweeps. A `git add` run
+# inside a `.worktrees/` path, or the words in an argument, must neither prime
+# nor sweep the repo's other (unprimed) worktrees.
+git -C "$LOOP" worktree add --quiet "$LOOP/.worktrees/w4" -b feat/w4   # unprimed
+: > "$TMP/loop-calls"
+for c in \
+  "cd $LOOP/.worktrees/w4 && git add README.md && git rebase --continue" \
+  'B=$PWD; git -C "$B" add f && git commit -m "worktree add docs"' \
+  'echo "git worktree add" > $TMP/note && git add .worktrees/x' \
+  'grep -rn "worktree add" $HOME/notes'; do
+  sweep_out="$(CLAUDE_PROJECT_DIR="$LOOP" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))
+' "$c" "$LOOP" | CLAUDE_PROJECT_DIR="$LOOP" "$HOOK" 2>/dev/null)"
+  sleep 0.3
+  [ -s "$TMP/loop-calls" ] && { echo "FAIL (#530): '$c' primed: $(cat "$TMP/loop-calls")"; fail=1; : > "$TMP/loop-calls"; }
+  [ -z "$sweep_out" ] || { echo "FAIL (#530): '$c' printed: $sweep_out"; fail=1; }
+done
+# A global option between git and worktree is still an invocation.
+: > "$TMP/loop-calls"
+CLAUDE_PROJECT_DIR="$LOOP" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))
+' "git -C $LOOP worktree add -q $LOOP/.worktrees/w5 -b feat/w5" "$LOOP" >/dev/null
+git -C "$LOOP" worktree add --quiet "$LOOP/.worktrees/w5" -b feat/w5
+CLAUDE_PROJECT_DIR="$LOOP" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))
+' "git -C $LOOP -c core.x=1 worktree add -q $LOOP/.worktrees/w5 -b feat/w5" "$LOOP" \
+  | CLAUDE_PROJECT_DIR="$LOOP" "$HOOK" >/dev/null 2>&1
+tries=100; while [ ! -s "$TMP/loop-calls" ] && [ $tries -gt 0 ]; do sleep 0.05; tries=$((tries-1)); done
+[ "$(cat "$TMP/loop-calls")" = "$LOOP/.worktrees/w5" ] \
+  || { echo "FAIL (#530): git -C … -c … worktree add did not prime w5: $(cat "$TMP/loop-calls")"; fail=1; }
+
+# A real `worktree add` whose target is literal but unresolvable from the
+# session cwd, in a command with an unrelated `$`, must not sweep (#530): the
+# session sits in LOOP while the add happens in another repo via `cd`.
+OTHER_R="$TMP/other-repo"
+mk_repo "$OTHER_R" OTHER
+git -C "$LOOP" worktree add --quiet "$LOOP/.worktrees/w6" -b feat/w6   # unprimed
+: > "$TMP/loop-calls"; : > "$TMP/OTHER-calls" 2>/dev/null
+CLAUDE_PROJECT_DIR="$LOOP" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))
+' "W=\$HOME/x; cd $OTHER_R && git worktree add .worktrees/nope -b feat/nope" "$LOOP" \
+  | CLAUDE_PROJECT_DIR="$LOOP" "$HOOK" >/dev/null 2>&1
+sleep 0.3
+[ -s "$TMP/loop-calls" ] && { echo "FAIL (#530): an unrelated \$ swept LOOP: $(cat "$TMP/loop-calls")"; fail=1; }
+# A leading `cd <dir> &&` and `git -C <dir>` both set the base for a relative target.
+git -C "$OTHER_R" worktree add --quiet "$OTHER_R/.worktrees/c1" -b feat/c1
+git -C "$OTHER_R" worktree add --quiet "$OTHER_R/.worktrees/c2" -b feat/c2
+for c in "cd $OTHER_R && git worktree add .worktrees/c1 -b feat/c1" "git -C $OTHER_R worktree add .worktrees/c2 -b feat/c2"; do
+  rm -f "$RECORD"
+  out="$(CLAUDE_PROJECT_DIR="$LOOP" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))
+' "$c" "$LOOP" | CLAUDE_PROJECT_DIR="$LOOP" "$HOOK" 2>/dev/null)"
+  want="$OTHER_R/.worktrees/c1"; case "$c" in *c2*) want="$OTHER_R/.worktrees/c2" ;; esac
+  grep -qF "priming $want" <<<"$out" || { echo "FAIL (#530 base): '$c' did not prime $want: $out"; fail=1; }
+done
+
+# --- #533: a repo with no manifest whose own bin/setup-worktree.sh IS
+# dotclaude's shared script (dotclaude itself) is not opted in: no priming
+# message, so no rc marker the agent is told to wait for.
+SELF="$TMP/self-repo"
+mkdir -p "$SELF/bin"; git init --quiet "$SELF"
+git -C "$SELF" config user.email t@t; git -C "$SELF" config user.name t
+ln -s "$(cd "$(dirname "$HOOK")/../bin" && pwd)/setup-worktree.sh" "$SELF/bin/setup-worktree.sh"
+echo x > "$SELF/f"; git -C "$SELF" add -A; git -C "$SELF" commit --quiet -m init
+git -C "$SELF" worktree add --quiet "$SELF/.worktrees/w1" -b feat/w1
+self_out="$(CLAUDE_PROJECT_DIR="$SELF" python3 -c '
+import json,sys
+print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))
+' "git worktree add .worktrees/w1 -b feat/w1" "$SELF" | CLAUDE_PROJECT_DIR="$SELF" "$HOOK" 2>/dev/null)"
+[ -z "$self_out" ] || { echo "FAIL (#533): a repo without a manifest was primed: $self_out"; fail=1; }
+gd="$(git -C "$SELF/.worktrees/w1" rev-parse --path-format=absolute --git-dir)"
+sleep 0.3
+[ ! -e "$gd/worktree-bootstrap.rc" ] || { echo "FAIL (#533): rc marker written: $(cat "$gd/worktree-bootstrap.rc")"; fail=1; }
+
 if [ "$fail" = 0 ]; then
   echo "worktree-bootstrap: all cases passed"
 fi
