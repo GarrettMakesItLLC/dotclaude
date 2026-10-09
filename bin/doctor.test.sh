@@ -97,4 +97,20 @@ grep -q 'NODE_AUTH_TOKEN is unset' <<<"$OUT" && ok "an empty token warns" || bad
 OUT="$(cd "$R" && NODE_AUTH_TOKEN=tok_good DOCTOR_PACKAGES_PROBE_URL=http://127.0.0.1:1/x "$DOC" 2>&1)"
 grep -q 'registry check was inconclusive' <<<"$OUT" && ok "an unreachable registry is inconclusive, not a rejection" || bad "unreachable: $OUT"
 
+# #529: a registered upload-post MCP needs its key in settings.local.json env,
+# the one place a non-interactive session reads it from.
+mkdir -p "$HOME/.claude"
+echo '{"mcpServers":{"upload-post":{"type":"http"}}}' >"$HOME/.claude.json"
+echo '{"env":{}}' >"$HOME/.claude/settings.local.json"
+run
+grep -q 'UPLOAD_POST_API_KEY is not in ~/.claude/settings.local.json env' <<<"$OUT" \
+  && ok "a registered upload-post MCP without the key warns" || bad "upload-post missing: $OUT"
+echo '{"env":{"UPLOAD_POST_API_KEY":"up_fake_value_123"}}' >"$HOME/.claude/settings.local.json"
+run
+grep -q 'UPLOAD_POST_API_KEY is in ~/.claude/settings.local.json env' <<<"$OUT" && ! grep -q 'up_fake_value_123' <<<"$OUT" \
+  && ok "the key in settings.local.json passes, and is never printed" || bad "upload-post present: $OUT"
+echo '{"mcpServers":{}}' >"$HOME/.claude.json"
+run
+! grep -q 'UPLOAD_POST_API_KEY' <<<"$OUT" && ok "no upload-post MCP, no check" || bad "upload-post absent: $OUT"
+
 exit "$fail"
