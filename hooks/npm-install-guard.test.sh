@@ -77,6 +77,32 @@ echo "export NODE_AUTH_TOKEN='ghp_good'" >"$HOME/.pin/agent.env"
 check 0 "$PINNED" "npm ci"
 rm "$HOME/.pin/agent.env"
 
+echo "npm-install-guard: the remedy names a token source that exists on this machine (#553)"
+refusal() {
+  python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))' "$1" "$2" \
+    | { (cd "$2" && "$GUARD") >/dev/null; } 2>&1
+}
+has() { # <label> <haystack> <needle> <want: yes|no>
+  if printf '%s' "$2" | grep -qF -- "$3"; then got=yes; else got=no; fi
+  [ "$got" = "$4" ] || { echo "FAIL: $1 (wanted '$3' present=$4)"; fail=1; }
+}
+unset NODE_AUTH_TOKEN
+out="$(refusal 'NODE_AUTH_TOKEN="" npm ci' "$PINNED")"
+has "no source file: does not advise a missing gmi.env" "$out" '. ~/.config/secrets/gmi.env' no
+has "no source file: says no file exports a token" "$out" 'No file on this machine exports NODE_AUTH_TOKEN' yes
+echo "export NODE_AUTH_TOKEN='ghp_good'" >"$HOME/.pin/agent.env"
+out="$(refusal 'NODE_AUTH_TOKEN="" npm ci' "$PINNED")"
+has "agent.env only: names agent.env" "$out" '. ~/.pin/agent.env && <your command>' yes
+has "agent.env only: does not name gmi.env" "$out" 'gmi.env' no
+echo 'export NODE_AUTH_TOKEN=ghp_good' >"$HOME/.config/secrets/gmi.env"
+out="$(refusal 'NODE_AUTH_TOKEN="" npm ci' "$PINNED")"
+has "gmi.env present: names gmi.env" "$out" '. ~/.config/secrets/gmi.env && <your command>' yes
+export NODE_AUTH_TOKEN=ghp_bad
+out="$(refusal 'npm ci' "$PINNED")"
+has "invalid token: names an existing source" "$out" '. ~/.config/secrets/gmi.env && <your command>' yes
+unset NODE_AUTH_TOKEN
+rm -f "$HOME/.pin/agent.env" "$HOME/.config/secrets/gmi.env"
+
 echo "npm-install-guard: empty-token spellings and multi-line commands (#451)"
 export NODE_AUTH_TOKEN=ambient-token
 check 2 "$PINNED" 'NODE_AUTH_TOKEN="" npm ci'

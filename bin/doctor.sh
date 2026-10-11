@@ -143,7 +143,7 @@ for tool in jq psql shellcheck railway vercel corepack; do
     jq) alt='use `node -e` or `python3 -m json.tool`'; repair='install jq' ;;
     psql) alt='use the Supabase MCP, or `node` with the repo'"'"'s `pg`'; repair='install postgresql-client' ;;
     shellcheck) alt='read the script'; repair='install shellcheck' ;;
-    railway) alt='use the Railway MCP'; repair='run `npm install -g @railway/cli --foreground-scripts` — the postinstall that fetches the binary did not run' ;;
+    railway) alt='use the Railway MCP'; repair='run `npm install -g @railway/cli --foreground-scripts` (then `bin/npm-allow-scripts.sh --apply`) — the postinstall that fetches the binary did not run' ;;
     vercel) alt='use `npx vercel …` or the Vercel MCP'; repair='use `npx vercel …`, which resolves its own copy' ;;
     corepack) alt='it ships with Node'; repair='re-run the nvm install' ;;
   esac
@@ -155,6 +155,12 @@ for tool in jq psql shellcheck railway vercel corepack; do
     warn "$tool present on PATH but NOT RUNNABLE (\`$tool --version\` fails)" "$repair; until then, $alt"
   fi
 done
+
+# The CLI updates itself with a global `npm install`; npm 12 blocks its
+# postinstall (which fetches the binary) unless allow-scripts covers it (#549).
+if [ -x "$HERE/npm-allow-scripts.sh" ] && ! allow_out="$("$HERE/npm-allow-scripts.sh" 2>&1)"; then
+  warn "npm allow-scripts policy does not cover @railway/cli / esbuild — the next CLI self-update leaves no binary" "$(printf '%s' "$allow_out" | sed -n 's/^  fix: //p')"
+fi
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
 head_ 'Dependencies'
