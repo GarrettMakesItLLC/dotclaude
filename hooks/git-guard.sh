@@ -158,8 +158,16 @@ printf '%s' "$nq" | grep -Eq '(^|[^[:alnum:]_./-])git([[:space:]]|$)' || exit 0
 # deliberately a different, narrower variable than a blanket --no-verify
 # escape hatch, and the bypass is always logged loudly to stderr so it is
 # never silent even though the command itself is allowed through.
-if printf '%s' "$scrubbed" | grep -Eq -- '--no-verify'; then
-  if escape GIT_GUARD_HOOK_PROVEN_KILLED '--no-verify'; then
+# git accepts any unambiguous prefix of a long option, so `--no-verif`, `--no-ver`
+# and `--no-v` all mean --no-verify on commit AND push. `git push`'s own arguments
+# are also read quote-stripped: the message scrub blanks a quoted `'--no-verify'`,
+# and push carries no free-text message to protect (#556).
+no_verify_re='--no-v(e(r(i(f(y)?)?)?)?)?([[:space:]=]|$)'
+nq_push_args="$(printf '%s' "$nq" \
+  | perl -0777 -ne 'while (/git\s+(?:-[^\s]+\s+)*push((?:(?!\s*(?:;|&&|\|\||\||\n)).)*)/gs) { print "$1\n" }')"
+if printf '%s' "$scrubbed" | grep -Eq -- "$no_verify_re" \
+   || printf '%s' "$nq_push_args" | grep -Eq -- "(^|[[:space:]])$no_verify_re"; then
+  if escape GIT_GUARD_HOOK_PROVEN_KILLED '--no-v|git\s+(?:-[^\s]+\s+)*push\b'; then
     echo "⚠️  dotclaude git-guard: allowing git --no-verify — GIT_GUARD_HOOK_PROVEN_KILLED is set." >&2
     echo "   This bypasses commit hooks. Only legitimate when the hook was proven OOM-killed" >&2
     echo "   (exit 137 / dmesg 'Killed process'), not when it found a real problem." >&2

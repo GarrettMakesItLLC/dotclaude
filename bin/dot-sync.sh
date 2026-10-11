@@ -30,7 +30,8 @@
 #
 # Usage:
 #   bin/dot-sync.sh                 # pull + check + report (fast when current)
-#   bin/dot-sync.sh --fix           # also apply `bootstrap.sh` for reported link drift
+#   bin/dot-sync.sh --fix           # also apply `bootstrap.sh` for reported link drift, and
+#                                   # the npm allow-scripts policy (bin/npm-allow-scripts.sh)
 #   bin/dot-sync.sh --build-mcp     # also rebuild a stale github MCP dist outright
 #   bin/dot-sync.sh --kb            # also refresh the Obsidian vault (bin/kb-sync.sh)
 #   bin/dot-sync.sh --deps          # also install deps in a fleet repo that moved
@@ -307,6 +308,16 @@ if [ -f "$settings_local" ]; then
   fi
 else
   missing+=("$settings_local (per-machine secrets — see integrations.md#per-machine-secrets)")
+fi
+
+# npm's install-scripts policy: a blocked postinstall strands @railway/cli
+# without its binary (#549). Report always; --fix applies.
+if [ -x "$DOTCLAUDE_DIR/bin/npm-allow-scripts.sh" ]; then
+  if [ "$FIX" = 1 ]; then
+    "$DOTCLAUDE_DIR/bin/npm-allow-scripts.sh" --apply || bad "npm-allow-scripts --apply failed"
+  elif ! allow_out="$("$DOTCLAUDE_DIR/bin/npm-allow-scripts.sh" 2>&1)"; then
+    missing+=("npm allow-scripts policy: $(printf '%s' "$allow_out" | sed -n 's/^  fix: //p')")
+  fi
 fi
 
 if [ "${#missing[@]}" -eq 0 ]; then
