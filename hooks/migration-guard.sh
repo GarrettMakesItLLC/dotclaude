@@ -20,8 +20,10 @@
 #      rules 2 and 4 stay jointly satisfiable.
 #
 # A new migration.sql written whole must also follow rules/prisma.md's lock
-# rules: `SET LOCAL lock_timeout` before a heavy lock on an existing table, and
-# `CREATE INDEX CONCURRENTLY` alone in its migration (bin/migration-lock-check.py).
+# rules: `SET LOCAL lock_timeout` before a heavy lock on an existing table,
+# `CREATE INDEX CONCURRENTLY` alone in its migration, a DEFAULT on a NOT NULL
+# column added to an existing table, no `SET NOT NULL` on one, and no enum value
+# used in the migration that adds it (bin/migration-lock-check.py).
 #
 # Editing SQL inside an EXISTING migration directory is blocked once a shared
 # branch (origin's default, `main` or `dev`) carries it: every database that
