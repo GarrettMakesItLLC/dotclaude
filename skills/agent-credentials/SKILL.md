@@ -96,7 +96,7 @@ Prefer the MCP — its availability does not vary by box: Supabase, Railway, Ver
 
 | Tool | Use | Why |
 |---|---|---|
-| `railway` | the Railway MCP, or `railway_kv` above | the npm shim can be on `PATH` with its platform binary never fetched (repair: `npm install -g @railway/cli --foreground-scripts`); a bare token shadows the login |
+| `railway` | the Railway MCP, or `railway_kv` above | the npm shim can be on `PATH` with its platform binary never fetched (repair: `npm install -g @railway/cli --foreground-scripts`; prevent a recurrence with `bin/npm-allow-scripts.sh --apply`, because npm 12 blocks the postinstall of the CLI's own self-update unless `allow-scripts` covers `@railway/cli`); a bare token shadows the login |
 | `vercel` | the Vercel MCP, or `npx vercel …` | often off `PATH` |
 | `psql` | the Supabase MCP, or `node` with the repo's `pg` | not everywhere |
 | `jq` | `node -e` / `python3 -m json.tool` | not everywhere |

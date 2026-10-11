@@ -184,6 +184,28 @@ env_value() {
   printf '%s' "$val"
 }
 
+# The remedy has to name a file that exists on THIS machine: gmi.env is
+# hand-made per machine and absent on some (#553). Prefer a file that already
+# exports a non-empty NODE_AUTH_TOKEN; else say where the token comes from.
+remedy_cmd() {
+  local f
+  for f in "$HOME/.config/secrets/gmi.env" ${state_env:+"$state_env"}; do
+    if [ -f "$f" ] && grep -Eq "^(export )?NODE_AUTH_TOKEN=['\"]?[^'\"[:space:]]" "$f" 2>/dev/null; then
+      printf '. %s && <your command>' "${f/#$HOME/\~}"
+      return
+    fi
+  done
+  printf 'NODE_AUTH_TOKEN="$(<a token that can read @garrettmakesitllc packages>)" <your command>'
+}
+remedy_note() {
+  local f
+  for f in "$HOME/.config/secrets/gmi.env" ${state_env:+"$state_env"}; do
+    [ -f "$f" ] && grep -Eq "^(export )?NODE_AUTH_TOKEN=['\"]?[^'\"[:space:]]" "$f" 2>/dev/null && return
+  done
+  printf '%s\n' "No file on this machine exports NODE_AUTH_TOKEN (checked ~/.config/secrets/gmi.env${state_env:+ and ${state_env/#$HOME/\~}})." \
+    "Run \`~/.claude/bin/doctor.sh\` to see which source the registry accepts, or put the PAT in ~/.config/secrets/gmi.env."
+}
+
 # Degraded registry on (bin/degraded-registry.sh): `npm ci` takes every
 # @garrettmakesitllc tarball from the local mirror by its lockfile URL and sends
 # GitHub Packages nothing, so there is no token to check. A lockfile WRITER
@@ -278,8 +300,9 @@ That does not fail. npm reports "added N packages", exits 0, and omits every
 
 Export a token that can read GitHub Packages, then re-run. For example:
 
-  . ~/.config/secrets/gmi.env && <your command>
+  $(remedy_cmd)
 
+$(remedy_note)
 \`~/.claude/bin/doctor.sh\` reports whether the registry accepts the token you hold.
 EOF
     exit 2
@@ -363,8 +386,9 @@ Confirm what the shell holds, without printing it:
 A token that was revoked or expired, or that lacks \`read:packages\`, is answered
 401/403 here. Export a token the registry accepts, then re-run:
 
-  . ~/.config/secrets/gmi.env && <your command>
+  $(remedy_cmd)
 
+$(remedy_note)
 This verdict is cached for an hour per token.
 EOF
         exit 2

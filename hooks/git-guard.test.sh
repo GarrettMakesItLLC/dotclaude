@@ -46,6 +46,14 @@ check 2 'git commit --no-verify -m "x"'
 check 2 'git commit -nm "x"'
 check 2 'git commit -n -m "x"'
 check 2 'git push --no-verify'
+# git accepts any unambiguous prefix of a long option, and a quoted flag is still the flag (#556).
+check 2 'git push --no-verif origin x'
+check 2 'git push --no-ver origin x'
+check 2 'git push --no-v'
+check 2 'git commit --no-verif -m "x"'
+check 2 "git push 'origin' '--no-verify'"
+check 2 'git push "--no-verify" origin'
+check 2 'git -C /x push --force-with-lease --no-verify origin dev'
 check 2 'git push --force origin main'
 check 2 'git push -f origin main'
 check 2 'git push --force-with-lease origin master'
@@ -114,6 +122,8 @@ check 0 'git commit -am "fix main"'
 check 0 'git push origin feature/foo'
 check 0 'git push --force origin feature/foo'
 check 0 'git push -n origin main'
+check 0 'git push --dry-run origin feature/foo'
+check 0 'git push -o "ci.skip --notes" origin feature/foo'
 # `-f` is a force flag only inside `git push`'s own arguments. These pass a
 # FIELD to a later command in the same compound line, and the whole-line scan
 # they used to hit blocked repo bootstrap outright.
@@ -203,6 +213,9 @@ check_env() {
 check_env 0 1 'git commit --no-verify -m "x"'
 check_env 0 1 'git commit -nm "x"'
 check_env 0 1 'git push --no-verify'
+check_env 0 1 'git push --no-ver origin x'
+check_env 0 1 "git push '--no-verify' origin x"
+check_env 2 '' 'git push --no-verify origin x'
 
 # Should still BLOCK — unset (or empty) leaves the normal block in place.
 check_env 2 '' 'git commit --no-verify -m "x"'
