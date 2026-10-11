@@ -103,6 +103,25 @@ has "invalid token: names an existing source" "$out" '. ~/.config/secrets/gmi.en
 unset NODE_AUTH_TOKEN
 rm -f "$HOME/.pin/agent.env" "$HOME/.config/secrets/gmi.env"
 
+echo "npm-install-guard: sourcing a known token file on the command line (#563)"
+unset NODE_AUTH_TOKEN
+check 2 "$PINNED" "sh -c '. ~/.pin/agent.env; npm ci'"
+echo "export NODE_AUTH_TOKEN='ghp_good'" >"$HOME/.pin/agent.env"
+check 0 "$PINNED" "sh -c '. ~/.pin/agent.env; npm ci'"
+check 0 "$PINNED" ". $HOME/.pin/agent.env && npm ci"
+check 0 "$PINNED" 'source "$HOME/.pin/agent.env" && npm ci'
+echo 'export NODE_AUTH_TOKEN=ghp_bad' >"$HOME/.config/secrets/gmi.env"
+check 2 "$PINNED" ". ~/.config/secrets/gmi.env && npm ci"
+check 0 "$PINNED" ". ~/.pin/agent.env && npm ci"
+echo 'export NODE_AUTH_TOKEN=ghp_good' >"$HOME/.config/secrets/gmi.env"
+echo 'export NODE_AUTH_TOKEN=ghp_bad' >"$HOME/.pin/agent.env"
+check 0 "$PINNED" ". ~/.config/secrets/gmi.env && npm ci"
+rm -f "$HOME/.pin/agent.env" "$HOME/.config/secrets/gmi.env"
+echo 'export NODE_AUTH_TOKEN=ghp_good' >"$HOME/elsewhere.env"
+check 2 "$PINNED" ". ~/elsewhere.env && npm ci"
+rm -f "$HOME/elsewhere.env"
+check 2 "$PINNED" "npm ci"
+
 echo "npm-install-guard: empty-token spellings and multi-line commands (#451)"
 export NODE_AUTH_TOKEN=ambient-token
 check 2 "$PINNED" 'NODE_AUTH_TOKEN="" npm ci'

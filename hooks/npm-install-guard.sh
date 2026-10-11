@@ -170,16 +170,23 @@ if [ -f "$manifest_file" ]; then
   case "$state_dir" in \~/*) state_dir="$HOME/${state_dir#\~/}" ;; esac
   [ -n "$state_dir" ] && state_env="$state_dir/agent.env"
 fi
+# The last value NAME is assigned in file F (quotes stripped); empty if none.
+file_value() {
+  local name="$1" f="$2" val
+  [ -f "$f" ] || return 0
+  val="$(sed -n "s/^export ${name}=//p; s/^${name}=//p" "$f" | tail -1)"
+  val="${val%\'}"; val="${val#\'}"
+  val="${val%\"}"; val="${val#\"}"
+  printf '%s' "$val"
+}
 env_value() {
   # The name is matched against an identifier before it gets here; `eval` reads
   # a variable by name under `set -u` without tripping on an unset one.
   local name="$1" val='' f
   eval "val=\${$name:-}"
   for f in "$HOME/.config/secrets/gmi.env" ${state_env:+"$state_env"}; do
-    [ -z "$val" ] && [ -f "$f" ] || continue
-    val="$(sed -n "s/^export ${name}=//p; s/^${name}=//p" "$f" | tail -1)"
-    val="${val%\'}"; val="${val#\'}"
-    val="${val%\"}"; val="${val#\"}"
+    [ -z "$val" ] || continue
+    val="$(file_value "$name" "$f")"
   done
   printf '%s' "$val"
 }
@@ -287,6 +294,24 @@ if ((fetches)) && [ -n "$npmrc" ]; then
   else
     token="$(env_value NODE_AUTH_TOKEN)"
     source_desc='NODE_AUTH_TOKEN'
+    # `. <known token file>` / `source <known token file>` in the same command
+    # exports that file's token to the install, so `sh -c '. f; npm ci'` and
+    # `. f && npm ci` are judged by the file's value, not the outer env. Only
+    # the files this hook already reads count: sourcing an arbitrary path proves
+    # nothing about what it exports.
+    sourced="$(printf '%s' "$command_str" \
+      | grep -oE "(^|[^[:alnum:]_.-])(\.|source)[[:space:]]+[^[:space:];&|)]+" \
+      | sed -E "s/^.*(\.|source)[[:space:]]+//; s/^[\"']//; s/[\"']\$//")"
+    while IFS= read -r sf; do
+      [ -n "$sf" ] || continue
+      for f in "$HOME/.config/secrets/gmi.env" ${state_env:+"$state_env"}; do
+        for form in "$f" "~${f#"$HOME"}" "\$HOME${f#"$HOME"}" "\${HOME}${f#"$HOME"}"; do
+          [ "$sf" = "$form" ] || continue
+          fv="$(file_value NODE_AUTH_TOKEN "$f")"
+          if [ -n "$fv" ]; then token="$fv"; source_desc="${f/#$HOME/\~} sourced on this command"; fi
+        done
+      done
+    done <<<"$sourced"
   fi
 
   if [ -z "$token" ]; then
@@ -301,6 +326,10 @@ That does not fail. npm reports "added N packages", exits 0, and omits every
 Export a token that can read GitHub Packages, then re-run. For example:
 
   $(remedy_cmd)
+
+Sourcing a token file on the same command line is understood (\`. <file> && npm ci\`,
+\`sh -c '. <file>; npm ci'\`) for the files named below; any other path is not
+read, because what it exports cannot be checked.
 
 $(remedy_note)
 \`~/.claude/bin/doctor.sh\` reports whether the registry accepts the token you hold.
