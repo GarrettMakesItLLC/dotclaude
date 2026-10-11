@@ -21,6 +21,23 @@ t() {
 # A heavy lock on an existing table needs a lock_timeout BEFORE it.
 t 1 'ALTER TABLE "User" ADD COLUMN "x" TEXT;'
 t 0 "SET LOCAL lock_timeout = '5s'; ALTER TABLE \"User\" ADD COLUMN \"x\" TEXT;"
+t 0 "SET lock_timeout = '5s'; ALTER TABLE \"User\" ADD COLUMN \"x\" TEXT;"
+# --require-begin: SET LOCAL counts only inside the file's own BEGIN; ... COMMIT;.
+r() {
+  local want="$1" sql="$2" got
+  printf '%s' "$sql" | python3 "$CHECK" --require-begin - >/dev/null 2>&1
+  got=$?
+  [ "$got" = "$want" ] || { echo "FAIL (require-begin): want $want got $got for: $sql"; fail=1; }
+}
+ALT='ALTER TABLE "User" ADD COLUMN "x" TEXT;'
+r 1 "SET LOCAL lock_timeout = '5s'; $ALT"
+r 1 "BEGIN; SET LOCAL lock_timeout = '5s'; $ALT"
+r 1 "SET LOCAL lock_timeout = '5s'; $ALT COMMIT;"
+r 0 "BEGIN; SET LOCAL lock_timeout = '5s'; $ALT COMMIT;"
+r 0 "START TRANSACTION; SET LOCAL lock_timeout = '5s'; $ALT COMMIT;"
+r 0 "SET lock_timeout = '5s'; $ALT"
+r 0 'CREATE INDEX CONCURRENTLY "U_a_idx" ON "User"("a");'
+r 1 "BEGIN; CREATE INDEX CONCURRENTLY \"U_a_idx\" ON \"User\"(\"a\"); COMMIT;"
 t 1 "ALTER TABLE \"User\" ADD COLUMN \"x\" TEXT; SET LOCAL lock_timeout = '5s';"
 t 1 'DROP INDEX "User_a_idx";'
 t 1 'CREATE UNIQUE INDEX "User_e_key" ON "public"."User"("e");'
