@@ -70,6 +70,13 @@ check 2 Bash command "sed -n '1,5p' ~/.redthread/agent.env"
 check 2 Bash command "sed 's/foo/bar/' ~/.config/secrets/gmi.env"
 check 2 Bash command 'grep TOKEN ~/.redthread/agent.env'
 check 2 Bash command 'grep -A2 TOKEN ~/.config/secrets/gmi.env'
+check 2 Bash command "sed -e 's/foo/bar/' ~/.config/secrets/gmi.env"
+check 2 Bash command "awk -F= '{print \$2}' ~/.redthread/agent.env"
+
+# --- Bash: a secrets path inside sed/awk PROGRAM text is code, not a read (#566). ---
+check 0 Bash command "sed -i 's#a#~/.config/secrets/gmi.env#' bin/doctor.sh"
+check 0 Bash command "sed -e 's#x#~/.redthread/agent.env#' -i bin/x.sh"
+check 0 Bash command "awk '{print \"~/.config/secrets/gmi.env\"}' bin/x.sh"
 check 2 Bash command 'rg TOKEN ~/.redthread/agent.env'
 
 # --- Bash: readers piped or chained still get caught at the source segment. ---
