@@ -94,6 +94,23 @@ grep -q 'NODE_AUTH_TOKEN is rejected.*HTTP 403' <<<"$OUT" && ok "a rejected toke
 ! grep -q 'tok_bad_value' <<<"$OUT" && ok "the token is never printed" || bad "token leaked: $OUT"
 OUT="$(cd "$R" && env -u NODE_AUTH_TOKEN "$DOC" 2>&1)"
 grep -q 'NODE_AUTH_TOKEN is unset' <<<"$OUT" && ok "an empty token warns" || bad "unset: $OUT"
+# #563: with the shell holding nothing, a token file is a source: gmi.env, the
+# repo's own <stateDir>/agent.env, both, or neither.
+mkdir -p "$HOME/.config/secrets" "$HOME/.demo"
+noenv() { OUT="$(cd "$R" && env -u NODE_AUTH_TOKEN "$DOC" 2>&1)"; }
+echo 'export NODE_AUTH_TOKEN=tok_good' >"$HOME/.config/secrets/gmi.env"
+noenv
+grep -q 'NODE_AUTH_TOKEN from ~/.config/secrets/gmi.env reads' <<<"$OUT" && ok "gmi.env only: its token is probed" || bad "gmi only: $OUT"
+rm "$HOME/.config/secrets/gmi.env"
+echo "export NODE_AUTH_TOKEN='tok_good'" >"$HOME/.demo/agent.env"
+noenv
+grep -q 'NODE_AUTH_TOKEN from ~/.demo/agent.env reads' <<<"$OUT" && ok "agent.env only: its token is probed" || bad "agent only: $OUT"
+echo 'export NODE_AUTH_TOKEN=tok_good' >"$HOME/.config/secrets/gmi.env"
+noenv
+grep -q 'NODE_AUTH_TOKEN from ~/.config/secrets/gmi.env reads' <<<"$OUT" && ! grep -q tok_good <<<"$OUT" && ok "both: gmi.env is read first, and the token is not printed" || bad "both: $OUT"
+rm "$HOME/.config/secrets/gmi.env" "$HOME/.demo/agent.env"
+noenv
+grep -q 'NODE_AUTH_TOKEN is unset and no token file' <<<"$OUT" && ok "neither: warns" || bad "neither: $OUT"
 OUT="$(cd "$R" && NODE_AUTH_TOKEN=tok_good DOCTOR_PACKAGES_PROBE_URL=http://127.0.0.1:1/x "$DOC" 2>&1)"
 grep -q 'registry check was inconclusive' <<<"$OUT" && ok "an unreachable registry is inconclusive, not a rejection" || bad "unreachable: $OUT"
 
