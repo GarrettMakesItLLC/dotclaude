@@ -36,7 +36,8 @@ Exit 0 clean, 1 on a violation (each printed to stderr), 2 on bad usage.
 
 Kept in step with GarrettMakesItLLC/ci's `actions/check-migration-locks/
 migration-lock-check.py`, which CI runs: a migration this write-time hook
-(`hooks/migration-guard.sh`) accepts must not fail there. Change both together.
+(`hooks/migration-guard.sh`) accepts must not fail there. Change both together;
+`bin/migration-lock-check-drift.test.sh` fails CI when the code diverges.
 """
 
 import os
