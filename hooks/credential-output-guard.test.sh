@@ -171,6 +171,49 @@ must_pass "certificate body" "$(printf -- '-----BEGIN CERTIFICATE-----\nMIIC+TCC
 must_pass "public key body" "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB$(rep F 40)"
 must_pass "long hash" "sha256 $(rep 0 64) package.tgz"
 
+# Value shape, not name (#547, #548, #552, #554, #555): source constants that
+# NAME a credential but hold a path, a public endpoint or an identifier.
+must_pass "TOKEN_PATH url path (#547)" "export const ADVENTUREOS_TOKEN_PATH = '/oauth/token';"
+must_pass "TOKEN_PATH in a diff (#547)" "+export const ADVENTUREOS_TOKEN_PATH = '/api/v1/partner/oauth/token'"
+must_pass "FCM_TOKEN_URL public endpoint (#548)" "const FCM_TOKEN_URL = 'https://oauth2.googleapis.com/token';"
+must_pass "token_uri in a service account shape (#548)" "const TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';"
+must_pass "tokens option with a short path (#552)" "      tokens: 'design/tokens',"
+must_pass "tokens option, relative module (#552)" "tokens: './tokens',"
+must_pass "API_KEY_MINT_PERMISSION (#554)" "export const API_KEY_MINT_PERMISSION = 'admin:manage';"
+must_pass "ACCESS_TOKEN_AUDIENCE (#555)" "const ACCESS_TOKEN_AUDIENCE = 'authenticated';"
+must_pass "FCM_TOKEN test constant (#555)" "const FCM_TOKEN = 'fcm-token-1';"
+must_pass "descriptor name, non-word value" "const TOKEN_PATH = 'Ab3dE9fGh2Jk8LmN0pQr'"
+must_pass "pooler fixture, short lowercase password (#555)" "postgres://postgres.short:short@x.pooler.supabase.com:5432/postgres"
+# ...and the same shapes with a secret in them still redact.
+must_redact "token with a webhook-shaped URL" "SLACK_TOKEN_URL=https://hooks.slack.com/services/T0123ABCD/B0456EFGH/${FAKE_VAL}" "$FAKE_VAL" "SLACK_TOKEN_URL"
+must_redact "URL value with a secret query" "const TOKEN_URL = 'https://api.partner.io/cb?token=${FAKE_VAL}'" "$FAKE_VAL" "TOKEN_URL"
+must_redact "URL value with userinfo" "ACCESS_TOKEN_URL=https://user:${FAKE_VAL}@host.org/x" "$FAKE_VAL" "ACCESS_TOKEN_URL"
+must_redact "path-looking base64 secret" "const API_TOKEN = '${FAKE_VAL}/${FAKE_VAL}'" "$FAKE_VAL" "API_TOKEN"
+must_redact "tokens key, high-entropy value" "tokens: '$FAKE_VAL'," "$FAKE_VAL" "tokens"
+must_redact "descriptor name holding a live value" "export const TOKEN_PATH = '$FAKE_LIVE'" "$FAKE_LIVE" "TOKEN_PATH"
+must_redact "mixed-case password on the pooler" "postgres://postgres.abc:${FAKE_PW}@x.pooler.supabase.com:5432/postgres" "$FAKE_PW" "postgres password"
+
+# Supabase Management API config/auth (#557): any *_secret / *_pass, any quoting.
+CAPTCHA="0x4AAAAAAA$(rep Z 30)"
+must_redact "security_captcha_secret JSON" "{\"security_captcha_secret\":\"$CAPTCHA\",\"site_url\":\"https://x.org\"}" "$CAPTCHA" "security_captcha_secret"
+must_redact "security_captcha_secret escaped JSON" '{\"security_captcha_secret\":\"'"$CAPTCHA"'\",\"smtp_port\":\"587\"}' "$CAPTCHA" "security_captcha_secret"
+must_redact "security_captcha_secret YAML" "$(printf 'site_url: https://x.org\nsecurity_captcha_secret: %s' "$CAPTCHA")" "$CAPTCHA" "security_captcha_secret"
+must_redact "short smtp_pass" '{"smtp_pass":"p4ss!9"}' 'p4ss!9' "smtp_pass"
+must_redact "hook secrets" '{"hook_send_sms_secrets":"v1,whsec_'"$(rep h 20)"'"}' "whsec_$(rep h 20)" "hook_send_sms_secrets"
+must_redact "external client secret" "{\"external_github_secret\":\"$(rep K 3)$(rep m 20)\"}" "$(rep m 20)" "external_github_secret"
+must_pass "null secret" '{"security_captcha_secret":null,"smtp_pass":""}'
+must_pass "escaped placeholder" '{\"smtp_pass\":\"<redacted>\"}'
+must_pass "yaml, no value" "security_captcha_secret:"
+
+# A PEM body fragment printed by a name-extractor (#550): the guard sees no
+# header and no DER prefix, only a run that is part of a stored private key.
+FAKE_PEM_PRIVATE_KEY="$(printf -- '-----BEGIN PRIVATE KEY-----\nZQXWVUTSRQPONMLKJIHGFEDCBA9876\nMNBVCXZLKJHGFDSAPOIUYTREWQ0123\n-----END PRIVATE KEY-----')"
+export FAKE_PEM_PRIVATE_KEY
+must_redact "uppercase PEM fragment" "$(printf 'NAMES\nZQXWVUTSRQPONM\nMNBVCXZLKJHG')" "ZQXWVUTSRQPONM" "a fragment of a stored secret"
+must_pass "short run is not a fragment" "ZQXWVUT"
+must_pass "unrelated uppercase run" "ABCDEFGHIJKLMNOP"
+unset FAKE_PEM_PRIVATE_KEY
+
 # Serena's execute_shell_command (#519): the result is an MCP payload, replaced
 # through updatedMCPToolOutput. Serena's text is the JSON of
 # {stdout, return_code, cwd, stderr}; the harness hands it over either as that

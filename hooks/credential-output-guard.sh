@@ -49,6 +49,20 @@
 # fixtures hold those, and a false leak report sends the owner to rotate a
 # credential for nothing.
 #
+# The judgement is on the VALUE's shape, not only the name's. A value that is a
+# URL path (`/oauth/token`, `design/tokens`), a URL with no userinfo, query or
+# secret-looking path segment (a public token endpoint), or a lowercase
+# identifier (`admin:manage`, `authenticated`, `fcm-token-1`) is not a
+# credential unless it equals a live one; a name that says what a credential
+# DESCRIBES (…_PATH, …_AUDIENCE, …_PERMISSION, …_SCOPE) is likewise exempt for
+# a non-live value. Names that cannot hold anything but a secret (…SECRET,
+# …PASSWORD, …PASS, PRIVATE_KEY) are redacted at 6+ characters in any quoting
+# (plain, escaped-in-a-string JSON, or an unquoted `name: value` line).
+#
+# Any 10+ character base64-alphabet run in the output that is a substring of a
+# live credential's value or of one of its lines (a PEM body fragment a
+# name-extractor emitted) is redacted too.
+#
 # Fail-open: anything it cannot parse passes through unchanged.
 set -uo pipefail
 
@@ -107,6 +121,8 @@ KV_LINE = re.compile(r"(?m)^([ \t]*(?:export[ \t]+)?)([A-Za-z_][A-Za-z0-9_]*)=([
 # closing quote may be missing: `curl … | cut -c1-200` cuts a JSON response
 # mid-value, and the secret's prefix is still printed (#479).
 KV_PAIR = re.compile(r"""(?<![A-Za-z0-9_])(["']?)([A-Za-z_][A-Za-z0-9_]*)\1\s*[:=]\s*(["'])((?:(?!\3)[^\\\n]|\\.)*)(?:\3|(?=\n)|\Z)""")
+KV_ESCAPED = re.compile(r'''\\"([A-Za-z_][A-Za-z0-9_]*)\\"\s*:\s*\\"((?:(?!\\")[^\\\n])*)''')
+KV_YAML = re.compile(r"(?m)^([ \t]*(?:-[ \t]+)?)([A-Za-z_][A-Za-z0-9_]*):[ \t]+([^\s\"'<][^\n]*?)[ \t]*$")
 PLACEHOLDER = re.compile(r"redacted|\*\*\*|xxxx|changeme|change-me|your[_-]|placeholder|example|\.\.\.|…", re.I)
 
 
@@ -155,10 +171,65 @@ def live_values():
 LIVE = live_values()
 
 
+# A word: lowercase letters, at most three trailing digits (`fcm`, `token1`).
+_WORD = r"[a-z]+\d{0,3}"
+KNOWN_AUTH_HOSTS = {
+    "oauth2.googleapis.com", "accounts.google.com", "www.googleapis.com",
+    "login.microsoftonline.com", "appleid.apple.com", "fcm.googleapis.com",
+    "api.sandbox.push.apple.com", "api.push.apple.com",
+}
+
+
 def fixture_shaped(v):
     if re.fullmatch(r"(?:gh[pousr]_|github_pat_|sbp_|sk-ant-|sk_live_|rk_live_|AIza)[A-Za-z0-9_\-]{0,19}", v):
         return True
-    return bool(re.fullmatch(r"[a-z]+(?:[-_][a-z]+)+", v))
+    if len(v) > 40:
+        return False
+    # Lowercase words joined by `-`/`_`/`:`/`.` (`inline-expansion`, `admin:manage`,
+    # `fcm-token-1`) or one lowercase word with no digit (`authenticated`): an
+    # identifier, not a generated secret. A live credential is matched before this.
+    if re.fullmatch(_WORD + r"(?:[-_:.](?:" + _WORD + r"|\d{1,3}))+", v):
+        return True
+    return bool(re.fullmatch(r"[a-z]+", v))
+
+
+def path_shaped(v):
+    """A URL path or module specifier (`/oauth/token`, `./tokens`, `design/tokens`,
+    `@scope/pkg`): slash-separated segments of lowercase words. Mixed-case
+    segments count only when short and digit-free, so a base64 secret that
+    happens to hold a `/` does not."""
+    if "/" not in v or len(v) > 64 or re.search(r"[+=\s]", v):
+        return False
+    body = re.sub(r"^(?:\.{1,2}/|/|@)", "", v)
+    segs = body.split("/")
+    if not all(segs):
+        return False
+    lower = all(re.fullmatch(r"[a-z0-9][a-z0-9._~-]{0,23}", g) for g in segs)
+    mixed = len(v) <= 24 and all(re.fullmatch(r"[A-Za-z][A-Za-z._-]{0,23}", g) for g in segs)
+    return bool(lower or mixed)
+
+
+def public_url(v):
+    """An http(s) URL that carries no secret: no userinfo, query or fragment, and
+    either a known public auth host or a path of plain lowercase words. A webhook
+    URL (its path holds an id and a token) is not."""
+    m = re.fullmatch(r"https?://([A-Za-z0-9.-]+)(?::\d+)?((?:/[^\s?#@]*)?)", v)
+    if not m:
+        return False
+    if m.group(1).lower() in KNOWN_AUTH_HOSTS:
+        return True
+    segs = [g for g in m.group(2).split("/") if g]
+    return all(re.fullmatch(r"[a-z][a-z0-9._~-]{0,23}|v?\d{1,3}(?:\.\d+)?", g) for g in segs)
+
+
+# A name that says what a credential is FOR or HOW it is carried, not the credential.
+DESCRIPTOR_NAME = re.compile(
+    r"(?:[_-](?:path|endpoint|audience|permissions?|scopes?|issuer|ttl|header|prefix|algorithm)"
+    r"|(?:Path|Endpoint|Audience|Permissions?|Scopes?|Issuer|Header|Prefix|Algorithm))$",
+    re.I,
+)
+# Names that can hold nothing but a secret: the value is redacted at a lower floor.
+HARD_NAME = re.compile(r"(secret|passw(?:or)?d|passphrase|(?:^|_)pass$|private_?key)", re.I)
 
 
 def fixture_host(host):
@@ -169,24 +240,48 @@ def fixture_host(host):
     return bool(re.search(r"(?:^|\.)example\.(?:com|net|org)$|\.(?:test|example|invalid)$", h))
 
 
-def real_value(v):
+def real_value(v, name=""):
     v = unquote(v)
     if v in LIVE:
         return True
-    if fixture_shaped(v):
+    if name and DESCRIPTOR_NAME.search(name):
+        return False
+    if fixture_shaped(v) or path_shaped(v) or public_url(v):
         return False
     # A short lowercase-hex string is a digest's fingerprint (the Supabase
     # Management API prints `external_apple_secret` as a hash prefix), not a
     # secret: every credential shape this guard protects is longer (#479).
     if re.fullmatch(r"[0-9a-f]{8,16}", v):
         return False
-    if len(v) < 8 or re.search(r"\s", v) or re.search(r"[()\[\]{}$`]", v):
+    floor = 6 if name and HARD_NAME.search(name) else 8
+    if len(v) < floor or re.search(r"\s", v) or re.search(r"[()\[\]{}$`]", v):
         return False
     # A bare UPPER_SNAKE identifier is a variable NAME (`"RT_DATABASE_URL":
     # "DATABASE_URL"` in a name-mapping file), never a credential value.
     if re.fullmatch(r"[A-Z_][A-Z0-9_]*", v):
         return False
     return not placeholder(v)
+
+
+# Lines of every live value of 10+ characters: a name-extractor over a multi-line
+# PEM prints a fragment of one line, which is no PEM block and no known prefix.
+LIVE_LINES = {ln for v in LIVE for ln in v.splitlines() if len(ln) >= 10}
+FRAGMENT = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{10,}={0,2}")
+
+
+def fragments(text, found):
+    if not LIVE_LINES:
+        return text
+
+    def frag(m):
+        s = m.group(0).rstrip("=")
+        if s.islower() or s.isdigit():  # a word or a number, not key material
+            return m.group(0)
+        if any(s in ln for ln in LIVE_LINES):
+            found.append("a fragment of a stored secret")
+            return "<redacted>"
+        return m.group(0)
+    return FRAGMENT.sub(frag, text)
 
 
 def pem(text, found):
@@ -218,11 +313,13 @@ def pem(text, found):
 
 def scan(text, found):
     text = pem(text, found)
+    text = fragments(text, found)
 
     def url(m):
         if placeholder(m.group(3)):
             return m.group(0)
-        if fixture_host(m.group(4)) and unquote(m.group(3)) not in LIVE:
+        pw = unquote(m.group(3))
+        if pw not in LIVE and (fixture_host(m.group(4)) or re.fullmatch(r"[a-z]{1,12}", pw)):
             return m.group(0)
         found.append("a %s password for %s@%s" % (m.group(1).rstrip(":/"), m.group(2), m.group(4) or "?"))
         return "%s%s:<redacted>@%s" % (m.group(1), m.group(2), m.group(4))
@@ -236,7 +333,7 @@ def scan(text, found):
 
     def kv(m):
         lead, name, val = m.group(1), m.group(2), m.group(3)
-        if not SECRET_NAME.search(name) or not real_value(val):
+        if not SECRET_NAME.search(name) or not real_value(val, name):
             return m.group(0)
         found.append("the value of %s" % name)
         return "%s%s=<redacted>" % (lead, name)
@@ -244,12 +341,32 @@ def scan(text, found):
 
     def kp(m):
         name, val = m.group(2), m.group(4)
-        if not SECRET_NAME.search(name) or not real_value(val):
+        if not SECRET_NAME.search(name) or not real_value(val, name):
             return m.group(0)
         found.append("the value of %s" % name)
         whole, at = m.group(0), m.start(0)
         return whole[:m.start(4) - at] + "<redacted>" + whole[m.end(4) - at:]
     text = KV_PAIR.sub(kp, text)
+
+    # JSON escaped inside a string (`{\\"name\\":\\"value\\"}`), as a log line or a
+    # nested response prints it.
+    def ke(m):
+        name, val = m.group(1), m.group(2)
+        if not HARD_NAME.search(name) or not real_value(val, name):
+            return m.group(0)
+        found.append("the value of %s" % name)
+        return m.group(0).replace(val, "<redacted>")
+    text = KV_ESCAPED.sub(ke, text)
+
+    # An unquoted `name: value` line (YAML, `jq -r 'to_entries[]'`) under a name
+    # that can hold nothing but a secret.
+    def ky(m):
+        name, val = m.group(2), m.group(3)
+        if not HARD_NAME.search(name) or not real_value(val, name):
+            return m.group(0)
+        found.append("the value of %s" % name)
+        return "%s%s: <redacted>" % (m.group(1), name)
+    text = KV_YAML.sub(ky, text)
     return text
 
 
