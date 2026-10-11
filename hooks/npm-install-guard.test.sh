@@ -80,7 +80,7 @@ rm "$HOME/.pin/agent.env"
 echo "npm-install-guard: the remedy names a token source that exists on this machine (#553)"
 refusal() {
   python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","cwd":sys.argv[2],"tool_input":{"command":sys.argv[1]}}))' "$1" "$2" \
-    | (cd "$2" && "$GUARD") 2>&1 >/dev/null
+    | { (cd "$2" && "$GUARD") >/dev/null; } 2>&1
 }
 has() { # <label> <haystack> <needle> <want: yes|no>
   if printf '%s' "$2" | grep -qF -- "$3"; then got=yes; else got=no; fi
