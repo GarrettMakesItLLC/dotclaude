@@ -300,6 +300,34 @@ def grep_non_path_indexes(toks, cmd_idx):
     return skip
 
 
+def program_text_indexes(toks, cmd_idx):
+    # sed/awk program text is code, not a file read: a path that appears
+    # inside the script (written into a source file, say) prints nothing.
+    # The program is each `-e` argument, or else the first operand.
+    idx, saw_e, j = set(), False, cmd_idx + 1
+    while j < len(toks):
+        t = toks[j]
+        if t in ("-e", "--expression"):
+            saw_e = True
+            if j + 1 < len(toks):
+                idx.add(j + 1)
+            j += 2
+            continue
+        if t.startswith("--expression="):
+            saw_e = True
+        elif t in ("-f", "--file", "-v"):
+            j += 2
+            continue
+        elif not t.startswith("-") and not saw_e:
+            # A bare path in program position is still treated as a read:
+            # refusing a malformed command costs nothing, missing one leaks.
+            if not t.startswith(("~", "/", "$HOME", "${HOME}", "./")):
+                idx.add(j)
+            break
+        j += 1
+    return idx
+
+
 hit = None
 for seg in segments(cmd):
     seg = seg.strip()
@@ -328,6 +356,8 @@ for seg in segments(cmd):
     read_refs = []
     write_only = cmd_word == "tee"
     non_paths = grep_non_path_indexes(toks, i) if cmd_word in GREP_LIKE else set()
+    if cmd_word in SED_LIKE or cmd_word in AWK_LIKE:
+        non_paths = program_text_indexes(toks, i)
     for j, t in enumerate(toks):
         if j in non_paths or not is_secret_path(t):
             continue
