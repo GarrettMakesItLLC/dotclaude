@@ -207,7 +207,8 @@ must_pass "yaml, no value" "security_captcha_secret:"
 
 # A PEM body fragment printed by a name-extractor (#550): the guard sees no
 # header and no DER prefix, only a run that is part of a stored private key.
-export FAKE_PEM_PRIVATE_KEY="$(printf -- '-----BEGIN PRIVATE KEY-----\nZQXWVUTSRQPONMLKJIHGFEDCBA9876\nMNBVCXZLKJHGFDSAPOIUYTREWQ0123\n-----END PRIVATE KEY-----')"
+FAKE_PEM_PRIVATE_KEY="$(printf -- '-----BEGIN PRIVATE KEY-----\nZQXWVUTSRQPONMLKJIHGFEDCBA9876\nMNBVCXZLKJHGFDSAPOIUYTREWQ0123\n-----END PRIVATE KEY-----')"
+export FAKE_PEM_PRIVATE_KEY
 must_redact "uppercase PEM fragment" "$(printf 'NAMES\nZQXWVUTSRQPONM\nMNBVCXZLKJHG')" "ZQXWVUTSRQPONM" "a fragment of a stored secret"
 must_pass "short run is not a fragment" "ZQXWVUT"
 must_pass "unrelated uppercase run" "ABCDEFGHIJKLMNOP"
