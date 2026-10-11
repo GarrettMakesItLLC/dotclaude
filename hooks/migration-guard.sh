@@ -20,7 +20,8 @@
 #      rules 2 and 4 stay jointly satisfiable.
 #
 # A new migration.sql written whole must also follow rules/prisma.md's lock
-# rules: `SET LOCAL lock_timeout` before a heavy lock on an existing table,
+# rules: `SET LOCAL lock_timeout` inside the migration's own `BEGIN; … COMMIT;`
+# before a heavy lock on an existing table,
 # `CREATE INDEX CONCURRENTLY` alone in its migration, a DEFAULT on a NOT NULL
 # column added to an existing table, no `SET NOT NULL` on one, and no enum value
 # used in the migration that adds it (bin/migration-lock-check.py).
@@ -72,7 +73,7 @@ if d.get("tool_name") == "Write":
     sys.stdout.write(d.get("tool_input", {}).get("content") or "")
 ' 2>/dev/null)" || return 0
   [ -n "$content" ] || return 0
-  findings="$(printf '%s' "$content" | python3 "$lock_checker" - 2>&1)"
+  findings="$(printf '%s' "$content" | python3 "$lock_checker" --require-begin - 2>&1)"
   rc=$?
   [ "$rc" = 1 ] || return 0
   echo "⛔ dotclaude migration-guard: this migration breaks a lock rule." >&2

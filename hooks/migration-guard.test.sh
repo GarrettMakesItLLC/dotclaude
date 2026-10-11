@@ -56,18 +56,22 @@ check_sql() {
 }
 new="$M/${past}_lock_rules/migration.sql"
 check_sql 2 "$new" 'ALTER TABLE "User" ADD COLUMN "x" TEXT;'
-check_sql 0 "$new" "SET LOCAL lock_timeout = '5s';
+check_sql 2 "$new" "SET LOCAL lock_timeout = '5s';
 ALTER TABLE \"User\" ADD COLUMN \"x\" TEXT;"
+check_sql 0 "$new" "BEGIN;
+SET LOCAL lock_timeout = '5s';
+ALTER TABLE \"User\" ADD COLUMN \"x\" TEXT;
+COMMIT;"
 check_sql 0 "$new" 'CREATE TABLE "W" ("id" TEXT); CREATE INDEX "W_a_idx" ON "W"("a");'
 check_sql 0 "$new" 'CREATE INDEX CONCURRENTLY "U_a_idx" ON "User"("a");'
 check_sql 2 "$new" "SET LOCAL lock_timeout = '5s'; CREATE INDEX CONCURRENTLY \"U_a_idx\" ON \"User\"(\"a\");"
 # NOT NULL rules: ADD COLUMN needs a DEFAULT, SET NOT NULL on an existing table is refused.
 check_sql 2 "$new" "SET LOCAL lock_timeout = '5s'; ALTER TABLE \"User\" ADD COLUMN \"x\" TEXT NOT NULL;"
-check_sql 0 "$new" "SET LOCAL lock_timeout = '5s'; ALTER TABLE \"User\" ADD COLUMN \"x\" TEXT NOT NULL DEFAULT 'a';"
+check_sql 0 "$new" "BEGIN; SET LOCAL lock_timeout = '5s'; ALTER TABLE \"User\" ADD COLUMN \"x\" TEXT NOT NULL DEFAULT 'a'; COMMIT;"
 check_sql 2 "$new" "SET LOCAL lock_timeout = '5s'; ALTER TABLE \"User\" ALTER COLUMN \"x\" SET NOT NULL;"
 check_sql 2 "$new" "ALTER TYPE \"Role\" ADD VALUE 'ADMIN'; UPDATE \"User\" SET \"role\" = 'ADMIN';"
 # A plain foreign key is Prisma's own output; the hook does not apply CI's opt-in strict rule.
-check_sql 0 "$new" "SET LOCAL lock_timeout = '5s'; ALTER TABLE \"Post\" ADD CONSTRAINT \"f\" FOREIGN KEY (\"u\") REFERENCES \"User\"(\"id\");"
+check_sql 0 "$new" "BEGIN; SET LOCAL lock_timeout = '5s'; ALTER TABLE \"Post\" ADD CONSTRAINT \"f\" FOREIGN KEY (\"u\") REFERENCES \"User\"(\"id\"); COMMIT;"
 # A new .sql inside a directory that already exists is judged the same way.
 check_sql 2 "$M/20260102093722_branch_only/extra.sql" 'DROP INDEX "User_a_idx";'
 # An Edit carries a fragment, not the file, so it is not judged.
