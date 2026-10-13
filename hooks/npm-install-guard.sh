@@ -54,6 +54,12 @@ set -uo pipefail
 command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude npm-install-guard: DISABLED — python3 is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
 command -v perl >/dev/null 2>&1 || { echo "⚠️  dotclaude npm-install-guard: DISABLED — perl is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
 input="$(cat)"
+# Prefilter (#576): exit before any python start when the raw payload cannot
+# hold what this hook acts on. A superset test, never a verdict: a payload with a
+# \u escape bypasses it, and DOTCLAUDE_NO_PREFILTER=1 turns it off (hooks/prefilter.test.sh).
+if [ -z "${DOTCLAUDE_NO_PREFILTER:-}" ]; then
+  case "$input" in *npm*|*'\u'*) ;; *) exit 0 ;; esac
+fi
 
 # The command and the cwd are extracted by separate calls, each writing its
 # field whole. A multi-line command printed ahead of the cwd would put its

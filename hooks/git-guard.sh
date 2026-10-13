@@ -303,7 +303,20 @@ fi
 # without `-f` or with `--prefix`, `read-tree` without `-u`, and `clean -n`/
 # `--dry-run`/`-i`. NARROW ESCAPE: GIT_GUARD_ALLOW_DISCARD=1, in the
 # environment or as a prefix on the command, lifts ONLY this block, loudly.
-discard_report="$(GG_CMD="$cmd" GG_INPUT="$input" python3 - <<'PY' 2>/dev/null
+# Prefilter (#576): the discard analysis below only ever reports a literal `git`
+# word followed by one of its verbs, so a command without both skips the python
+# start. Quotes and backslashes are removed first because the tokenizer joins
+# `g"i"t` / `re\set` into the word they spell. DOTCLAUDE_NO_PREFILTER=1 turns it off.
+discard_possible=1
+if [ -z "${DOTCLAUDE_NO_PREFILTER:-}" ]; then
+  _c=${cmd//[\"\'\\]/}
+  case "$_c" in
+    *git*) case "$_c" in *checkout*|*restore*|*switch*|*reset*|*read-tree*|*clean*) ;; *) discard_possible=0 ;; esac ;;
+    *) discard_possible=0 ;;
+  esac
+fi
+discard_report=""
+[ "$discard_possible" = 1 ] && discard_report="$(GG_CMD="$cmd" GG_INPUT="$input" python3 - <<'PY' 2>/dev/null
 import json, os, re, shlex, subprocess
 
 raw = os.environ.get("GG_CMD", "")
@@ -708,7 +721,15 @@ fi
 #
 # Extracted from $nq (quotes stripped, content kept): branch names and paths
 # are real arguments here, not message prose to blank out.
-if command -v python3 >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+wt_possible=1
+if [ -z "${DOTCLAUDE_NO_PREFILTER:-}" ]; then
+  # The rule only matches a literal `git` followed by one of these verbs (#576).
+  case "$nq" in
+    *git*) case "$nq" in *checkout*|*switch*|*branch*|*update-ref*) ;; *) wt_possible=0 ;; esac ;;
+    *) wt_possible=0 ;;
+  esac
+fi
+if [ "$wt_possible" = 1 ] && command -v python3 >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
   wt_hit="$(printf '%s' "$nq" | python3 -c '
 import os, re, subprocess, sys
 

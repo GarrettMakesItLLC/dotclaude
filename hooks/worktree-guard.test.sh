@@ -46,7 +46,7 @@ sed 's/^import json, os, re, shlex, sys$/&\nraise RuntimeError("deliberate break
 chmod +x "$BROKEN"
 broken_got=$(python3 -c '
 import json,sys
-print(json.dumps({"tool_name":"Bash","tool_input":{"command":"echo hello"}}))
+print(json.dumps({"tool_name":"Bash","tool_input":{"command":"echo hello > /dev/null; echo node_modules"}}))
 ' | "$BROKEN" >/dev/null 2>&1; echo $?)
 if [ "$broken_got" != "2" ]; then
   echo "FAIL: want 2, got $broken_got for a BROKEN extractor (must fail closed, #319)"

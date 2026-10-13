@@ -14,9 +14,9 @@
 #   …__search_for_pattern                               -> Grep  {path, glob}
 #   Grep                                                -> Grep  (passed through)
 #   …__create_text_file                                 -> Write {file_path, content}
-#   …__replace_content / replace_in_files / delete_lines / replace_lines /
-#      insert_at_line / replace_symbol_body / insert_after_symbol /
-#      insert_before_symbol / rename_symbol / safe_delete_symbol
+#   …__replace_content / replace_in_files / replace_symbol_body /
+#      insert_after_symbol / insert_before_symbol / rename_symbol /
+#      safe_delete_symbol
 #                                                       -> Edit  {file_path}
 #
 # Serena resolves `relative_path` against its active project, which the hook
@@ -59,7 +59,7 @@ def at(p):
     p = os.path.expanduser(p or "")
     return os.path.normpath(os.path.join(cwd, p)) if p else cwd
 
-EDITS = {"replace_content", "replace_in_files", "delete_lines", "replace_lines", "insert_at_line",
+EDITS = {"replace_content", "replace_in_files",
          "replace_symbol_body", "insert_after_symbol", "insert_before_symbol", "rename_symbol",
          "safe_delete_symbol"}
 out = None
