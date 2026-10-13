@@ -60,6 +60,7 @@ SHARED_SKILLS=(
   "task-observer"               # meta-skill: watches sessions for skill-improvement opportunities, logs them
   "operating-a-fleet"           # multi-machine roles, the integrator lease, batching, degraded-mode CI replica
   "agent-credentials"           # what an agent shell holds in a product repo, how Railway/Vercel values are fetched
+  "dispatching-agents"          # subagent/fork/team briefs, wait levels, worktree isolation, shared-box symptoms
 )
 # Third-party skills that ship as a plain repo with no plugin marketplace, so
 # they can't go in settings.json's enabledPlugins. `<dir-name>=<owner/repo>`.

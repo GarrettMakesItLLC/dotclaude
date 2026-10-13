@@ -124,7 +124,7 @@ cd .worktrees/bootstrap
 
 | File | Notes |
 | --- | --- |
-| `CLAUDE.md` | Autonomy line first. Describe what the repo **is**, not what it will be — mark planned layout as not-yet-present. |
+| `CLAUDE.md` | Describe what the repo **is**, not what it will be — mark planned layout as not-yet-present. |
 | `.github/workflows/ci.yml` | The `CI Success` job name is what the rulesets require. Do not rename it. PR-title linting is the `lint-pr-title` job inside this file, not a standalone workflow — it joins `ci-success`'s `needs:` rather than being independently required. |
 | `.github/workflows/issue-status-clear.yml` | Strips `status:*` on close. |
 | `package.json`, prettier, markdownlint, commitlint, husky | See the traps below. |

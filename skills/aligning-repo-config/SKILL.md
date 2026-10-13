@@ -68,7 +68,7 @@ For each line in the repo file, ask *what is the cheapest thing that can enforce
 
 What's left — and what the repo file must actually contain:
 
-- **`Autonomy:`** — global default is now `autonomous-merge` for every repo; only state it here if this repo opts down to `gated`.
+- **No `Autonomy:` line.** Every repo merges autonomously with no opt-out (global `CLAUDE.md` § Autonomy); delete any `gated` opt-down or human merge gate.
 - **Architecture in a diagram**, plus which package depends on which.
 - **Commands that work**, including how to run a *single* test.
 - **Stack reality and deliberate non-choices** — the assumptions a competent agent would otherwise make and get wrong ("no Redis", "Vitest not Jest", "no i18n").

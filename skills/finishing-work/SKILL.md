@@ -10,7 +10,7 @@ Layers on `superpowers:finishing-a-development-branch` and `superpowers:verifica
 
 ## 1. Definition of done
 
-Verification itself is covered by CLAUDE.md and `verify-reminder.sh`. What this checklist adds is everything *besides* green checks — run it against the actual diff, don't assume:
+The verification rules are in CLAUDE.md (*Verify before a handoff*), enforced in part by `verify-reminder.sh`; §2–§4 below hold their detail. What this checklist adds is everything *besides* green checks — run it against the actual diff, don't assume:
 
 - [ ] Change verified live (app runs, UI exercised) where that's feasible.
 - [ ] No debug logging, commented-out code, dead code, or scratch files in the diff.
@@ -49,18 +49,39 @@ The mechanically-checkable subset of `running-an-audit`'s realms, run against th
 - [ ] Any new outbound call: explicit timeout, and a stated behaviour when the dependency is down (`running-an-audit/references/resilience-dependencies.md`).
 - [ ] Any new client-side role or permission check: the server-side counterpart exists (`running-an-audit/references/security-access-control.md`).
 
-## 2. Account for every finding
+## 2. Reading a check's result
+
+- **Never pipe a verification command.** Run it bare and read its exit code; pipe only after the status is captured (`cmd; rc=$?` or `set -o pipefail`). A killed process reports the pipe's exit code, not its own: `npx eslint <files> | tail -20` reads clean whether lint passed or the OOM-killer took eslint out mid-run, and the second is common under swarm load. When a hook fails with a message that doesn't match the diff (`Task failed to spawn` from lint-staged, for instance), suspect the environment first: `dmesg | grep -i "killed process"` settles it (see #186).
+- **A synthesized completion is not proof.** A `Monitor` event, a background task's `tasks/<id>.output` file and a `run_in_background` Bash task's own notification have each reported `completed` / `exit code 0` while the output file was still empty and the process unfinished (see #217), or while the command had exited non-zero — a `git commit` whose pre-commit hook failed, a failing `npm test` (see #351). Redirect the command to a self-named log (`cmd > scratchpad/build.log 2>&1; echo "EXIT=$?" >> scratchpad/build.log`) and read that file and the real artifact (`git log`, the test summary).
+
+## 3. Arming auto-merge
+
+- **Arm once the branch is final, not merely when the PR is open.** Arming means "merge the instant checks pass, whatever the branch says then", so every push after arming races a merge already authorised. For a dispatched agent that has finished, open and final are the same moment. They come apart when a reviewer finds a defect after checks clear: a push after arming must re-check that it landed on a still-open PR, and if the PR merged first, the correction needs its own PR. A reviewer with a fix for an armed PR checks `state` first.
+- **One arming chain.** `mcp__github-rest__pr_auto_merge` first. If the `github-rest` MCP is unavailable, send the bare `enablePullRequestAutoMerge` mutation with `gh api graphql`. If arming is throttled — GraphQL's secondary limit can refuse the mutation while `rate_limit` still shows thousands remaining, so there is nothing to sleep until — wait for green, then `pr_merge`. Never merge on red or pending, and never `gh pr merge --auto`: it issues extra GraphQL calls that trip the secondary limit under concurrent-agent load (see #238).
+- **Read back the right field.** `pr_auto_merge` returns `armed` (read back, not inferred), `in_merge_queue`, `auto_merge_request` and `merge_state_status`; trust `armed`. On a repo with a required merge queue, `auto_merge_request` is null for a queued PR by design — `in_merge_queue` is the signal there, and reading the wrong one looks exactly like a dropped request (see #259). Off the queue, a request can genuinely vanish: `CLEAN`, all checks green, `auto_merge_request: null`, no event (see #236). §8 handles both.
+
+## 4. Destructive git under concurrency
+
+Three habits destroy work silently. The remedy for all three is to address the real artifact by path, at a known ref.
+
+- **`git stash` is repo-wide.** `refs/stash` is one stack shared by every worktree of a repo; a linked worktree isolates the working tree and index, never the ref namespace, so two agents interleaving push and pop take each other's entries with no error. Commit to your branch instead; `git reset --soft HEAD~1` undoes it. `git-guard.sh` blocks it wherever a sibling worktree exists.
+- **Commit before you break anything on purpose.** Reverting a deliberate break with `git checkout -- <file>` reverts to the last commit and silently takes any unrelated uncommitted work in that file with it. Start the break from a clean tree, or `cp <file> <file>.bak` and `mv` it back.
+- **Break it by restoring the real defect.** `git checkout <sha-that-had-the-bug> -- <path>` (or `git checkout origin/<trunk> -- <path>` where the defect predates the branch) gives the genuine input. A hand-written break can be strictly easier than the real one — unused where the original was used, shallower, missing the second file it interacted with — and passing it proves nothing. If a guard does not fire on a hand-written break, suspect the break first. The same trap applies to live probes: an authorization probe made harmless by naming a nonexistent column was rejected before reaching the authorization check. Making the input safer or simpler moves it out of the code path under test.
+
+`git checkout <ref> -- <path>` is also the answer to the first two: it reads a file back at a known ref without popping a stash and without discarding uncommitted work.
+
+## 5. Account for every finding
 
 Walk the findings you accumulated this session — bugs noticed in passing, tests you skipped, docs left stale, rough edges in code you touched. Each one is either **in this diff** or **has an issue number**. There is no third bucket (CLAUDE.md: *Finish what you find*).
 
 - **Fixable here ⇒ fix it here.** Adjacent and unblocked counts as here. Do it now, in this branch, before the PR — a second PR costs another round of context, review, and CI, and usually never happens.
 - **Genuinely out of scope or needs Garrett ⇒ file it** per **managing-work-with-issues**, batching related findings into one issue. Reference each from the PR (`Follow-up: #123`) and name it in the summary.
 
-Don't spawn an agent per follow-up. If a filed issue is ready to work, work it next yourself, or leave it for a later session — CLAUDE.md (*Execution*) keeps spawn counts low, and fanning out on your own leftovers is the expensive way to do what fixing-in-place already handles.
+Don't spawn an agent per follow-up. If a filed issue is ready to work, work it next yourself, or leave it for a later session — CLAUDE.md (*Execution*) keeps spawn counts low and delegates only independent, sizeable tracks, and fanning out on your own leftovers is the expensive way to do what fixing-in-place already handles.
 
 Before writing the PR body, state the count out loud: *N findings — M fixed in this diff, K filed as #…*. A finding you can't place in one of those two buckets is one you dropped.
 
-## 3. PR description
+## 6. PR description
 
 - **What & why** — a sentence or two on the change and its motivation, not a file-by-file restatement of the diff.
 - **Test evidence** — what you ran, and that it passed.
@@ -70,7 +91,7 @@ Before writing the PR body, state the count out loud: *N findings — M fixed in
 
 Canonical shapes live in `~/dotclaude/templates/` — roll them into each repo's `.github/` so the structure is enforced there too.
 
-## 4. Leave the workspace ready
+## 7. Leave the workspace ready
 
 1. `git worktree remove .worktrees/<name>` (from the main checkout).
 2. `git branch -d <branch>` once merged or its PR is open (`-D` only if Garrett explicitly abandoned it).
@@ -79,6 +100,6 @@ Canonical shapes live in `~/dotclaude/templates/` — roll them into each repo's
 
 If the branch was an `issue-<N>-*` claim abandoned without a PR, `claim_release` it so the other machine can pick the issue up. `commit-commands:clean_gone` sweeps branches whose remotes are already deleted.
 
-## 5. The one come-back after arming auto-merge
+## 8. The one come-back after arming auto-merge
 
-Arming (`pr_auto_merge`) is a request the remote can later revoke: a PR can drop out of auto-merge with every check green, `mergeStateStatus: CLEAN`, and no event explaining it (CLAUDE.md, *Verify before a handoff*). The single generous wakeup you schedule after arming is the one cheap confirmation — so it does more than look for red checks. For every PR still open when it fires, read the arming back (`pr_auto_merge` returns `armed`, `in_merge_queue`, `auto_merge_request`; `pr_view` shows the same) and re-arm any that is clean, green, not in the queue, and no longer armed. Only then treat a still-open PR as needing a real fix.
+Arming (`pr_auto_merge`) is a request the remote can later revoke: a PR can drop out of auto-merge with every check green, `mergeStateStatus: CLEAN`, and no event explaining it (§3 above). The single generous wakeup the session-owning level schedules after arming (a dispatched subagent arms and stops; its dispatcher comes back) is the one cheap confirmation — so it does more than look for red checks. For every PR still open when it fires, read the arming back (`pr_auto_merge` returns `armed`, `in_merge_queue`, `auto_merge_request`; `pr_view` shows the same) and re-arm any that is clean, green, not in the queue, and no longer armed. Only then treat a still-open PR as needing a real fix.
