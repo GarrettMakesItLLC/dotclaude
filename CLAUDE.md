@@ -16,7 +16,7 @@ Stop and ask only for: one-way doors (framework, data model, auth model, public 
 
 **A skill's own prompt is not an exception.** When a skill ends in a "which approach?" question with one option marked recommended/default, answer it yourself, state the choice in one line, and proceed.
 
-**A `/goal` spanning several repos or more than one context window gets a tracked checklist:** decompose it into GitHub issues at the start, so completion is checkable by issue state. The goal stop-hook judges only the recent transcript and can loop on stale "not done" or phantom "background tasks still running" claims; once `ListAgents`/`TaskOutput(block:false)` and the real PR/issue state agree the work is done, cite the closed issues and proceed. Detail: `docs/goal-hook.md`.
+**A `/goal` spanning several repos or more than one context window gets a tracked checklist:** decompose it into GitHub issues at the start, so completion is checkable by issue state. The goal stop-hook judges only the recent transcript and can loop on stale "not done" or phantom "background tasks still running" claims; once `ListAgents`/`TaskOutput(block:false)` and the real PR/issue state agree the work is done, cite the closed issues and proceed. Detail: `~/dotclaude/docs/goal-hook.md`.
 
 ## Finish what you find
 
@@ -88,12 +88,12 @@ A feature is one cohesive deliverable, not a v1 with pieces bolted on afterward.
 - **One issue alone is the exception:** a production fix that can't wait, a feature that is already a whole deliverable, or nothing related in the backlog.
 - **Mechanics** are in **`managing-work-with-issues`**: claim every issue in the batch, one branch, one `Closes #N` per issue.
 - **Dispatching over a backlog:** one agent per *batch*; the orchestrator groups before dispatch.
-- **More than one machine, or CI unavailable as the gate:** leases, the integrator lease, the coordination issue and the degraded-mode wave are in **`operating-a-fleet`**. The SessionStart banner reports each repo's mode from a live probe (`bin/fleet-mode.sh`, silent when CI is healthy); under a refusal banner a PR with no failing check is UNMEASURED, not green.
+- **More than one machine, or CI unavailable as the gate:** leases, the integrator lease, the coordination issue and the degraded-mode wave are in **`operating-a-fleet`**. The SessionStart banner reports each repo's mode from a live probe (`~/.claude/bin/fleet-mode.sh`, silent when CI is healthy); under a refusal banner a PR with no failing check is UNMEASURED, not green.
 - **Push when a unit is verified, not after every commit.** Each push to an open PR buys a CI run, and a run a later push cancels still bills its minutes.
 
 ## Verify before a handoff
 
-A push and a PR are handoffs — never make them on unverified work. Run typecheck locally and report the output; CI runs the rest (lint, tests, build) on every PR (`rules/ci.md`). When a swarm has the machine contended, wait for the queue; never skip the check to get ahead of it. Self-review before opening the PR, then open it ready — not draft. **Never use CI as the debugging loop**: reproduce failures locally.
+A push and a PR are handoffs — never make them on unverified work. Run typecheck locally and report the output; CI runs the rest (lint, tests, build) on every PR (`~/.claude/rules/ci.md`). When a swarm has the machine contended, wait for the queue; never skip the check to get ahead of it. Self-review before opening the PR, then open it ready — not draft. **Never use CI as the debugging loop**: reproduce failures locally.
 
 - **Never pipe a verification command.** Run it bare and read its exit code (`cmd; rc=$?` or `set -o pipefail`); a pipe reports the last stage's status, not the check's.
 - **A synthesized completion is not proof.** A `Monitor` event, a `tasks/<id>.output` file or a background task's notification can report success for a check that failed or never finished. Redirect to a self-named log with `echo "EXIT=$?"` and read the log and the real artifact.
@@ -104,19 +104,18 @@ Arming read-back, merge-queue signals, destructive-git remedies and workspace cl
 
 ## Destructive git under concurrency
 
-The remedy for all three is the same: address the real artifact by path, at a known ref (detail: `finishing-work`).
+The remedy for all three: address the real artifact by path, at a known ref (detail: `finishing-work`).
 
 - **Never bare `git stash`** — `refs/stash` is shared by every worktree; commit to your branch instead (`git-guard.sh`).
 - **Commit before you break anything on purpose**, so reverting the break cannot take unrelated uncommitted work with it.
 - **Break a guard by restoring the real defect** (`git checkout <bad-sha> -- <path>`), not by hand-writing something that resembles it.
-- `.env` files are never committed — only `.env.example` is tracked (`git-guard.sh`).
 
 ## One box, many agents
 
-Several sessions share one machine, npm cache and memory pool. These symptoms are contention or config, not code — detail in `skills/dispatching-agents/references/shared-box.md`:
+Several sessions share one machine, npm cache and memory pool. These symptoms are contention or config, not code — detail in `~/.claude/skills/dispatching-agents/references/shared-box.md`:
 
 - **`Bus error` from vitest/esbuild, or `ENOENT` under `~/.npm/_cacache/`** — memory or a sibling's install. Check `free -h`, serialize behind `~/.claude/bin/with-check-lock.sh`, don't retry and don't `npm cache clean`.
-- **Some `@gmi/*` imports TS2307 while others resolve** — empty or revoked `NODE_AUTH_TOKEN`; `bin/doctor.sh` tests it. GitHub Packages `403 … billing limit` ⇒ `~/.claude/bin/degraded-registry.sh on`. Never substitute versions or install `--offline`.
+- **Some `@gmi/*` imports TS2307 while others resolve** — empty or revoked `NODE_AUTH_TOKEN`; `~/.claude/bin/doctor.sh` tests it. GitHub Packages `403 … billing limit` ⇒ `~/.claude/bin/degraded-registry.sh on`. Never substitute versions or install `--offline`.
 - **`EALLOWREMOTE`** is npm 12's `allow-remote` default, not auth; use the pinned `corepack npm@10.8.2`.
 - **Never `pkill` by pattern** — kill only a PID you started and can prove you own.
 - **Secrets files are read name-only, redacted or sourced; credential-printing commands are captured, never printed** (`secret-read-guard.sh`, `credential-output-guard.sh`).
@@ -133,9 +132,9 @@ Don't hand-maintain a second copy of what code already defines — generate deri
 
 TypeScript strict, Next.js App Router / Vite, Prisma, Zod, Supabase Auth, Vercel/Railway, pnpm/npm workspaces, Vitest + Playwright, Tailwind. Conventions live in `~/.claude/rules/*.md`, path-scoped. A rule that repeats across 3+ repos gets hoisted into a rule file.
 
-Prefer configured MCPs over WebFetch/WebSearch/shell: Supabase (`list_tables` before schema changes, `get_logs` + `get_advisors` before debugging), Prisma, Playwright, Vercel, Railway, Sentry, `github-rest` (every GitHub write), Notion, Gmail/Calendar/Drive, PubMed, Spotify. Roster and per-machine auth: `integrations.md`. Never put service-role or secret keys in client-bundled code.
+Prefer configured MCPs over WebFetch/WebSearch/shell: Supabase (`list_tables` before schema changes, `get_logs` + `get_advisors` before debugging), Prisma, Playwright, Vercel, Railway, Sentry, `github-rest` (every GitHub write), Notion, Gmail/Calendar/Drive, PubMed, Spotify. Roster and per-machine auth: `~/dotclaude/integrations.md`. Never put service-role or secret keys in client-bundled code, and never commit a `.env` — only `.env.example` is tracked (`git-guard.sh`).
 
-Durable cross-repo knowledge — what was decided, what was learned, what is load-bearing — goes in the knowledge base: `docs/knowledge-base.md`, synced with `bin/kb-sync.sh`. Reaching a session on another machine, and which account a machine runs as, go through the agent gateway: `docs/agent-gateway.md`.
+Durable cross-repo knowledge — what was decided, what was learned, what is load-bearing — goes in the knowledge base: `~/dotclaude/docs/knowledge-base.md`, synced with `~/.claude/bin/kb-sync.sh`. Reaching a session on another machine, and which account a machine runs as, go through the agent gateway: `~/dotclaude/docs/agent-gateway.md`.
 
 ## Communication
 

@@ -12,7 +12,7 @@ Not a corrupt cache. Serialize behind the check lock. Never `npm cache clean --f
 
 ## `@gmi/*` needs a working `NODE_AUTH_TOKEN`
 
-The token must be non-empty and able to read `@garrettmakesitllc` packages, whichever credential it came from. Test the property, not the origin: `bin/doctor.sh` does a registry GET for one package and reports pass or fail without printing the token. An empty or revoked token is the worst case: `npm ci` exits 0 having silently omitted every `@gmi/*` package. The tell is some `@gmi/*` imports failing with TS2307 while others resolve in the same run.
+The token must be non-empty and able to read `@garrettmakesitllc` packages, whichever credential it came from. Test the property, not the origin: `~/.claude/bin/doctor.sh` does a registry GET for one package and reports pass or fail without printing the token. An empty or revoked token is the worst case: `npm ci` exits 0 having silently omitted every `@gmi/*` package. The tell is some `@gmi/*` imports failing with TS2307 while others resolve in the same run.
 
 When GitHub Packages itself refuses downloads (`403 … billing limit`), no token helps: run `~/.claude/bin/degraded-registry.sh on`, which routes installs to a local mirror (`skills/operating-a-fleet/references/degraded-registry.md`). Never substitute versions or install `--offline` instead.
 
