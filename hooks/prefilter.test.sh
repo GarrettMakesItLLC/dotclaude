@@ -241,7 +241,8 @@ PY
 python3 "$TMP/api.py" "$TMP/api-port" & API=$!
 trap 'kill "$API" 2>/dev/null; rm -rf "$TMP"' EXIT
 for _ in $(seq 1 50); do [ -s "$TMP/api-port" ] && break; sleep 0.1; done
-export CLAIM_GUARD_API="http://127.0.0.1:$(cat "$TMP/api-port")" CLAIM_GUARD_CACHE_DIR="$TMP/cg-cache" NO_PROXY=127.0.0.1 no_proxy=127.0.0.1
+api_port="$(cat "$TMP/api-port")"
+export CLAIM_GUARD_API="http://127.0.0.1:$api_port" CLAIM_GUARD_CACHE_DIR="$TMP/cg-cache" NO_PROXY=127.0.0.1 no_proxy=127.0.0.1
 check fires $H 'Edit, plain payload'    "$CG" "{\"session_id\":\"s\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$CG/a.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}}"
 check fires $H 'Edit, escaped payload'  "$CG" "{\"session_id\":\"s\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$CG/a.txt\",\"old_string\":\"a\\\\\\\"b\",\"new_string\":\"b\"}}"
 check fires $H 'NotebookEdit'           "$CG" "{\"session_id\":\"s\",\"tool_name\":\"NotebookEdit\",\"tool_input\":{\"notebook_path\":\"$CG/n.ipynb\",\"new_source\":\"x\"}}"
