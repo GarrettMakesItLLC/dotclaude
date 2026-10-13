@@ -18,6 +18,18 @@ set -uo pipefail
 
 command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude pr-base-guard: DISABLED — python3 is not installed, so nothing was checked (bin/doctor.sh lists the prerequisites)." >&2; exit 0; }
 input="$(cat)"
+# Prefilter (#576): exit before any python start when the raw payload cannot
+# hold what this hook acts on. A superset test, never a verdict: a payload with a
+# \u escape bypasses it, and DOTCLAUDE_NO_PREFILTER=1 turns it off (hooks/prefilter.test.sh).
+if [ -z "${DOTCLAUDE_NO_PREFILTER:-}" ]; then
+  case "$input" in
+    *'\u'*) ;;
+    *)
+      _s=${input//[\"\'\\]/}  # quotes and backslashes removed, as the shell would
+      case "$_s" in *pr_create* | *gh*pr*create*) ;; *) exit 0 ;; esac
+      ;;
+  esac
+fi
 
 verdict="$(printf '%s' "$input" | python3 -c '
 import json, re, shlex, subprocess, sys

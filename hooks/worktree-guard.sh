@@ -137,8 +137,31 @@ command -v python3 >/dev/null 2>&1 || { echo "⚠️  dotclaude worktree-guard: 
 # Its own stderr is kept and its exit status checked, for the same reason the
 # main extractor's are: a crashed check that returns nothing is indistinguishable
 # from one that found nothing, and the whole rule goes quiet (#319).
+# Prefilter (#576). For a Bash call, the two python parses below can only report
+# something when the command text holds a `node_modules` link target, or one of
+# the write shapes the second parse recognises: a `>` redirect, `tee`, `cp`, `mv`,
+# `install`, `sed -i`, or a python heredoc's `open(`. Quotes and backslashes are
+# removed first because the tokenizers join `c"p"` into the word it spells. A
+# skipped parse is run as `true`, which prints nothing, exactly as the parse does
+# for a command with no such target. A payload with a \u escape, or any tool other
+# than Bash, runs both. DOTCLAUDE_NO_PREFILTER=1 turns it off.
+link_py=python3
+cand_py=python3
+if [ -z "${DOTCLAUDE_NO_PREFILTER:-}" ]; then
+  case "$input" in
+    *'\u'*) ;;
+    *)
+      _bash_re='"tool_name"[[:space:]]*:[[:space:]]*"Bash"'
+      if [[ $input =~ $_bash_re ]]; then
+        _s=${input//[\"\'\\]/}
+        case "$_s" in *node_modules*) ;; *) link_py=true ;; esac
+        case "$_s" in *'>'*|*sed*|*cp*|*mv*|*install*|*tee*|*'open('*) ;; *) cand_py=true ;; esac
+      fi
+      ;;
+  esac
+fi
 link_err="$(mktemp 2>/dev/null || echo /tmp/worktree-guard-link-err.$$)"
-link_verdict="$(INPUT_JSON="$input" python3 - <<'PYEOF' 2>"$link_err"
+link_verdict="$(INPUT_JSON="$input" $link_py - <<'PYEOF' 2>"$link_err"
 import json, os, re, shlex, sys
 
 try:
@@ -232,7 +255,7 @@ fi
 # the whole guard off and flipped every BLOCK case in the self-test to
 # pass-as-allowed — nothing in a real session would have shown it (#319).
 guard_err="$(mktemp 2>/dev/null || echo /tmp/worktree-guard-err.$$)"
-candidates="$(INPUT_JSON="$input" python3 - <<'PYEOF' 2>"$guard_err"
+candidates="$(INPUT_JSON="$input" $cand_py - <<'PYEOF' 2>"$guard_err"
 import json, os, re, shlex, sys
 
 try:

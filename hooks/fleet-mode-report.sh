@@ -54,7 +54,10 @@ fi
 REGISTRY="$(dirname "$HOOK_DIR")/bin/degraded-registry.sh"
 registry=""
 if [ -x "$REGISTRY" ]; then
-  registry="$(timeout 8 "$REGISTRY" banner 2>/dev/null || true)"
+  # `banner` restarts a dead mirror and waits up to the start budget for it; the
+  # budget has to fit inside this timeout, or a mirror that cannot start loses
+  # the BROKEN banner instead of producing it.
+  registry="$(DEGRADED_REGISTRY_START_SECS="${DEGRADED_REGISTRY_START_SECS:-5}" timeout 8 "$REGISTRY" banner 2>/dev/null || true)"
 fi
 
 if [ -z "$lifted" ] && [ -z "$registry" ]; then

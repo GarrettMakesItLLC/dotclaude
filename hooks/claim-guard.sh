@@ -60,7 +60,31 @@ command -v gh >/dev/null 2>&1 || { echo "⚠️  dotclaude claim-guard: DISABLED
 # Edit/Write/MultiEdit use file_path; NotebookEdit uses notebook_path. One parse
 # emits the session id then the path, each on its own line, so a path containing
 # spaces survives intact.
-parsed="$(printf '%s' "$input" | python3 -c 'import json,sys
+# Fast parse (#576): a payload with no backslash has no escaped string in it, so the
+# top-level keys can be read with a regex instead of a python start. Anything with
+# a backslash (a \u escape, or an escaped quote in an edit's text) goes to python,
+# which is the authority. DOTCLAUDE_NO_PREFILTER=1 forces python.
+parsed=""
+case "$input" in
+  *'\'*) ;;
+  *)
+    if [ -z "${DOTCLAUDE_NO_PREFILTER:-}" ]; then
+      _re_sid='"session_id"[[:space:]]*:[[:space:]]*"([^"]*)"'
+      _re_fp='"file_path"[[:space:]]*:[[:space:]]*"([^"]*)"'
+      _re_np='"notebook_path"[[:space:]]*:[[:space:]]*"([^"]*)"'
+      _sid=""; _fp=""
+      [[ $input =~ $_re_sid ]] && _sid="${BASH_REMATCH[1]}"
+      if [[ $input =~ $_re_fp && -n "${BASH_REMATCH[1]}" ]]; then
+        _fp="${BASH_REMATCH[1]}"
+      elif [[ $input =~ $_re_np ]]; then
+        _fp="${BASH_REMATCH[1]}"
+      fi
+      parsed="${_sid:-nosession}"$'\n'"$_fp"
+    fi
+    ;;
+esac
+if [ -z "$parsed" ]; then
+  parsed="$(printf '%s' "$input" | python3 -c 'import json,sys
 try:
     d = json.load(sys.stdin)
 except Exception:
@@ -68,6 +92,7 @@ except Exception:
 ti = d.get("tool_input", {}) or {}
 print(d.get("session_id") or "nosession")
 print(ti.get("file_path") or ti.get("notebook_path") or "")' 2>/dev/null)"
+fi
 
 session_id="$(printf '%s' "$parsed" | sed -n 1p)"
 file_path="$(printf '%s' "$parsed" | sed -n 2p)"
@@ -107,11 +132,11 @@ slug="${slug#/}"
 slug="${slug%.git}"
 printf '%s' "$slug" | grep -Eq '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' || exit 0
 
-# Cached positive answer within the TTL -> allow without touching the network.
+# Cached positive answer within the TTL (CLAIM_GUARD_TTL_MIN, default 30) -> allow without touching the network.
 cache_dir="${CLAIM_GUARD_CACHE_DIR:-${TMPDIR:-/tmp}/claude-claim-guard-$(id -u)}"
 cache_key="$(printf '%s|%s|%s' "$session_id" "$slug" "$branch" | tr -c '[:alnum:]._-' '_')"
 cache_file="$cache_dir/$cache_key"
-if [ -f "$cache_file" ] && [ -n "$(find "$cache_file" -mmin -10 2>/dev/null)" ]; then
+if [ -f "$cache_file" ] && [ -n "$(find "$cache_file" -mmin "-${CLAIM_GUARD_TTL_MIN:-30}" 2>/dev/null)" ]; then
   exit 0
 fi
 

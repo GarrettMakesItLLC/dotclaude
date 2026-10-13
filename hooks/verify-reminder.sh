@@ -30,6 +30,18 @@
 set -uo pipefail
 
 input="$(cat)"
+# Prefilter (#576): exit before any python start when the raw payload cannot
+# hold what this hook acts on. A superset test, never a verdict: a payload with a
+# \u escape bypasses it, and DOTCLAUDE_NO_PREFILTER=1 turns it off (hooks/prefilter.test.sh).
+if [ -z "${DOTCLAUDE_NO_PREFILTER:-}" ]; then
+  case "$input" in
+    *'\u'*) ;;
+    *)
+      _s=${input//[\"\'\\]/}  # quotes and backslashes removed, as the shell would
+      case "$_s" in *pr_create* | *gh*pr*create*) ;; *) exit 0 ;; esac
+      ;;
+  esac
+fi
 
 # No JSON parser -> fail open. python3 is ubiquitous on Linux/macOS.
 if ! command -v python3 >/dev/null 2>&1; then

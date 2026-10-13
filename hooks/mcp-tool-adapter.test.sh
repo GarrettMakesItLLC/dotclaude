@@ -89,8 +89,8 @@ for p in SERENA:
     TABLE[p + "execute_shell_command"] = SHELL_GUARDS
     for op in ("read_file", "search_for_pattern"):
         TABLE[p + op] = READ_GUARDS
-    for op in ("create_text_file", "replace_content", "replace_in_files", "delete_lines", "replace_lines",
-               "insert_at_line", "replace_symbol_body", "insert_after_symbol", "insert_before_symbol",
+    for op in ("create_text_file", "replace_content", "replace_in_files",
+               "replace_symbol_body", "insert_after_symbol", "insert_before_symbol",
                "rename_symbol", "safe_delete_symbol"):
         TABLE[p + op] = WRITE_GUARDS
 NATIVE = {"Bash", "Read", "Grep", "Edit", "Write", "MultiEdit", "NotebookEdit"}
@@ -123,6 +123,30 @@ for tool, need in sorted(TABLE.items()):
         print(f"FAIL: {tool} reaches no {', '.join(missing)}"); bad = 1
     if tool not in NATIVE and direct & (SHELL_GUARDS | READ_GUARDS | WRITE_GUARDS):
         print(f"FAIL: {tool} is registered directly on {sorted(direct)}, which cannot read its payload"); bad = 1
+
+# Drift: every Serena tool a matcher names must exist. A matcher naming a tool
+# Serena does not ship guards nothing and hides that a real one is unguarded.
+# The list is Serena's tool set; add a tool here when Serena ships one. Memory
+# tools take a memory name, not a path, so no path guard applies to them.
+SERENA_TOOLS = {"activate_project", "create_text_file", "delete_memory", "edit_memory", "execute_shell_command",
+                "find_declaration", "find_file", "find_implementations", "find_referencing_symbols", "find_symbol",
+                "get_current_config", "get_diagnostics_for_file", "get_symbols_overview", "initial_instructions",
+                "insert_after_symbol", "insert_before_symbol", "list_dir", "list_memories", "onboarding",
+                "read_file", "read_memory", "rename_memory", "rename_symbol", "replace_content",
+                "replace_in_files", "replace_symbol_body", "safe_delete_symbol", "search_for_pattern", "write_memory"}
+for event, groups in cfg["hooks"].items():
+    for group in groups:
+        for tok in (group.get("matcher") or "").split("|"):
+            m = re.fullmatch(r"mcp__(?:plugin_serena_)?serena__(\w+)", tok)
+            if m and m.group(1) not in SERENA_TOOLS:
+                print(f"FAIL: {event} matcher names {tok}, which Serena does not ship"); bad = 1
+
+# Every hook command has a timeout, so one hung process cannot stall a tool call.
+for event, groups in cfg["hooks"].items():
+    for group in groups:
+        for h in group.get("hooks", []):
+            if not isinstance(h.get("timeout"), int) or h["timeout"] <= 0:
+                print(f"FAIL: {event} hook without a timeout: {h.get('command')}"); bad = 1
 
 # PostToolUse: every tool that runs a shell has its output scanned. The guard
 # reads Serena's MCP result shape itself, so it is registered directly, not

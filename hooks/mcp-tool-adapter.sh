@@ -14,9 +14,13 @@
 #   …__search_for_pattern                               -> Grep  {path, glob}
 #   Grep                                                -> Grep  (passed through)
 #   …__create_text_file                                 -> Write {file_path, content}
-#   …__replace_content / replace_in_files / delete_lines / replace_lines /
-#      insert_at_line / replace_symbol_body / insert_after_symbol /
-#      insert_before_symbol / rename_symbol / safe_delete_symbol
+#   …__replace_content / replace_in_files / replace_symbol_body /
+#      insert_after_symbol / insert_before_symbol / rename_symbol /
+#      safe_delete_symbol
+#
+# Known gap: Serena's find_file, list_dir and find_symbol are not guarded by
+# secret-read-guard. They return file names and symbol bodies, not the contents
+# of a secrets file, which only read_file and search_for_pattern can return.
 #                                                       -> Edit  {file_path}
 #
 # Serena resolves `relative_path` against its active project, which the hook
@@ -59,7 +63,7 @@ def at(p):
     p = os.path.expanduser(p or "")
     return os.path.normpath(os.path.join(cwd, p)) if p else cwd
 
-EDITS = {"replace_content", "replace_in_files", "delete_lines", "replace_lines", "insert_at_line",
+EDITS = {"replace_content", "replace_in_files",
          "replace_symbol_body", "insert_after_symbol", "insert_before_symbol", "rename_symbol",
          "safe_delete_symbol"}
 out = None

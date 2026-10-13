@@ -29,43 +29,55 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/dotrepo-sync.sh"
+            "command": "\"$HOME\"/.claude/hooks/dotrepo-sync.sh",
+            "timeout": 60
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/dotclaude-freshness.sh"
+            "command": "\"$HOME\"/.claude/hooks/dotclaude-freshness.sh",
+            "timeout": 20,
+            "async": true
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/link-doctor.sh"
+            "command": "\"$HOME\"/.claude/hooks/link-doctor.sh",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/agent-creds-sync.sh"
+            "command": "\"$HOME\"/.claude/hooks/agent-creds-sync.sh",
+            "timeout": 120
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/worktree-install-check.sh"
+            "command": "\"$HOME\"/.claude/hooks/worktree-install-check.sh",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/claude-accounts-report.sh"
+            "command": "\"$HOME\"/.claude/hooks/claude-accounts-report.sh",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/fleet-mode-report.sh"
+            "command": "\"$HOME\"/.claude/hooks/fleet-mode-report.sh",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/prisma-client-freshness.sh"
+            "command": "\"$HOME\"/.claude/hooks/prisma-client-freshness.sh",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/session-contention.sh"
+            "command": "\"$HOME\"/.claude/hooks/session-contention.sh",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/worktree-reap-trigger.sh"
+            "command": "\"$HOME\"/.claude/hooks/worktree-reap-trigger.sh",
+            "timeout": 10,
+            "async": true
           }
         ]
       }
@@ -76,27 +88,33 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/git-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/git-guard.sh",
+            "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/worktree-cd-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/worktree-cd-guard.sh",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/npm-install-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/npm-install-guard.sh",
+            "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/heredoc-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/heredoc-guard.sh",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/db-push-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/db-push-guard.sh",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/pooler-readonly-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/pooler-readonly-guard.sh",
+            "timeout": 10
           }
         ]
       },
@@ -105,11 +123,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/verify-reminder.sh"
+            "command": "\"$HOME\"/.claude/hooks/verify-reminder.sh",
+            "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/pr-base-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/pr-base-guard.sh",
+            "timeout": 15
           }
         ]
       },
@@ -118,7 +138,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/secret-read-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/secret-read-guard.sh",
+            "timeout": 10
           }
         ]
       },
@@ -127,7 +148,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/worktree-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/worktree-guard.sh",
+            "timeout": 20
           }
         ]
       },
@@ -136,11 +158,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/claim-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/claim-guard.sh",
+            "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/migration-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/migration-guard.sh",
+            "timeout": 10
           }
         ]
       },
@@ -149,43 +173,53 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh git-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh git-guard",
+            "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh worktree-cd-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh worktree-cd-guard",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh npm-install-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh npm-install-guard",
+            "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh heredoc-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh heredoc-guard",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh db-push-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh db-push-guard",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh pooler-readonly-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh pooler-readonly-guard",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh verify-reminder"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh verify-reminder",
+            "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh pr-base-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh pr-base-guard",
+            "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh secret-read-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh secret-read-guard",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh worktree-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh worktree-guard",
+            "timeout": 20
           }
         ]
       },
@@ -194,24 +228,28 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh secret-read-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh secret-read-guard",
+            "timeout": 10
           }
         ]
       },
       {
-        "matcher": "mcp__plugin_serena_serena__create_text_file|mcp__serena__create_text_file|mcp__plugin_serena_serena__replace_content|mcp__serena__replace_content|mcp__plugin_serena_serena__replace_in_files|mcp__serena__replace_in_files|mcp__plugin_serena_serena__delete_lines|mcp__serena__delete_lines|mcp__plugin_serena_serena__replace_lines|mcp__serena__replace_lines|mcp__plugin_serena_serena__insert_at_line|mcp__serena__insert_at_line|mcp__plugin_serena_serena__replace_symbol_body|mcp__serena__replace_symbol_body|mcp__plugin_serena_serena__insert_after_symbol|mcp__serena__insert_after_symbol|mcp__plugin_serena_serena__insert_before_symbol|mcp__serena__insert_before_symbol|mcp__plugin_serena_serena__rename_symbol|mcp__serena__rename_symbol|mcp__plugin_serena_serena__safe_delete_symbol|mcp__serena__safe_delete_symbol",
+        "matcher": "mcp__plugin_serena_serena__create_text_file|mcp__serena__create_text_file|mcp__plugin_serena_serena__replace_content|mcp__serena__replace_content|mcp__plugin_serena_serena__replace_in_files|mcp__serena__replace_in_files|mcp__plugin_serena_serena__replace_symbol_body|mcp__serena__replace_symbol_body|mcp__plugin_serena_serena__insert_after_symbol|mcp__serena__insert_after_symbol|mcp__plugin_serena_serena__insert_before_symbol|mcp__serena__insert_before_symbol|mcp__plugin_serena_serena__rename_symbol|mcp__serena__rename_symbol|mcp__plugin_serena_serena__safe_delete_symbol|mcp__serena__safe_delete_symbol",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh worktree-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh worktree-guard",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh claim-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh claim-guard",
+            "timeout": 15
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh migration-guard"
+            "command": "\"$HOME\"/.claude/hooks/mcp-tool-adapter.sh migration-guard",
+            "timeout": 10
           }
         ]
       }
@@ -221,7 +259,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/subagent-evidence.sh"
+            "command": "\"$HOME\"/.claude/hooks/subagent-evidence.sh",
+            "timeout": 15
           }
         ]
       }
@@ -232,11 +271,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/worktree-bootstrap.sh"
+            "command": "\"$HOME\"/.claude/hooks/worktree-bootstrap.sh",
+            "timeout": 20
           },
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/credential-output-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/credential-output-guard.sh",
+            "timeout": 10
           }
         ]
       },
@@ -245,7 +286,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/credential-output-guard.sh"
+            "command": "\"$HOME\"/.claude/hooks/credential-output-guard.sh",
+            "timeout": 10
           }
         ]
       },
@@ -254,7 +296,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME\"/.claude/hooks/tool-gap-reporter.sh"
+            "command": "\"$HOME\"/.claude/hooks/tool-gap-reporter.sh",
+            "timeout": 10
           }
         ]
       }
