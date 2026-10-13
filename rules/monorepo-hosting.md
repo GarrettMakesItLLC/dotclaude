@@ -1,7 +1,7 @@
 ---
 description: Monorepo layout & hosting defaults — workspaces, package boundaries, Vercel/Railway, PR-title lint
 paths:
-  - "**/package.json"
+  - "package.json"
   - "**/pnpm-workspace.yaml"
   - "**/turbo.json"
   - "**/vercel.json"

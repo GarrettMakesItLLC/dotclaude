@@ -1,6 +1,6 @@
 ---
 name: managing-work-with-issues
-description: Use when starting, creating, or finishing any tracked unit of work in a GitHub repo — claiming an issue before you begin, filing a well-formed issue during investigation or as a follow-up, triaging app user-feedback, or moving an issue through its status lifecycle. Carries the cross-machine claim protocol that prevents duplicate work.
+description: Use when claiming, filing, triaging or closing a tracked GitHub issue; carries the claim protocol that prevents duplicate work. Not for untracked quick fixes.
 allowed-tools: mcp__github-rest__issue_claim, mcp__github-rest__work_in_flight, mcp__github-rest__claim_release, mcp__github-rest__issue_open, mcp__github-rest__issue_list, mcp__github-rest__issue_view, mcp__github-rest__issue_update, mcp__github-rest__issue_set_status, mcp__github-rest__issue_set_type, mcp__github-rest__issue_set_effort, mcp__github-rest__issue_set_priority, mcp__github-rest__issue_set_blocked_by, mcp__github-rest__issue_list_blocked_by, mcp__github-rest__issue_set_labels, mcp__github-rest__issue_set_milestone, mcp__github-rest__issue_add_sub_issue, mcp__github-rest__issue_comment, mcp__github-rest__labels_ensure, mcp__github-rest__labels_audit, mcp__github-rest__label_list, mcp__github-rest__label_update, mcp__github-rest__label_delete, mcp__github-rest__milestone_ensure, Bash(git fetch:*), Bash(git checkout:*)
 ---
 

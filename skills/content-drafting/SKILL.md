@@ -1,6 +1,6 @@
 ---
 name: content-drafting
-description: Use when writing a blog post, guide, help/docs page, or resource page for MuscleBuddy, NetWorthy, RedThreadEvents, or AdventureOS — turns a brief into a validated MDX draft against @gmi/content's Meta schema, ready for human review. Not for ad creative, social posts, or anything RedThreadEvents' own content-plan pipeline owns.
+description: Use when drafting a blog, guide, help or resource page for MuscleBuddy, NetWorthy, RedThreadEvents or AdventureOS as validated MDX. Not for ads, social posts, or RedThread's content-plan pipeline.
 ---
 
 # Content drafting

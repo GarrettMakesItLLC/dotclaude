@@ -1,6 +1,6 @@
 ---
 name: agent-credentials
-description: Use when an agent in a product repo needs a credential, a database URL, or a CLI that seems missing — before concluding "I can't". Covers what is already in the shell, how Railway- and Vercel-held values are fetched, which CLIs are absent and what replaces them, and where the repo's own key list lives.
+description: 'Use when a product-repo agent needs a credential, database URL, or CLI that seems missing, before concluding "I can''t". Not for rotating or creating secrets.'
 ---
 
 # Agent credentials

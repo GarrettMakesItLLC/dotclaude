@@ -1,6 +1,6 @@
 ---
 name: running-an-audit
-description: Use when running or scoping any audit, investigation, gap analysis, or compliance review — accessibility, privacy/data-processing, legal, security, feature completeness, competitor, performance, ops, UX, data integrity — or when deciding how deep to run one and where its findings land. Covers the method; per-realm checklists live in references/.
+description: Use when running or scoping an audit, gap analysis or compliance review (a11y, privacy, security, perf, UX, data integrity) and deciding its depth. Not for reviewing a working diff.
 ---
 
 # Running an audit
@@ -105,7 +105,7 @@ For **realm**, **launch-readiness** and **full-spectrum** depth, fan out with th
 
 **File the epic shell before dispatching, and hand every auditor its number.** The epic body is the live dedupe list — auditors that read it deduped; auditors handed a skip-list in a scratchpad file re-found wave-1 findings anyway. On a second wave, the brief says `skip #A–#B` and points at the epic again.
 
-**Long reports do not survive the return channel.** A final result over a few thousand characters comes back as `[result truncated — ask the agent for the rest via SendMessage]`. The brief mandates delivery: write the full report to a named file in the lead's scratchpad (or the repo's audit directory) and message the path, or send it via `SendMessage` in numbered parts of ≤6,000 characters — and return a one-paragraph summary only.
+**Long reports do not survive the return channel.** A final result over a few thousand characters comes back as `[result truncated — ask the agent for the rest via SendMessage]`. `domain-auditor` has no `Write` tool: the brief mandates delivery via `SendMessage` in numbered parts of ≤6,000 characters, then a one-paragraph summary as the final reply. The lead saves each part to a named file in its scratchpad (or the repo's audit directory) as it arrives; auditors never write the file themselves.
 
 **An auditor that reads production gets exactly one query helper, written by the lead.** Use the direct (session) database URL, with each query wrapped in `BEGIN READ ONLY; …; ROLLBACK`. Left to themselves, auditors write their own helpers, and the "safe" one they reach for is a session-level `default_transaction_read_only` on the transaction-pooler URL. A pooler shares backends across clients, so that setting leaks into the production app's own connections and fails its writes. Auditors never write a connection string to a file.
 

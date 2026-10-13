@@ -3,8 +3,8 @@ description: Frontend conventions — Next.js/Vite, Tailwind, dark mode, a11y, i
 paths:
   - "**/*.tsx"
   - "**/*.jsx"
-  - "**/components/**"
-  - "**/app/**"
+  - "**/*.css"
+  - "tailwind.config.*"
 ---
 
 # Frontend conventions

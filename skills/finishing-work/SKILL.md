@@ -1,6 +1,6 @@
 ---
 name: finishing-work
-description: Use when wrapping up a coding task — before claiming something is done, opening a PR, or handing work back. Runs the definition-of-done checklist, writes the PR body, and leaves the workspace clean and ready.
+description: 'Use when wrapping up a coding task, before claiming done, opening a PR or handing back: definition-of-done checklist, PR body, clean workspace. Not for mid-task checkpoints.'
 allowed-tools: Bash(git status:*), Bash(git diff:*), Bash(git worktree:*), Bash(git branch:*), Bash(git checkout:*), Bash(git pull:*), mcp__github-rest__pr_create, mcp__github-rest__pr_update, mcp__github-rest__pr_view, mcp__github-rest__pr_checks, mcp__github-rest__issue_open, mcp__github-rest__issue_set_status
 ---
 
@@ -38,16 +38,16 @@ The mechanically-checkable subset of `running-an-audit`'s realms, run against th
 
 - [ ] No test disabled, skipped, or loosened to let this diff pass.
 - [ ] No unjustified lint-disable comment added.
-- [ ] Any new route or form: security headers / CSRF / secure cookie flags present (`running-an-audit/references/security-access-control.md`).
+- [ ] Any new route or form: security headers / CSRF / secure cookie flags present (`../running-an-audit/references/security-access-control.md`).
 - [ ] No secrets in the diff; no API key reachable from a frontend bundle.
-- [ ] Any new image: alt text. Any new page: meta title + description, exactly one `<h1>` (`running-an-audit/references/seo-metadata.md`).
-- [ ] No new emoji-as-icon usage; no new purple/violet accent that isn't already in the token system (`running-an-audit/references/visual-anti-slop.md`).
-- [ ] Any new async surface: loading, error, and empty states present, using a skeleton where the shape is known rather than a spinner — see `running-an-audit/references/ux-coherence.md`, don't re-derive it here.
-- [ ] Any new UI at a phone viewport: no horizontal document scroll, tap targets ≥44px, no hover-only affordance (`running-an-audit/references/responsive-mobile.md`).
-- [ ] Any new icon-only button: accessible name *and* tooltip. Any new link or button: it actually goes somewhere (`running-an-audit/references/site-hygiene-launch-tells.md`).
-- [ ] Any new mutation: wrapped in a transaction if multi-step, idempotent if externally triggered, and it produces a visible success or error message (`running-an-audit/references/data-integrity-safety.md`).
-- [ ] Any new outbound call: explicit timeout, and a stated behaviour when the dependency is down (`running-an-audit/references/resilience-dependencies.md`).
-- [ ] Any new client-side role or permission check: the server-side counterpart exists (`running-an-audit/references/security-access-control.md`).
+- [ ] Any new image: alt text. Any new page: meta title + description, exactly one `<h1>` (`../running-an-audit/references/seo-metadata.md`).
+- [ ] No new emoji-as-icon usage; no new purple/violet accent that isn't already in the token system (`../running-an-audit/references/visual-anti-slop.md`).
+- [ ] Any new async surface: loading, error, and empty states present, using a skeleton where the shape is known rather than a spinner — see `../running-an-audit/references/ux-coherence.md`, don't re-derive it here.
+- [ ] Any new UI at a phone viewport: no horizontal document scroll, tap targets ≥44px, no hover-only affordance (`../running-an-audit/references/responsive-mobile.md`).
+- [ ] Any new icon-only button: accessible name *and* tooltip. Any new link or button: it actually goes somewhere (`../running-an-audit/references/site-hygiene-launch-tells.md`).
+- [ ] Any new mutation: wrapped in a transaction if multi-step, idempotent if externally triggered, and it produces a visible success or error message (`../running-an-audit/references/data-integrity-safety.md`).
+- [ ] Any new outbound call: explicit timeout, and a stated behaviour when the dependency is down (`../running-an-audit/references/resilience-dependencies.md`).
+- [ ] Any new client-side role or permission check: the server-side counterpart exists (`../running-an-audit/references/security-access-control.md`).
 
 ## 2. Reading a check's result
 

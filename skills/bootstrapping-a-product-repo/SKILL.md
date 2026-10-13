@@ -1,6 +1,6 @@
 ---
 name: bootstrapping-a-product-repo
-description: Use when standing up a brand-new repo in the GarrettMakesItLLC org, or bringing an existing bare one up to the fleet standard — creating the repo, its dev/main branches and rulesets, the label taxonomy, CI, git hooks, and CLAUDE.md. Also use when a repo is missing part of that standard and needs to be brought into line.
+description: Use when creating a new GarrettMakesItLLC repo or bringing a bare one to fleet standard (branches, rulesets, labels, CI, hooks, CLAUDE.md). Not for day-to-day changes in an existing repo.
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 ---
 

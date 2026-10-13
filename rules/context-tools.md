@@ -1,13 +1,9 @@
 ---
 description: When to reach for Serena vs. Graphify vs. rg/Read in an app repo
 paths:
-  - "**/*.ts"
-  - "**/*.tsx"
-  - "**/*.js"
-  - "**/*.jsx"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.rs"
+  - "**/.serena/**"
+  - "**/graphify-out/**"
+  - "**/.mcp.json"
 ---
 
 # Context-graph tools
@@ -26,6 +22,10 @@ mechanics: `integrations.md`'s "Per-project context tools".
   results in context by hand.
 - **Fall back to `rg`/`Read`** when neither tool is installed in the repo yet,
   or for anything outside code structure — config values, string content.
+- **Serena unavailable (MCP failed to connect, or not activated), use `rg`/`Read`.**
+  Say so in one line and carry on; don't retry the connection in a loop. The
+  main session may use Serena and Graphify; subagents (`search`, `grep`,
+  `docs`, `Explore`) have no Serena and use `rg`/`Read` only.
 - **A zero/empty result from Serena or Graphify is not evidence the thing
   doesn't exist.** Both index declared symbols and extracted code
   relationships — neither has a full-text fallback built in. A naming
