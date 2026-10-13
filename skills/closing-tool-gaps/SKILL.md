@@ -1,6 +1,6 @@
 ---
 name: closing-tool-gaps
-description: Use when a tool fails repeatedly or cannot do what you need — a missing MCP capability, an MCP call that keeps erroring, a hook misfiring, a skill whose instructions no longer match reality — and you are about to work around it. Covers unblocking now, filing the gap where the fix lands, and closing it. Deepest case is building the missing tool into the vendored github-rest MCP.
+description: Use when a tool fails repeatedly or lacks a needed capability (MCP error, misfiring hook, stale skill) and you are about to work around it. Files the gap where the fix lands.
 allowed-tools: Bash(gh api:*), Bash(npm run:*), Bash(npm test:*), mcp__github-rest__issue_open, mcp__github-rest__issue_claim, mcp__github-rest__pr_create
 ---
 

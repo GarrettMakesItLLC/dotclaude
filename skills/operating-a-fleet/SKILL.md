@@ -1,6 +1,6 @@
 ---
 name: operating-a-fleet
-description: Use when more than one machine, or more than a couple of agent sessions, are working one repo at the same time — deciding who implements, who validates and who merges, taking the single fleet-wide integrator lease, batching related issues into one PR, and running a local CI replica when GitHub Actions is unavailable or too expensive to be the gate. Covers the degraded-mode wave procedure and the reconcile pass that runs after every merge.
+description: 'Use when several machines or agent sessions work one repo at once: integrator lease, batching issues into PRs, degraded-mode CI replica waves. Not for a single session.'
 allowed-tools: Bash(bin/fleet-lease.sh:*), Bash(bin/fleet-reconcile.sh:*), Bash(bin/ci-replica.sh:*), Bash(bin/fleet-mode.sh:*), Bash(bin/fleet-merge.sh:*), Bash(gh api:*), Bash(git:*), mcp__github-rest__issue_open, mcp__github-rest__issue_comment, mcp__github-rest__pr_create, mcp__github-rest__pr_auto_merge
 ---
 

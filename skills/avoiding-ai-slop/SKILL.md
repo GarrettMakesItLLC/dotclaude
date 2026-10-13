@@ -1,6 +1,6 @@
 ---
 name: avoiding-ai-slop
-description: Use when writing or reviewing prose that a human will read as a finished artifact — docs, PR/issue descriptions, comments, commit messages, drafted content (content-drafting's output) — to strip predictable AI writing tells before handing it back.
+description: Use when writing or reviewing human-read prose (docs, PR/issue text, comments, commit messages, drafts) to strip AI writing tells. Not for code or terse chat replies.
 ---
 
 # Avoiding AI slop

@@ -1,7 +1,6 @@
 ---
 description: Data & API-boundary conventions — Prisma, Zod, Supabase auth clients, migrations, feature flags
 paths:
-  - "**/*.prisma"
   - "**/api/**"
   - "**/route.ts"
   - "**/route.tsx"

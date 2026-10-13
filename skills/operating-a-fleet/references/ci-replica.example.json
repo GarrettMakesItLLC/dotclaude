@@ -28,7 +28,7 @@
     {
       "name": "e2e",
       "needsDataPlane": true,
-      "dataPlaneReason": "truncates the shared agent-sandbox-testing branch; mint with bin/e2e-env.sh first",
+      "dataPlaneReason": "truncates the shared agent-sandbox-testing branch; mint the sandbox env with the repo's own env script first",
       "budgetSeconds": 2400,
       "unset": ["BASH_ENV"],
       "commands": [

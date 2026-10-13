@@ -1,7 +1,7 @@
 ---
 name: operating-production
-description: Use when operating, monitoring, or recovering a deployed production service — responding to an incident or outage, deciding rollback vs. forward-fix, adding health checks or alerting, or setting up a repo's production runbook. Rollback-first incident posture for Vercel/Railway-hosted apps.
-allowed-tools: mcp__plugin_vercel_vercel__list_deployments, mcp__plugin_vercel_vercel__get_deployment, mcp__plugin_vercel_vercel__get_runtime_logs, mcp__plugin_vercel_vercel__get_runtime_errors, mcp__plugin_railway_railway__get-status, mcp__plugin_railway_railway__get-logs, mcp__plugin_railway_railway__list-deployments, mcp__plugin_railway_railway__redeploy, mcp__plugin_sentry_sentry__search_issues, mcp__plugin_sentry_sentry__search_events
+description: Use when responding to an incident or outage, choosing rollback vs forward-fix, or adding health checks/alerts for a Vercel/Railway service. Not for routine deploys.
+allowed-tools: mcp__plugin_vercel_vercel__list_deployments, mcp__plugin_vercel_vercel__get_deployment, mcp__plugin_vercel_vercel__get_runtime_logs, mcp__plugin_vercel_vercel__get_runtime_errors, mcp__plugin_railway_railway__get-status, mcp__plugin_railway_railway__get-logs, mcp__plugin_railway_railway__list-deployments, mcp__plugin_sentry_sentry__search_issues
 ---
 
 # Operating production
@@ -13,7 +13,7 @@ The reusable posture. Per-repo specifics — URLs, env, domain playbooks — liv
 **Favor the fastest safe recovery over root-causing on a live system.** Roll back to the last-good deploy, confirm the symptom clears, then investigate the bad deploy on a branch. Root-causing while users are down trades their time for your curiosity.
 
 - **Vercel:** promote the previous production deployment (instant), or redeploy the last-good ref.
-- **Railway:** redeploy the previous successful deployment.
+- **Railway:** redeploy the previous successful deployment (`redeploy` mutates production and is not pre-approved: state the target deployment and get the go-ahead from the incident owner, or from the user in a live session, before calling it).
 - **Data-caused, not code-caused:** a rollback won't fix it but still buys time. Pair it with an ops kill switch (`rules/data-api.md`) to disable the affected subsystem without a redeploy.
 - Forward-fix in place only when rollback is impossible (e.g. an already-run irreversible migration) — then expand-then-contract so the *next* rollback is safe.
 
