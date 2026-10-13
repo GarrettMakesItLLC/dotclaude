@@ -102,7 +102,7 @@ nudge() {
   DOTCLAUDE_LOOSE_ENDS="$(loose_ends)" python3 -c '
 import json, os
 msg = (
-    "Verification check before this PR hands off (CLAUDE.md: \"Verify before you push or open a PR\"). "
+    "Verification check before this PR hands off (CLAUDE.md: \"Verify before a handoff\"). "
     "Confirm you have run the check relevant to your change on THIS branch'\''s current state and it passes:\n"
     "  - typecheck (CI runs the rest — lint, tests, build).\n"
     "If you have not run it yet, run it now and report the command output. "
