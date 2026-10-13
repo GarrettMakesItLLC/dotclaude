@@ -19,6 +19,8 @@ export FLEET_MODE_NO_REFRESH=1
 # The registry banner reads ~/.npmrc; keep the machine's real switch out of it.
 export DEGRADED_REGISTRY_NPMRC="$TMP/npmrc"
 export GMI_REGISTRY_STATE="$TMP/registry-state" GMI_REGISTRY_HOME="$TMP/registry-store"
+# Nothing listens on the fixture port; the dead-mirror restart must give up fast.
+export DEGRADED_REGISTRY_START_SECS=1
 
 REPO="$TMP/repo"; mkdir -p "$REPO"
 git -C "$REPO" init -q
