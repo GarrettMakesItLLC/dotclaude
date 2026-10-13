@@ -394,6 +394,7 @@ the worktree bootstrap after every `git worktree add`.
 | `bin/with-check-lock.sh` | the box-wide semaphore for memory-heavy checks, shared by every repo (`${XDG_CACHE_HOME:-~/.cache}/gmi-check-lock`) | `envPrefix` (knob aliases and drift marker only) |
 | `bin/doctor.sh` | "is this box set up for this repo?" | `doctor` |
 | `bin/staging-db-url.sh` | mints the staging Postgres URL from the Supabase Management PAT | `supabase` |
+| `bin/prod-db-url.sh` | prints the production writer URL from Railway for one command (`--writer`); never exported into a shell | `credentials.railway`, `credentials.writerKey` |
 
 What an agent shell holds and how to fetch the rest: the `agent-credentials`
 skill, plus the repo's own `.claude/credentials.md` appendix.

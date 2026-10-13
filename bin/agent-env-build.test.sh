@@ -85,6 +85,30 @@ printf 'VAPID_PUBLIC_KEY=v-local\nDIRECT_URL=postgres://d-local\n' >>"$REPO/.env
 run
 [ ! -s "$RAILWAY_CALLS" ] && ok "a complete local env never calls Railway" || bad "Railway called anyway"
 
+echo "agent-env-build: credentials.retired clears names an older bundle exported"
+python3 - "$REPO/.claude/repo.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+m = json.load(open(p))
+m["credentials"]["retired"] = ["DM_PROD_DIRECT_URL", "DM_OLD_KEY"]
+m["credentials"]["namespaced"] = {}
+json.dump(m, open(p, "w"))
+PY
+run
+[ "$RC" = 0 ] && grep -q '^unset DM_PROD_DIRECT_URL$' "$F" && grep -q '^unset DM_OLD_KEY$' "$F" && ok "each retired name is unset in the bundle" || bad "retired: rc=$RC $(grep -c unset "$F")"
+# shellcheck source=/dev/null
+[ "$( ( set +u; export DM_PROD_DIRECT_URL=from-older-bundle; . "$F" >/dev/null 2>&1; printf '%s' "${DM_PROD_DIRECT_URL:-}" ) )" = "" ] && ok "sourcing the bundle drops a retired variable an older bundle exported" || bad "retired variable survives sourcing"
+! grep -q 'export DM_PROD_DIRECT_URL' "$F" && ok "a retired name is no longer exported" || bad "still exported"
+python3 - "$REPO/.claude/repo.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+m = json.load(open(p))
+m["credentials"]["retired"] = ["BAD NAME"]
+json.dump(m, open(p, "w"))
+PY
+run
+[ "$RC" != 0 ] && grep -q 'invalid variable name' <<<"$OUT" && ok "a malformed retired name is refused" || bad "rc=$RC $OUT"
+
 echo "agent-env-build: the file"
 [ "$(stat -c %a "$F")" = 600 ] && ok "mode 600" || bad "mode $(stat -c %a "$F")"
 src_line="$(grep -n 'demo/agent.env' "$HOME/.bashrc" | cut -d: -f1)"

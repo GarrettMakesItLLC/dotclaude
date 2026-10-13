@@ -34,6 +34,10 @@
 #                from ~/.config/secrets/gmi.env), so falling back to the ambient
 #                shell is correct. Never widened to other keys: a repo-shaped
 #                name in the ambient shell is probably another project's value.
+#   retired      names the bundle no longer exports. Each is `unset` in the bundle,
+#                so a shell that sourced an older one drops it on the next source
+#                instead of holding it for its lifetime (the ambient prod writer
+#                URL, once the repo moves to a read-only role).
 #   githubToken  true: export GITHUB_TOKEN from `gh auth token`. This never
 #                writes NODE_AUTH_TOKEN; that is a separate credential that
 #                doctor.sh verifies against the registry.
@@ -81,6 +85,7 @@ SOURCES+=("$STATE_DIR/cloud.env")
 
 mapfile -t DIRECT < <(manifest_get credentials.direct || true)
 mapfile -t MACHINE_WIDE < <(manifest_get credentials.machineWide || true)
+mapfile -t RETIRED < <(manifest_get credentials.retired || true)
 mapfile -t RW_FALLBACK < <(manifest_get credentials.railway.fallback || true)
 NS_NAMES=(); NS_SRC=()
 while IFS=$'\t' read -r k v; do
@@ -191,6 +196,15 @@ for key in "${DIRECT[@]}"; do
 done
 
 printf '\n# Claude Code bills a bare Anthropic key instead of the subscription.\nunset %s\n' "${NEVER_BARE[*]}" >>"$TMP"
+
+if [ -n "${RETIRED[0]:-}" ]; then
+  printf '\n# Retired (credentials.retired) — cleared so an older bundle'"'"'s export dies too.\n' >>"$TMP"
+  for key in "${RETIRED[@]}"; do
+    [ -n "$key" ] || continue
+    case "$key" in *[!A-Za-z0-9_]* | [0-9]*) die "credentials.retired has an invalid variable name: $key" ;; esac
+    printf 'unset %s\n' "$key" >>"$TMP"
+  done
+fi
 
 if [ "$alias_direct" = true ] && [ "${#skipped[@]}" -gt 0 ]; then
   {

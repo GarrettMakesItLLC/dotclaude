@@ -86,7 +86,7 @@ ROWS
 
 # The refusal names the incident and the safe form.
 check 2 'PGOPTIONS="-c default_transaction_read_only=on" psql "$MB_PROD_DATABASE_URL" -c "select 1"'
-for want in 'BEGIN READ ONLY' 'MB_PROD_DIRECT_URL' '#8460' '25006'; do
+for want in 'BEGIN READ ONLY' 'prod-db-url.sh --writer' '#8460' '25006'; do
   grep -qF -- "$want" "$TMP/err" || { echo "FAIL: the refusal does not say '$want'"; fail=1; }
 done
 

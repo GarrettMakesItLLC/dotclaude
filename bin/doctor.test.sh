@@ -18,7 +18,8 @@ unset BASH_ENV REPO_MANIFEST DATABASE_URL
 export HOME="$TMP/home" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 mkdir -p "$HOME" "$TMP/bin"
-for t in jq psql shellcheck vercel corepack; do printf '#!/bin/sh\nexit 0\n' >"$TMP/bin/$t"; done
+for t in jq shellcheck vercel corepack; do printf '#!/bin/sh\nexit 0\n' >"$TMP/bin/$t"; done
+printf '#!/bin/sh\n[ -n "${PSQL_OUT:-}" ] && printf "%%s\\n" "$PSQL_OUT"\nexit 0\n' >"$TMP/bin/psql"   # answers like the server when PSQL_OUT is set
 printf '#!/bin/sh\nexit 127\n' >"$TMP/bin/railway"   # a shim whose binary never arrived
 chmod +x "$TMP/bin/"*
 export PATH="$TMP/bin:$PATH"
@@ -60,6 +61,28 @@ run
 echo "doctor: a bare DATABASE_URL in the shell warns"
 OUT="$(cd "$R" && DATABASE_URL=postgres://x "$DOC" 2>&1)"
 grep -q 'DATABASE_URL is exported' <<<"$OUT" && ok "flagged" || bad "$OUT"
+
+echo "doctor: an ambient production URL must not connect as a role that reads health data"
+cat >"$R/.claude/repo.json" <<'J'
+{ "stateDir": "~/.demo",
+  "doctor": {
+    "envFiles": [ { "path": ".env", "fix": "copy .env.example" } ],
+    "ambientProd": { "vars": ["DM_PROD_DIRECT_URL", "DM_PROD_READONLY_URL"], "healthTable": "vital_readings" },
+    "checks": [] } }
+J
+amb() { OUT="$(cd "$R" && env "$@" "$DOC" 2>&1)"; RC=$?; }
+amb -u DM_PROD_DIRECT_URL -u DM_PROD_READONLY_URL
+grep -q 'no ambient production database URL' <<<"$OUT" && ok "nothing exported: passes" || bad "none: $OUT"
+amb DM_PROD_DIRECT_URL=postgres://u:secretpw@h/db 'PSQL_OUT=postgres|t|t'
+[ "$RC" = 1 ] && grep -q '✗.*DM_PROD_DIRECT_URL connects as postgres and can read vital_readings' <<<"$OUT" && ok "the owner role fails the run" || bad "postgres: rc=$RC $OUT"
+! grep -q secretpw <<<"$OUT" && ok "the URL is never printed" || bad "url leaked: $OUT"
+amb DM_PROD_DIRECT_URL=postgres://u:p@h/db 'PSQL_OUT=app_owner|t|t'
+[ "$RC" = 1 ] && grep -q 'connects as app_owner and can read vital_readings' <<<"$OUT" && ok "a BYPASSRLS role with SELECT fails" || bad "bypassrls: rc=$RC $OUT"
+amb DM_PROD_READONLY_URL=postgres://u:p@h/db 'PSQL_OUT=readonly|f|f'
+grep -q '✓.*DM_PROD_READONLY_URL connects as readonly, which cannot read vital_readings' <<<"$OUT" && ok "a role without SELECT passes" || bad "readonly: $OUT"
+amb DM_PROD_READONLY_URL=postgres://u:p@h/db
+grep -q 'DM_PROD_READONLY_URL did not answer' <<<"$OUT" && ! grep -q '✗.*DM_PROD' <<<"$OUT" && ok "an unreachable server is noted, not a failure" || bad "silent: $OUT"
+git -C "$R" show HEAD:.claude/repo.json >"$R/.claude/repo.json"
 
 echo "doctor: in a worktree, a missing root .env is expected"
 git -C "$R" worktree add -q "$R/.worktrees/w" -b w

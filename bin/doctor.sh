@@ -248,6 +248,44 @@ else
   ok 'DATABASE_URL not exported (opt in per command)'
 fi
 
+# An ambient production URL must connect as a role that cannot read health data
+# (`doctor.ambientProd` in the manifest). A shell that holds the owner role's URL
+# hands every script and prompt-injected command a path to the whole database.
+# Judged by what the server says about the connecting role, never by the URL's
+# text; the URL reaches psql only, never this output.
+amb_table="$(manifest_get doctor.ambientProd.healthTable || true)"
+if [ -n "$amb_table" ]; then
+  if ! printf '%s' "$amb_table" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$'; then
+    bad "doctor.ambientProd.healthTable is not a table name: $amb_table" 'use a bare table name, e.g. vital_readings'
+  else
+    amb_checked=0
+    while IFS= read -r amb_var; do
+      [ -n "$amb_var" ] || continue
+      amb_url="${!amb_var:-}"
+      [ -n "$amb_url" ] || continue
+      amb_checked=$((amb_checked + 1))
+      if ! command -v psql >/dev/null 2>&1; then
+        note "$amb_var is set but psql is missing — role not checked"
+        continue
+      fi
+      amb_row="$(PGCONNECT_TIMEOUT=8 timeout 20 psql "$amb_url" -X -At -F '|' -c \
+        "select current_user, coalesce((select rolbypassrls from pg_roles where rolname = current_user), false), has_table_privilege(current_user, '$amb_table', 'SELECT')" 2>/dev/null || true)"
+      amb_user="${amb_row%%|*}"; amb_rest="${amb_row#*|}"
+      amb_bypass="${amb_rest%%|*}"; amb_select="${amb_rest#*|}"
+      if [ -z "$amb_row" ] || [ "$amb_rest" = "$amb_row" ]; then
+        note "$amb_var did not answer — role not checked"
+      elif [ "$amb_user" = postgres ] || { [ "$amb_bypass" = t ] && [ "$amb_select" = t ]; }; then
+        bad "$amb_var connects as $amb_user and can read $amb_table" 'export the read-only URL to agents; fetch the owner URL for one command with `~/.claude/bin/prod-db-url.sh --writer`, and add the name to credentials.retired'
+      elif [ "$amb_select" = t ]; then
+        bad "$amb_var connects as $amb_user and can read $amb_table" 'ambient production access must not read health data — use a role without SELECT on it'
+      else
+        ok "$amb_var connects as $amb_user, which cannot read $amb_table"
+      fi
+    done < <(manifest_get doctor.ambientProd.vars || true)
+    [ "$amb_checked" -gt 0 ] || ok 'no ambient production database URL in this shell'
+  fi
+fi
+
 # NODE_AUTH_TOKEN is judged by what the registry does with it, not by where it
 # came from: one GET for a @garrettmakesitllc package. The token travels on
 # curl's stdin config, so it never reaches argv or this output.

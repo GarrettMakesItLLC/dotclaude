@@ -21,7 +21,7 @@
 # `SESSION CHARACTERISTICS ... READ ONLY`, a bare `SET transaction_read_only`,
 # `set_config(..., false)`, any of them riding in PGOPTIONS or a URL's
 # `options=`) unless the command names only a direct connection: a variable
-# whose name ends in DIRECT_URL (`DIRECT_URL`, `MB_PROD_DIRECT_URL`, …) or a
+# whose name ends in DIRECT_URL (`DIRECT_URL`, `PROD_DIRECT_URL`, …) or a
 # literal `:5432`, and nothing pooled or opaque. The hook reads only the command
 # string, so it cannot see what `$URL`, `$(…)` or a sourced file holds; every
 # such indirection is refused, which is the safe direction for an incident that
@@ -144,7 +144,8 @@ Scope read-only to the TRANSACTION, on the direct connection:
 
   psql "$DIRECT_URL" -X -A -F '|' -c "BEGIN READ ONLY; <query>; ROLLBACK;"
 
-(In MuscleBuddy that is $MB_PROD_DIRECT_URL. Never write a connection string
-into a file.)
+(The owner URL is fetched for one command with
+~/.claude/bin/prod-db-url.sh --writer; agent shells hold only a read-only
+role. Never write a connection string into a file.)
 EOF
 exit 2

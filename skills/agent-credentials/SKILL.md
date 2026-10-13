@@ -40,10 +40,11 @@ A native or bundled build is worse-exposed: Vite lets an already-set `process.en
 
 ### Database URLs are namespaced, and you opt in per command
 
-`dotenv` never overrides an already-set variable, so a bare `DATABASE_URL` in a shell pins every seed, backfill and migration on the machine to it. The bundle exports `<PREFIX>_…DATABASE_URL` only:
+`dotenv` never overrides an already-set variable, so a bare `DATABASE_URL` in a shell pins every seed, backfill and migration on the machine to it. The bundle exports a database URL only under a namespaced, read-only name (`<PREFIX>_PROD_READONLY_URL`), never the owner role's. Reads opt in per command; a migration or backfill fetches the writer URL for that one command and never stores it:
 
 ```bash
-DATABASE_URL="$MB_PROD_DATABASE_URL" npx prisma migrate status
+DATABASE_URL="$MB_PROD_READONLY_URL" npx tsx scripts/audit.ts
+DATABASE_URL="$(~/.claude/bin/prod-db-url.sh --writer)" npm run backfill:x -- --apply
 ```
 
 The appendix says what each points at — often a live production database, with no separate local one.

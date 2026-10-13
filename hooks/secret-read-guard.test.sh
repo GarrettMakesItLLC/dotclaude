@@ -143,6 +143,9 @@ check 2 Bash command 'gh auth token'
 check 2 Bash command 'gh auth status --show-token'
 check 2 Bash command 'echo "$(bin/staging-db-url.sh)"'
 check 2 Bash command 'bin/staging-db-url.sh | tee /tmp/url.txt'
+# shellcheck disable=SC2088 # the literal command text is the input
+check 2 Bash command '~/.claude/bin/prod-db-url.sh --writer'
+check 2 Bash command 'cd ~/workspace/MuscleBuddy && prod-db-url.sh --writer | tee /tmp/u'
 check 2 Bash command 'bin/staging-db-url.sh >&2'
 check 2 Bash command 'railway variables --kv | grep DATABASE'
 check 2 Bash command 'env FOO=1 bin/staging-db-url.sh'
@@ -152,6 +155,8 @@ check 2 Bash command "$(printf 'cd /tmp\nprintenv GITHUB_TOKEN')"
 check 0 Bash command 'export STAGING_DATABASE_URL="$(~/.claude/bin/staging-db-url.sh)"'
 check 0 Bash command 'psql "$(bin/staging-db-url.sh)" -c "select 1"'
 check 0 Bash command 'DB=`bin/staging-db-url.sh`'
+check 0 Bash command 'DATABASE_URL="$(~/.claude/bin/prod-db-url.sh --writer)" npm run backfill:x -- --apply'
+check 0 Bash command 'bash bin/prod-db-url.test.sh'
 check 0 Bash command 'bin/staging-db-url.sh > /tmp/url.txt'
 check 0 Bash command 'bin/staging-db-url.sh >/dev/null 2>&1 && echo ok'
 check 0 Bash command "bin/staging-db-url.sh | sed 's/:[^:@]*@/:<redacted>@/'"
