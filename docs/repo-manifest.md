@@ -25,6 +25,8 @@ in the environment overrides discovery (the self-tests use it).
 | `direct` | keys | Exported under their real names. |
 | `aliasDirect` | bool | Also export each direct key as `<envPrefix>_<KEY>`, and `unset` the alias of a key not found. |
 | `namespaced` | `{ "EXPORTED": "SOURCE_KEY" }` | Exported ONLY under the namespaced name — database URLs. |
+| `retired` | keys | Names the bundle no longer exports. Each is `unset` in the bundle, so a shell that sourced an older one drops it on the next source. |
+| `writerKey` | string | The Railway variable `bin/prod-db-url.sh --writer` prints. Default `DIRECT_URL`. |
 | `machineWide` | keys | May fall back to the ambient shell (per-machine tokens such as `NODE_AUTH_TOKEN`). |
 | `githubToken` | bool | Export `GITHUB_TOKEN` from `gh auth token`. |
 | `railway.service` | string | Railway service holding the deployed server's env. Also used by `ops.railwayKeys`. |
@@ -93,10 +95,15 @@ sets how long a source must be quiet before a copy that timed out on the lock re
 | `prismaClient` | paths | Any existing path proves a generated client. Default `node_modules/.prisma/client/index.d.ts`. |
 | `envFiles` | `[{ path, fix }]` | Env files to report, each with the command that produces it. |
 | `checks` | `[{ name, run, fix, severity }]` | Repo checks run with `sh` in the repo root; `severity` `block` (default) or `warn`. |
+| `ambientProd` | `{ vars, healthTable }` | Production URL variables that may be exported in a shell. Each set one is probed with `psql`; the run fails when it connects as `postgres`, or as a role that can `SELECT` `healthTable`. The URL is never printed. |
+
+## `credentials.railway` — `bin/prod-db-url.sh`
+
+`prod-db-url.sh --writer` prints the owner database URL (`credentials.writerKey`, default `DIRECT_URL`) from the Railway service in `credentials.railway`, with the pgbouncer query stripped. It is the only way an agent holds the writer URL, for one command: `DATABASE_URL="$(~/.claude/bin/prod-db-url.sh --writer)" npm run backfill:x -- --apply`.
 
 ## Example — a mirror-strategy repo with the OPS channel
 
-MuscleBuddy's manifest, verbatim.
+The credentials, ops and doctor database fields of MuscleBuddy's manifest.
 
 ```json
 {
@@ -121,10 +128,7 @@ MuscleBuddy's manifest, verbatim.
       "FDC_API_KEY"
     ],
     "aliasDirect": true,
-    "namespaced": {
-      "MB_PROD_DATABASE_URL": "DATABASE_URL",
-      "MB_PROD_DIRECT_URL": "DIRECT_URL"
-    },
+    "retired": ["MB_PROD_DATABASE_URL", "MB_PROD_DIRECT_URL"],
     "githubToken": true,
     "railway": {
       "service": "@musclebuddy/server",
@@ -134,9 +138,7 @@ MuscleBuddy's manifest, verbatim.
         "SUPABASE_ANON_KEY",
         "SUPABASE_SERVICE_KEY",
         "VAPID_PUBLIC_KEY",
-        "VAPID_PRIVATE_KEY",
-        "DATABASE_URL",
-        "DIRECT_URL"
+        "VAPID_PRIVATE_KEY"
       ]
     }
   },
@@ -174,6 +176,7 @@ MuscleBuddy's manifest, verbatim.
     "resolves": "vitest",
     "nestedDeps": ["apps/web:lucide-react", "apps/server:fastify", "packages/engine:zod"],
     "prismaClient": ["prisma/generated/client/client.ts", "prisma/generated/client/index.js"],
+    "ambientProd": { "vars": ["MB_PROD_READONLY_URL", "MB_PROD_DIRECT_URL", "MB_PROD_DATABASE_URL"], "healthTable": "vital_readings" },
     "envFiles": [
       {
         "path": ".env",
