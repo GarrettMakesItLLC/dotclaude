@@ -127,7 +127,7 @@ PLACEHOLDER = re.compile(r"redacted|\*\*\*|xxxx|changeme|change-me|your[_-]|plac
 
 
 def placeholder(v):
-    return (not v or v.startswith(("$", "<", "%", "{")) or PLACEHOLDER.search(v)
+    return (not v or v.startswith(("$", "<", "%", "{", "[")) or PLACEHOLDER.search(v)
             or len(set(v)) == 1)
 
 
@@ -239,6 +239,8 @@ def fixture_host(host):
     rather than a leak."""
     h = (host or "").lower().rstrip(".")
     if h == "localhost" or re.fullmatch(r"127(?:\.\d{1,3}){3}", h):
+        return True
+    if re.search(r"\$\{|\[|\]|<|>|%s", h):  # a template or placeholder host, not a real name
         return True
     return bool(re.search(r"(?:^|\.)example\.(?:com|net|org)$|\.(?:test|example|invalid|localhost)$", h))
 

@@ -142,6 +142,10 @@ must_pass ".invalid fixture URL" "postgres://u:${FAKE_PW}@db.internal.invalid/x"
 must_pass "localhost fixture URL" "postgresql://user:${FAKE_PW}@localhost:5432/test"
 must_pass "127.0.0.1 fixture URL" "postgresql://user:${FAKE_PW}@127.0.0.1:5432/test"
 must_pass ".localhost fixture URL" "redis://default:${FAKE_PW}@cache.localhost:6379"
+must_pass "template-expression host" 'postgresql://user:'"${FAKE_PW}"'@${POOLER}:6543/postgres'
+must_pass "bracketed ref and region placeholders" 'postgresql://postgres.[PROJECT_REF]:'"${FAKE_PW}"'@aws-1-[REGION].pooler.supabase.com:5432/postgres'
+must_pass "bracketed password placeholder" 'postgresql://postgres:[YOUR-PASSWORD]@db.abcdefghijklmnop.supabase.co:5432/postgres'
+must_redact "live password on a template host" "postgresql://u:${FAKE_LIVE}@\${POOLER}/x" "$FAKE_LIVE" "postgresql password"
 must_redact "live password on localhost" "postgresql://u:${FAKE_LIVE}@localhost/x" "$FAKE_LIVE" "postgresql password"
 must_redact "live password on a fixture host" "postgresql://u:${FAKE_LIVE}@db.example.com/x" "$FAKE_LIVE" "postgresql password"
 must_redact "example-ish real host" "postgresql://u:${FAKE_PW}@example.com.attacker.net/x" "$FAKE_PW" "postgresql password"
