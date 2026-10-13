@@ -234,10 +234,13 @@ HARD_NAME = re.compile(r"(secret|passw(?:or)?d|passphrase|(?:^|_)pass$|private_?
 
 def fixture_host(host):
     """An RFC 2606 / 6761 reserved host — example.com/.net/.org, or a .test,
-    .example or .invalid name — which no real database answers on, so a URL to
-    it is a test fixture rather than a leak."""
+    .example, .invalid or .localhost name — or a loopback address, which no
+    shared or production database answers on, so a URL to it is a test fixture
+    rather than a leak."""
     h = (host or "").lower().rstrip(".")
-    return bool(re.search(r"(?:^|\.)example\.(?:com|net|org)$|\.(?:test|example|invalid)$", h))
+    if h == "localhost" or re.fullmatch(r"127(?:\.\d{1,3}){3}", h):
+        return True
+    return bool(re.search(r"(?:^|\.)example\.(?:com|net|org)$|\.(?:test|example|invalid|localhost)$", h))
 
 
 def real_value(v, name=""):

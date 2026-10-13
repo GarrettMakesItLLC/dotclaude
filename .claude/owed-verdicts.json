@@ -29,7 +29,13 @@
         "from": "2026-10-04T12:57:00Z",
         "issue": "GarrettMakesItLLC/MuscleBuddy#10493"
       },
-      "paid": null
+      "paid": {
+        "run": "https://github.com/GarrettMakesItLLC/dotclaude/actions/runs/38352496066",
+        "sha": "d162934068078429f769a41a7ee3d09e08587a61",
+        "result": "success",
+        "note": "validate on push to main: all jobs success. CI Success runs only on pull_request; the aggregate is evidenced by PR run https://github.com/GarrettMakesItLLC/dotclaude/actions/runs/38351785216 (head 4ff0ba59b914acba71f53f2b02f62eb1aa67ed74): config-drift, commitlint, mcp-github, validate and CI Success all succeeded.",
+        "paidOn": "2026-10-13"
+      }
     }
   ]
 }

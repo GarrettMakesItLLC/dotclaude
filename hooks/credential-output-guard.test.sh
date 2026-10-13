@@ -139,6 +139,10 @@ must_pass "name mapping env vs live names" "$(printf 'X_DATABASE_URL=DATABASE_UR
 must_pass "example.com fixture URL" "postgresql://postgres.sandboxref:${FAKE_PW}@pooler.example.com:6543/postgres"
 must_pass ".test fixture URL" "redis://default:${FAKE_PW}@cache.test:6379"
 must_pass ".invalid fixture URL" "postgres://u:${FAKE_PW}@db.internal.invalid/x"
+must_pass "localhost fixture URL" "postgresql://user:${FAKE_PW}@localhost:5432/test"
+must_pass "127.0.0.1 fixture URL" "postgresql://user:${FAKE_PW}@127.0.0.1:5432/test"
+must_pass ".localhost fixture URL" "redis://default:${FAKE_PW}@cache.localhost:6379"
+must_redact "live password on localhost" "postgresql://u:${FAKE_LIVE}@localhost/x" "$FAKE_LIVE" "postgresql password"
 must_redact "live password on a fixture host" "postgresql://u:${FAKE_LIVE}@db.example.com/x" "$FAKE_LIVE" "postgresql password"
 must_redact "example-ish real host" "postgresql://u:${FAKE_PW}@example.com.attacker.net/x" "$FAKE_PW" "postgresql password"
 
