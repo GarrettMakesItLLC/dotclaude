@@ -17,6 +17,10 @@
 #   …__replace_content / replace_in_files / replace_symbol_body /
 #      insert_after_symbol / insert_before_symbol / rename_symbol /
 #      safe_delete_symbol
+#
+# Known gap: Serena's find_file, list_dir and find_symbol are not guarded by
+# secret-read-guard. They return file names and symbol bodies, not the contents
+# of a secrets file, which only read_file and search_for_pattern can return.
 #                                                       -> Edit  {file_path}
 #
 # Serena resolves `relative_path` against its active project, which the hook
