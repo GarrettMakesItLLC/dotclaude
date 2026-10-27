@@ -280,9 +280,9 @@ interface AddItemResponse {
  * happen to auto-add, reporting the miss in `_warnings` rather than doing the
  * one call that would have fixed it (platform#745).
  *
- * `addProjectV2ItemById` is idempotent: adding an issue already on the board
- * returns the existing item rather than duplicating it, so a caller does not
- * have to check first.
+ * Adding an issue already on the board never duplicates it: the API either
+ * returns the existing item or rejects with "Content already exists", which is
+ * resolved to that item, so a caller does not have to check first.
  */
 export async function addProjectItem(
   owner: string,
@@ -297,10 +297,22 @@ export async function addProjectItem(
   const contentId = issue.repository?.issue?.id;
   if (!contentId) throw new Error(`Could not resolve ${owner}/${repo}#${issueNumber}`);
 
-  const added = await ghGraphQL<AddItemResponse>(ADD_ITEM_MUTATION, {
-    projectId: PROJECT_ID,
-    contentId,
-  });
+  let added: AddItemResponse;
+  try {
+    added = await ghGraphQL<AddItemResponse>(ADD_ITEM_MUTATION, {
+      projectId: PROJECT_ID,
+      contentId,
+    });
+  } catch (err) {
+    // A project workflow can add the issue between the caller's lookup and this
+    // mutation, and the API then answers "Content already exists" instead of
+    // returning the existing item. The goal is met; hand back that item.
+    if (!/already exists in this project/i.test(err instanceof Error ? err.message : String(err))) throw err;
+    invalidateProjectItem(owner, repo, issueNumber);
+    const existing = await findProjectItem(owner, repo, issueNumber);
+    if (!existing) throw err;
+    return existing.id;
+  }
   const itemId = added.addProjectV2ItemById?.item?.id;
   if (!itemId) throw new Error(`Adding ${owner}/${repo}#${issueNumber} to the project returned no item`);
 
