@@ -109,6 +109,49 @@ check "populate copies a pin from an npm cache" \
   "'$CLI' populate --lockfile '$TMP/consumer/package-lock.json' --cache '$TMP/cache' 2>/dev/null | grep -q 'copied from cache: 1'"
 check "populated bytes are the cached bytes" "cmp -s '$TGZ' '$TMP/held.tgz'"
 
+# --- sync: per-machine branches, since the org ruleset rejects pushes to main (#596) ----------
+SYNC="$TMP/sync"; mkdir -p "$SYNC"
+git init -q --bare -b main "$SYNC/remote.git"
+# Stand-in for the org ruleset: main takes no direct pushes.
+printf '%s\n' '#!/bin/sh' \
+  'while read old new ref; do' \
+  '  [ "$ref" = refs/heads/main ] && { echo "GH013: Changes must be made through a pull request" >&2; exit 1; }' \
+  'done' 'exit 0' >"$SYNC/remote.git/hooks/pre-receive"
+chmod +x "$SYNC/remote.git/hooks/pre-receive"
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+# Seed main past the hook, as the repo's initial commit would be.
+git clone -q "$SYNC/remote.git" "$SYNC/seed" 2>/dev/null
+git -C "$SYNC/seed" commit -q --allow-empty -m init
+git -C "$SYNC/seed" push -q "$SYNC/remote.git" HEAD:refs/heads/seed-main 2>/dev/null
+rm -f "$SYNC/remote.git/hooks/pre-receive.off"
+mv "$SYNC/remote.git/hooks/pre-receive" "$SYNC/remote.git/hooks/pre-receive.off"
+git -C "$SYNC/seed" push -q "$SYNC/remote.git" HEAD:refs/heads/main 2>/dev/null
+mv "$SYNC/remote.git/hooks/pre-receive.off" "$SYNC/remote.git/hooks/pre-receive"
+mk_tgz() { mkdir -p "$1/packages/$2"; printf '%s' "$3" >"$1/packages/$2/$2-$3.tgz"; }
+store_a="$SYNC/a"; store_b="$SYNC/b"
+mk_tgz "$store_a" alpha 1.0.0
+sync_as() { # store host
+  GMI_REGISTRY_HOME="$1" GMI_REGISTRY_REMOTE="$SYNC/remote.git" GMI_REGISTRY_HOST="$2" "$CLI" sync 2>&1
+}
+out="$(sync_as "$store_a" desk)"; rc=$?
+check "sync succeeds though main rejects pushes (log: $out)" "[ $rc = 0 ]"
+check "sync pushes a per-machine store/ branch" \
+  "git -C '$SYNC/remote.git' for-each-ref --format='%(refname)' refs/heads/store/ | grep -q '^refs/heads/store/desk-'"
+git clone -q "$SYNC/remote.git" "$store_b" 2>/dev/null
+mk_tgz "$store_b" beta 2.0.0
+out="$(sync_as "$store_b" lap)"; rc=$?
+check "second machine sync succeeds (log: $out)" "[ $rc = 0 ]"
+check "second machine received the first machine's tarball" "[ -f '$store_b/packages/alpha/alpha-1.0.0.tgz' ]"
+out="$(sync_as "$store_a" desk)"; rc=$?
+check "first machine sync succeeds again (log: $out)" "[ $rc = 0 ]"
+check "first machine received the second machine's tarball" "[ -f '$store_a/packages/beta/beta-2.0.0.tgz' ]"
+mk_tgz "$store_a" gamma 3.0.0
+out="$(GMI_REGISTRY_HOME="$store_a" GMI_REGISTRY_REMOTE="$SYNC/nowhere.git" "$CLI" sync 2>&1)"; rc=$?
+check "an unreachable remote exits non-zero and says the commit stays local" \
+  "[ $rc -ne 0 ] && grep -qi 'unreachable' <<<\"\$out\""
+check "and the tarball is committed locally" \
+  "git -C '$store_a' ls-files packages/gamma | grep -q gamma-3.0.0.tgz"
+
 # --- the routing claim, end to end ----------------------------------------------------------
 # The consumer pins the scope to GitHub Packages exactly as every real repo does.
 printf '@garrettmakesitllc:registry=https://npm.pkg.github.com\n' >"$TMP/consumer/.npmrc"

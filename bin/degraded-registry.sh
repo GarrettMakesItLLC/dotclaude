@@ -35,8 +35,9 @@
 #
 # THE STORE is a git checkout ($GMI_REGISTRY_HOME, default
 # ~/.local/share/gmi-registry) holding packages/<name>/<name>-<version>.tgz.
-# `sync` exchanges it with $GMI_REGISTRY_REMOTE, which is how the other machine
-# gets the same bytes. Bytes matter: a rebuilt tarball almost never hashes the
+# `sync` exchanges it with $GMI_REGISTRY_REMOTE (a per-machine store/* branch
+# pushed, every store/* branch merged), which is how the other machine gets the
+# same bytes. Bytes matter: a rebuilt tarball almost never hashes the
 # same as the original, so tarballs are shared rather than rebuilt per machine.
 set -uo pipefail
 
@@ -221,16 +222,27 @@ cmd_sync() {
       return 0
     fi
   fi
+  git -C "$STORE" remote set-url origin "$REMOTE" 2>/dev/null || git -C "$STORE" remote add origin "$REMOTE"
   git -C "$STORE" add -A packages
   if ! git -C "$STORE" diff --cached --quiet; then
     git -C "$STORE" commit -q -m "store: $(git -C "$STORE" diff --cached --name-only | wc -l | tr -d ' ') tarball(s) from $(hostname)" \
       || die "commit failed in $STORE"
   fi
-  if git -C "$STORE" ls-remote --exit-code origin main >/dev/null 2>&1; then
-    git -C "$STORE" pull -q --rebase origin main || die "pull failed in $STORE; resolve it there"
+  # The org ruleset keeps direct pushes off the store's main, and the store has
+  # no CI to satisfy it. Each machine pushes its own store/<host>-<date> branch
+  # and merges every other machine's: tarballs are distinct files, so the merges
+  # never conflict.
+  if ! git -C "$STORE" fetch -q origin '+refs/heads/*:refs/remotes/origin/*' 2>/dev/null; then
+    die "$REMOTE is unreachable; the store is committed locally and the next sync will share it"
   fi
-  git -C "$STORE" push -q origin HEAD:main || die "push failed from $STORE"
-  echo "store in sync with $REMOTE: $(tarball_count) tarballs"
+  local ref
+  for ref in $(git -C "$STORE" for-each-ref --format='%(refname)' refs/remotes/origin/main 'refs/remotes/origin/store/'); do
+    git -C "$STORE" merge -q --no-edit --allow-unrelated-histories "$ref" >/dev/null \
+      || { git -C "$STORE" merge --abort 2>/dev/null; die "merging $ref into $STORE conflicted (a version published with different bytes?); resolve it there"; }
+  done
+  local branch="store/${GMI_REGISTRY_HOST:-$(hostname -s)}-$(date +%F)"
+  git -C "$STORE" push -q origin "HEAD:refs/heads/$branch" || die "push failed from $STORE"
+  echo "store in sync with $REMOTE via $branch: $(tarball_count) tarballs"
 }
 
 cmd_banner() {
