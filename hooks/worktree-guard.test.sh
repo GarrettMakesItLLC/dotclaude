@@ -84,6 +84,12 @@ git -C "$PLAIN" commit -qm init --allow-empty
 # Should BLOCK (main tree of a convention repo)
 check 2 Edit         file_path     "$CONV/src/existing.ts"
 check 2 Write        file_path     "$CONV/src/brand-new.ts"      # file need not exist yet
+# task-observer appends to skill-observations/log.md (and its .bak) in-session, so
+# that directory is not a worktree-collision surface (#591).
+check 0 Write        file_path     "$CONV/skill-observations/log.md"
+check 0 Write        file_path     "$CONV/skill-observations/log.md.bak"
+check 2 Write        file_path     "$CONV/skill-observations-not/log.md"
+check 0 Bash         command       "cp $CONV/skill-observations/log.md $CONV/skill-observations/log.md.bak"
 check 2 NotebookEdit notebook_path "$CONV/src/nb.ipynb"
 
 # Should BLOCK — quoting/path-resolution edge cases in the main tree.
