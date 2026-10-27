@@ -144,6 +144,17 @@ sleep 1; touch "$M/package-lock.json"
 run "$V"
 [ "$RC" = 1 ] && grep -q 'predate its own package-lock.json' <<<"$OUT" && ok "a main tree older than its lockfile is refused as a source" || bad "stale main: rc=$RC $OUT"
 
+# --check on a worktree with a fresh install of its own must not demand a main-tree
+# `npm ci`, which worktree-guard forbids from a worktree session (#587).
+run --check "$V"
+grep -q 'predate its own package-lock.json' <<<"$OUT" && ok "--check still refuses a stale main when the worktree has no install of its own" || bad "no own install: rc=$RC $OUT"
+mkdir -p "$V/node_modules"; sleep 1; echo '{}' >"$V/node_modules/.package-lock.json"
+run --check "$V"
+! grep -q 'predate its own package-lock.json' <<<"$OUT" && ok "--check ignores a stale main when the worktree's own install is current" || bad "own install: rc=$RC $OUT"
+run "$V"
+[ "$RC" = 1 ] && grep -q 'predate its own package-lock.json' <<<"$OUT" && ok "a real setup still refuses a stale main as a copy source" || bad "setup: rc=$RC $OUT"
+rm -rf "$V/node_modules"
+
 # --------------------------------------------------------------------------
 # A fresh mirror fixture: main tree with one nested dep (apps/web: foo@1), a root
 # tool with a .bin link, the install stamp, and one worktree. $1 = dir, $2 = the

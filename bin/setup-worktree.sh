@@ -245,7 +245,15 @@ fi
 if [ "$strategy" = mirror ]; then
   # The main tree is the source of truth for every copy below, which it is not
   # when its own install predates its lockfile.
-  if [ -f "$main_tree/package-lock.json" ] && [ -f "$main_tree/node_modules/.package-lock.json" ] \
+  # A --check of a worktree whose own root install is current does not copy from
+  # the main tree, and the remedy (a main-tree `npm ci`) is a write that
+  # worktree-guard forbids from a worktree session, so it is not asked for.
+  own_install_current=0
+  if ((check_only)) && [ -f "$target/package-lock.json" ] && [ -f "$target/node_modules/.package-lock.json" ] \
+    && (($(stat -c %Y "$target/node_modules/.package-lock.json") >= $(stat -c %Y "$target/package-lock.json"))); then
+    own_install_current=1
+  fi
+  if ((own_install_current == 0)) && [ -f "$main_tree/package-lock.json" ] && [ -f "$main_tree/node_modules/.package-lock.json" ] \
     && (($(stat -c %Y "$main_tree/node_modules/.package-lock.json") < $(stat -c %Y "$main_tree/package-lock.json"))); then
     warn "the MAIN checkout ($main_tree) installed packages that predate its own package-lock.json, so it is"
     warn "not a trustworthy source to copy from. This is churn from another session's merged lockfile"

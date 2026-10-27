@@ -834,6 +834,12 @@ check_one() {
       ;;
   esac
 
+  # task-observer logs into skill-observations/ in-session (log.md, its .bak);
+  # that directory is a per-workspace notebook, not a collision surface.
+  case "$file_path" in
+    */skill-observations/*) return 0 ;;
+  esac
+
   # Resolve the nearest existing directory at/above the target (the file may
   # not exist yet on a Write). git -C needs a real directory to run in.
   dir="$file_path"

@@ -294,3 +294,33 @@ describe("setProjectSingleSelect", () => {
     ]);
   });
 });
+
+describe("addProjectItem", () => {
+  const gqlError = (message: string): Response => {
+    const text = JSON.stringify({ errors: [{ message }] });
+    return { status: 200, ok: true, headers: new Headers(), text: async () => text, json: async () => JSON.parse(text) } as unknown as Response;
+  };
+
+  it("resolves to the existing item when the project already holds the issue (#591)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(graphqlResponse({ repository: { issue: { id: "I_1" } } })) // node id
+      .mockResolvedValueOnce(gqlError("Content already exists in this project")) // add
+      .mockResolvedValueOnce(
+        graphqlResponse({
+          repository: {
+            issue: { projectItems: { nodes: [{ id: "PVTI_exist", project: { id: PROJECT_ID }, fieldValues: { nodes: [] } }] } },
+          },
+        }),
+      ); // re-find
+    const { addProjectItem } = await import("../src/project.js");
+    await expect(addProjectItem("acme", "widgets", 5)).resolves.toBe("PVTI_exist");
+  });
+
+  it("still throws an unrelated add failure", async () => {
+    fetchMock
+      .mockResolvedValueOnce(graphqlResponse({ repository: { issue: { id: "I_1" } } }))
+      .mockResolvedValueOnce(gqlError("Resource not accessible"));
+    const { addProjectItem } = await import("../src/project.js");
+    await expect(addProjectItem("acme", "widgets", 5)).rejects.toThrow("Resource not accessible");
+  });
+});

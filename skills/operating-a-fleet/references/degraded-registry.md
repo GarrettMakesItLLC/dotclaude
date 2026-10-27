@@ -120,9 +120,16 @@ Tarballs are shared rather than rebuilt per machine because rebuilds rarely repr
 bytes.
 
 ```bash
-~/.claude/bin/degraded-registry.sh sync   # first run clones the store; later runs commit, pull --rebase, push
+~/.claude/bin/degraded-registry.sh sync   # first run clones the store; later runs commit, merge every store/* branch, push store/<host>-<date>
 ~/.claude/bin/degraded-registry.sh on
 ```
+
+The org ruleset on the store repo requires a PR and `CI Success` for `main`, and the store has no
+CI, so `sync` never pushes `main`. It pushes the machine's own branch `store/<hostname>-<date>`,
+then fetches and merges `main` and every `store/*` branch into the local store. Tarballs are
+distinct files, so those merges do not conflict; one that does means a version was published with
+different bytes, and `sync` aborts the merge and says so. With the remote unreachable, `sync` leaves
+the commit in the local store and exits non-zero; the next run shares it.
 
 `on` clones the store by itself on a machine that has none. Run `sync` after every `publish` and
 `populate`, on whichever machine did it.
