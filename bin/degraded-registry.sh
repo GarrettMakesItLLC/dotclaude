@@ -240,7 +240,9 @@ cmd_sync() {
     git -C "$STORE" merge -q --no-edit --allow-unrelated-histories "$ref" >/dev/null \
       || { git -C "$STORE" merge --abort 2>/dev/null; die "merging $ref into $STORE conflicted (a version published with different bytes?); resolve it there"; }
   done
-  local branch="store/${GMI_REGISTRY_HOST:-$(hostname -s)}-$(date +%F)"
+  local branch host="${GMI_REGISTRY_HOST:-}"
+  [ -n "$host" ] || host="$(hostname -s)"
+  branch="store/$host-$(date +%F)"
   git -C "$STORE" push -q origin "HEAD:refs/heads/$branch" || die "push failed from $STORE"
   echo "store in sync with $REMOTE via $branch: $(tarball_count) tarballs"
 }
