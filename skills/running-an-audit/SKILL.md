@@ -39,6 +39,7 @@ The method is here. The realm checklists are in `references/` — load only the 
 | Observability & cost | `references/observability-cost.md` |
 | Product & spec coherence (tiers, flags, invariants) | `references/product-spec-coherence.md` |
 | Business-logic claim fulfilment (claims × situations, end to end) | `references/business-logic-claims.md` |
+| User journeys (persona x situation, shared-surface ownership) | `references/user-journeys.md` |
 | i18n, units & time | `references/i18n-units-time.md` |
 | API contract quality | `references/api-contract-quality.md` |
 
