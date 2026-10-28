@@ -19,7 +19,6 @@ teams/
 telemetry/
 .credentials.json
 .worktrees/
-.serena/
 .remember/
 
 # OS noise

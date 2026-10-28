@@ -1,6 +1,6 @@
 ---
 name: content-drafting
-description: Use when drafting a blog, guide, help or resource page for MuscleBuddy, NetWorthy, RedThreadEvents or AdventureOS as validated MDX. Not for ads, social posts, or RedThread's content-plan pipeline.
+description: Use when drafting a blog, guide, help or resource page for MuscleBuddy, RedThreadEvents or AdventureOS as validated MDX. Not for ads, social posts, or RedThread's content-plan pipeline.
 ---
 
 # Content drafting

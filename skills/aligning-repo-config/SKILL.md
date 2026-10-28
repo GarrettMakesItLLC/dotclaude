@@ -49,7 +49,7 @@ ls .claude/skills/ ~/dotclaude/skills/
 
 - **A hook dotclaude now ships and wires globally** — delete the repo copy AND its `.claude/settings.json` entry, or it runs twice. Keep only a repo-specific payload the global hook calls.
 - **A `bin/` script dotclaude ships** (`setup-worktree.sh`, `agent-env-build.sh`, `ops-pull.sh`, `lib/vercel.sh`, `with-check-lock.sh`, `staging-db-url.sh`, `doctor.sh`) — move the repo's values into `.claude/repo.json` (`~/dotclaude/docs/repo-manifest.md`), repoint callers (`package.json`, `.husky/`, docs) at `~/.claude/bin/…`, and delete the copy. A script CI runs has no dotclaude on the runner: keep a shim that `exec`s `~/.claude/bin/<script>` when it exists and falls back otherwise (for `with-check-lock.sh`, to running the command unwrapped).
-- **A skill dotclaude ships** (`agent-credentials`, `graphify`, a config-alignment skill like this one) — fold any repo-only content into the right place (`.claude/credentials.md` for credentials, `.claude/rules/` for invariants) and delete the copy.
+- **A skill dotclaude ships** (`agent-credentials`, a config-alignment skill like this one) — fold any repo-only content into the right place (`.claude/credentials.md` for credentials, `.claude/rules/` for invariants) and delete the copy.
 
 ## 4. Tier every line
 
@@ -101,7 +101,6 @@ Before renaming or deleting a rule file or a heading, grep for citations: code c
 - **Integrations** — cross-check `~/dotclaude/integrations.md`'s roster against what the repo actually uses (its `package.json`/CI for Supabase, Railway, Vercel, Sentry, etc.). A used integration undocumented there is a gap to file back against `integrations.md`, not something to re-document per repo.
 - **`.claude/rules/*.md` frontmatter** — every rule has a `paths:` glob. Without one it loads every turn, which is the cost the tier exists to avoid.
 - **Repo-owned AI surfaces** — a vendored third-party skills lockfile, a public-docs allowlist, `llms.txt`: every file they list still exists under the listed name.
-- **Context-graph scaffold** — the `graphify-out/`/`.serena/` gitignore lines, `.husky/post-merge` + `.husky/post-checkout`, and the `ci.yml` Graphify step (`bootstrapping-a-product-repo`'s `references/scaffold/`) are cheap and inert until a repo opts in — check for them and add if missing, same as any other scaffold drift.
 
 ## 7. Ship it
 

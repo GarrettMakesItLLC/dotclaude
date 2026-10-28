@@ -348,7 +348,7 @@ describe("indexReason", () => {
   });
 
   it("names a childless epic by its body, which is the only thing that says so", () => {
-    // Verbatim from NetWorthy #25-#39 — twelve roadmap epics with no
+    // Modelled on real roadmap epics with no
     // sub-issues filed, correctly `status:ready`, and not work (#395).
     const body =
       "RSU vesting schedules, ISO and NSO exercise modelling with AMT.\n\n" +

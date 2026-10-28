@@ -70,7 +70,7 @@ Sources, in order:
 
 1. **An npm cache.** cacache stores content under the sha512 that the lockfile already names, so a
    hit is the exact published bytes. `~/.npm/_cacache`, `/tmp/npm-cache/_cacache` (the `cache=`
-   RedThreadEvents and SideQuest set), `npm config get cache`, plus `--cache DIR` and
+   RedThreadEvents set), `npm config get cache`, plus `--cache DIR` and
    `GMI_REGISTRY_CACHES`. Read-only: populate never writes to or cleans a cache.
 2. **A rebuild from platform** (`--rebuild`), at the release tag `@gmi/<name>@<version>`. It runs
    in a throwaway platform worktree with `npm ci` (through the mirror), `npm run build`, and

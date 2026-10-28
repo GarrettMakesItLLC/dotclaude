@@ -41,7 +41,6 @@
 #                 never symlinked across trees: that escapes the worktree under
 #                 realpath and breaks type-aware ESLint's project resolution.
 #   * No generated Prisma client (`worktree.prismaGenerate`).
-#   * No graph for graphify (`worktree.graphify`), built best-effort.
 #
 # `worktree.postSteps` run last, in the worktree, with WORKTREE, MAIN_TREE and
 # the SETUP_WORKTREE_* state exported (docs/repo-manifest.md) — the place for a
@@ -584,15 +583,6 @@ if [ -n "$prisma_cmd" ]; then
       warn "Prisma client generation failed — run it by hand: (cd $target && $prisma_cmd)"
     fi
     exit 1
-  fi
-fi
-
-if [ "$(manifest_get worktree.graphify || echo false)" = true ]; then
-  if command -v graphify >/dev/null 2>&1; then
-    (cd "$target" && graphify update . >/dev/null 2>&1) && say "graphify-out ready." \
-      || warn "graphify update failed — run by hand: (cd $target && graphify update .)"
-  else
-    warn "graphify CLI not on PATH — skipping the knowledge graph (bootstrap.sh installs it)."
   fi
 fi
 

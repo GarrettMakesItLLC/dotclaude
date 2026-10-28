@@ -89,18 +89,13 @@
 # indistinguishable from a drift. The block message therefore steers to an
 # absolute write-target, the one spelling that survives (#466, #468).
 #
-# NOT THE CAUSE OF NetWorthy#223: a Bash command merely referencing a
-# credential-shaped env var name (`export DATABASE_URL=$NW_DATABASE_URL`) was
-# reported blocked with a "worktree-isolated agent's git operations must
-# target its own worktree" message inside a worktree-isolated agent. This
-# script has no env-var-name deny-list — it only scans for write-target
-# PATTERNS (redirects, sed -i, cp/mv/tee, open(...,"w")), none of which those
-# commands contain, and it was confirmed to exit 0 (allow) on all of them
-# (see worktree-guard.test.sh). That error string does not appear anywhere in
-# this repo; it is compiled into the Claude Code CLI binary itself — a
-# separate, built-in worktree-isolation Bash-safety check for agents
-# dispatched with `isolation: "worktree"`, outside this repo's source. Tracked
-# as a vendor gap, not fixed here.
+# NOT A DENY-LIST FOR ENV VAR NAMES: a Bash command merely referencing a
+# credential-shaped env var name (`export DATABASE_URL=$APP_DATABASE_URL`) is
+# not a write. This script scans only for write-target PATTERNS (redirects,
+# sed -i, cp/mv/tee, open(...,"w")), none of which those commands contain. A
+# "worktree-isolated agent's git operations must target its own worktree"
+# block on such a command comes from Claude Code's built-in worktree-isolation
+# Bash check, outside this repo (see worktree-guard.test.sh).
 
 set -uo pipefail
 

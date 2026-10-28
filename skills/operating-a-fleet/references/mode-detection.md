@@ -17,7 +17,7 @@ Conflating these is what makes a marker file go stale exactly when it matters.
 |---|---|---|
 | Observable? | Yes, and it changes with nobody editing anything | No — it is a decision, not a state |
 | So it is | **probed**, live, every few hours | **declared**, in `.claude/fleet-mode.json`, committed |
-| Authority | the probe, always | the owner, in writing |
+| Authority | the probe, always | standing owner policy; the repo declares it |
 
 The declaration is a committed file rather than a gitignored dotfile because the skill's rule holds
 here too: coordination lives on the remote. A committed file is remote state — every machine that
@@ -57,8 +57,8 @@ believed**:
 
 - `refused` + declared `degraded` → degraded mode, and the banner says what to do in it.
 - `refused` + nothing declared → the trigger, observed. The banner says there is no gate right now,
-  that entering degraded mode lifts branch protection and is the owner's call in writing, and to say
-  so on the coordination issue and stop.
+  that degraded mode is standing owner policy (allowed when the local CI replica passes), and to declare
+  it on the coordination issue and proceed.
 - `healthy` + declared `degraded` → **stale declaration.** Actions is running jobs again while every
   machine still reads a mode this repo is no longer in. Leaving degraded mode is not automatic — the
   last integrator says so on the coordination issue and restores the rules.

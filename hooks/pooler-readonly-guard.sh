@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# dotclaude pooler-readonly-guard — PreToolUse hook (matcher: Bash, and through
-# mcp-tool-adapter.sh, Serena's execute_shell_command). Refuses a command that
+# dotclaude pooler-readonly-guard — PreToolUse hook (matcher: Bash). Refuses a command that
 # sets a SESSION-level read-only Postgres setting on a connection it cannot
 # prove is a direct (session-mode, :5432) one.
 #

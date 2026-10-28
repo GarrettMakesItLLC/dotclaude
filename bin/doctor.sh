@@ -370,14 +370,6 @@ if [ -n "$hooks_path" ]; then
   fi
 fi
 
-if grep -qs 'graphify hook-guard' .claude/settings.json; then
-  if [ -f graphify-out/graph.json ]; then
-    ok 'graphify-out/graph.json present'
-  else
-    warn 'no graphify-out/graph.json — the repo points agents at a graph that does not exist here' 'run `graphify update .`'
-  fi
-fi
-
 # ── Repo checks ──────────────────────────────────────────────────────────────
 checks="$(manifest_get doctor.checks || true)"
 if [ -n "$checks" ]; then

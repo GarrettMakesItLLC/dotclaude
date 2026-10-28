@@ -127,15 +127,15 @@ export function hasTickedOwnerAction(body: string | null | undefined): boolean {
  * body links its children and carries the scope statement, and nothing is ever
  * implemented on it directly". Both wear the same label, and nothing in the
  * taxonomy separates them, so a `ready` count silently overstates the backlog
- * (#395: NetWorthy reported 20 ready issues and had zero ready leaves).
+ * (#395: a repo reported 20 ready issues and had zero ready leaves).
  *
  * Two ways to be an index, because either one alone misses half the set:
  *
  *   - `"sub-issues"` — GitHub already knows: the issue has children. Costs
  *     nothing per-issue and needs no migration.
  *   - `"body-marker"` — a CHILDLESS epic, which the first test cannot see at
- *     all. Twelve of NetWorthy's sixteen roadmap epics had no sub-issues filed
- *     and were indistinguishable from leaf issues nobody had started. They are
+ *     all. Roadmap epics are often filed with no sub-issues
+ *     and are indistinguishable from leaf issues nobody had started. They are
  *     `source:owner`, they carry real milestones, and they are correctly
  *     `ready` by the taxonomy as written — the label simply cannot express
  *     "this is an index". The body can, and does, verbatim.

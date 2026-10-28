@@ -222,41 +222,6 @@ must_pass "short run is not a fragment" "ZQXWVUT"
 must_pass "unrelated uppercase run" "ABCDEFGHIJKLMNOP"
 unset FAKE_PEM_PRIVATE_KEY
 
-# Serena's execute_shell_command (#519): the result is an MCP payload, replaced
-# through updatedMCPToolOutput. Serena's text is the JSON of
-# {stdout, return_code, cwd, stderr}; the harness hands it over either as that
-# string or as a list of text content blocks.
-SERENA_TEXT="$(python3 -c 'import json,sys; print(json.dumps({"stdout": sys.argv[1], "return_code": 0, "cwd": "/w", "stderr": None}))' \
-  "$(printf 'line one\nDATABASE: postgresql://u:%s@db.example.internal:6543/postgres' "$FAKE_PW")")"
-for shape in blocks string; do
-  for tool in mcp__plugin_serena_serena__execute_shell_command mcp__serena__execute_shell_command; do
-    out="$(python3 -c '
-import json, sys
-text = sys.argv[3]
-resp = [{"type": "text", "text": text}] if sys.argv[2] == "blocks" else text
-print(json.dumps({"tool_name": sys.argv[1], "tool_input": {"command": "env | grep URL"}, "tool_response": resp}))
-' "$tool" "$shape" "$SERENA_TEXT" | "$GUARD")"
-    [ -n "$out" ] || { fail "$tool ($shape): no report"; continue; }
-    got="$(python3 -c '
-import json, sys
-d = json.load(sys.stdin)["hookSpecificOutput"]
-assert "updatedToolOutput" not in d, "an MCP result was replaced through the Bash field"
-r = d["updatedMCPToolOutput"]
-text = r[0]["text"] if isinstance(r, list) else r
-assert (isinstance(r, list) and r[0]["type"] == "text") or isinstance(r, str), "shape changed"
-print(json.loads(text)["stdout"])
-' <<<"$out" 2>&1)" || { fail "$tool ($shape): $got"; continue; }
-    grep -qF "$FAKE_PW" <<<"$got" && fail "$tool ($shape): value survived redaction"
-    grep -qF 'postgresql://u:<redacted>@db.example.internal' <<<"$got" || fail "$tool ($shape): not redacted in place: $got"
-    grep -q '^line one$' <<<"$got" || fail "$tool ($shape): other output lost: $got"
-    grep -q 'Serena shell result' <<<"$out" || fail "$tool ($shape): warning does not name the tool"
-  done
-done
-out="$(python3 -c 'import json; print(json.dumps({"tool_name": "mcp__serena__execute_shell_command", "tool_input": {"command": "ls"}, "tool_response": [{"type": "text", "text": "{\"stdout\": \"a.txt\", \"return_code\": 0}"}]}))' | "$GUARD")"
-[ -z "$out" ] || fail "clean Serena output was flagged: $out"
-out="$(python3 -c 'import json; print(json.dumps({"tool_name": "mcp__serena__read_file", "tool_response": "postgresql://u:secretvalue1@h/db"}))' | "$GUARD")"
-[ -z "$out" ] || fail "a Serena tool other than the shell was scanned"
-
 # Fail open on garbage and on other tools.
 printf 'not json' | "$GUARD" >/dev/null 2>&1 || fail "garbage input did not fail open"
 out="$(printf '%s' '{"tool_name":"Read","tool_response":"x"}' | "$GUARD")"
