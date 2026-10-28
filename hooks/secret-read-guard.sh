@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# dotclaude secret-read-guard — PreToolUse hook for Read | Grep | Bash, and (through
-# mcp-tool-adapter.sh) Serena's read, search and shell tools.
+# dotclaude secret-read-guard — PreToolUse hook for Read | Grep | Bash (Grep through
+# mcp-tool-adapter.sh).
 #
 # Turns "never read a secrets file's VALUES into the transcript" from prose an
 # agent follows probabilistically into a hard, deterministic block. Wired in

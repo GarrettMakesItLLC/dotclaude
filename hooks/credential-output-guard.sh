@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
-# dotclaude credential-output-guard — PostToolUse hook (matcher: Bash, and
-# Serena's execute_shell_command).
+# dotclaude credential-output-guard — PostToolUse hook (matcher: Bash).
 #
 # secret-read-guard.sh refuses the commands KNOWN to print a credential before
 # they run. This is the net under it: after any shell call, the result is
 # scanned for credential-shaped text, and when it holds some the hook
-#   - REDACTS it, so Claude never sees the value: `updatedToolOutput` for Bash's
-#     `{stdout, stderr}`, `updatedMCPToolOutput` for Serena's MCP result (a
-#     string, or a list of `{type: text, text}` blocks, whose text is itself the
-#     JSON `{stdout, stderr, return_code, cwd}`; every string in it is scanned,
-#     and JSON text is scanned field by field and re-serialised); and
+#   - REDACTS it, so Claude never sees the value (`updatedToolOutput` for Bash's
+#     `{stdout, stderr}`); and
 #   - says so LOUDLY: a `systemMessage` to the user and `additionalContext`
 #     telling Claude to report the leak at once, naming what leaked (never the
 #     value), so the credential is rotated rather than quietly carried on past.
@@ -77,8 +73,7 @@ try:
 except Exception:
     sys.exit(0)
 tool = obj.get("tool_name") or ""
-is_mcp = re.fullmatch(r"mcp__(?:plugin_serena_)?serena__execute_shell_command", tool) is not None
-if tool != "Bash" and not is_mcp:
+if tool != "Bash":
     sys.exit(0)
 resp = obj.get("tool_response")
 if resp is None:
@@ -375,30 +370,8 @@ def scan(text, found):
     return text
 
 
-def walk(v, found):
-    """An MCP result: every string in it, and JSON text field by field."""
-    if isinstance(v, list):
-        return [walk(x, found) for x in v]
-    if isinstance(v, dict):
-        return {k: walk(x, found) for k, x in v.items()}
-    if not isinstance(v, str):
-        return v
-    if v.lstrip().startswith(("{", "[")):
-        try:
-            inner = json.loads(v)
-        except ValueError:
-            inner = None
-        if isinstance(inner, (dict, list)):
-            mark = len(found)
-            redone = walk(inner, found)
-            return json.dumps(redone) if len(found) > mark else v
-    return scan(v, found)
-
-
 found = []
-if is_mcp:
-    updated = walk(resp, found)
-elif isinstance(resp, dict):
+if isinstance(resp, dict):
     updated = dict(resp)
     for key in ("stdout", "stderr"):
         if isinstance(resp.get(key), str):
@@ -418,7 +391,7 @@ print(json.dumps({
     "systemMessage": (
         "⚠ CREDENTIAL LEAK: a %s result carried %s. It was redacted before Claude saw it, "
         "but the command already printed it — treat it as leaked and rotate it. Command: %s"
-        % ("Serena shell" if is_mcp else "Bash", what, cmd_line)
+        % ("Bash", what, cmd_line)
     ),
     "hookSpecificOutput": {
         "hookEventName": "PostToolUse",
@@ -431,9 +404,7 @@ print(json.dumps({
             "file, and inspect it with sed 's/:[^:@]*@/:<redacted>@/' or sed 's/=.*/=<redacted>/'."
             % what
         ),
-        # The MCP field is the one every harness version applies to an MCP
-        # tool; Bash's result is replaced through updatedToolOutput.
-        ("updatedMCPToolOutput" if is_mcp else "updatedToolOutput"): updated,
+        "updatedToolOutput": updated,
     },
 }))
 PY

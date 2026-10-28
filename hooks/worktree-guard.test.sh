@@ -222,7 +222,7 @@ check 0 Bash command "echo hi > $CONV/src/redirected.ts" 1
 # blockquote line ("> word") inside a quoted heredoc must not read as a
 # redirect, and prose words must not be mistaken for cp/mv/tee destinations.
 check 0 Bash command "gh pr create --title x --body \"\$(cat <<'EOF'
-Some prose mentioning graphify, Serena, and grep/Read as bare words.
+Some prose mentioning code-graph tools, and grep/Read as bare words.
 > A markdown blockquote line that looks like a redirect.
 EOF
 )\""
@@ -399,19 +399,15 @@ if ! printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$HERE/../CLA
   echo x >> "$FAIL_MARKER"
 fi
 
-# --- NetWorthy#223: a Bash command that merely REFERENCES a credential-shaped
-# env var name (e.g. $NW_DATABASE_URL, the documented `export DATABASE_URL=
-# $NW_DATABASE_URL` pattern from that repo's agent-credentials skill) must not
-# be treated as a write pattern by this hook — it has no env-var-name
-# deny-list at all, only the write-pattern scan above. The block reported in
-# #223 was traced to Claude Code's own built-in worktree-isolation Bash
-# safety check (compiled into the CLI binary, outside this repo) misfiring on
-# that variable name — NOT to this script. These are characterization tests:
-# they must keep passing so a future "fix" for #223 doesn't get misdirected
-# into this hook.
-check 0 Bash command 'export DATABASE_URL="$NW_DATABASE_URL"'
-check 0 Bash command 'export XYZ="$NW_DATABASE_URL"'
-check 0 Bash command 'echo "$NW_DATABASE_URL" | wc -c'
+# --- a Bash command that merely REFERENCES a credential-shaped env var name
+# (e.g. `export DATABASE_URL=$APP_DATABASE_URL`) is not a write pattern: this
+# hook has no env-var-name deny-list, only the write-pattern scan above. A block
+# on such a command comes from Claude Code's built-in worktree-isolation check,
+# not this script. Characterization tests: they must keep passing so a future
+# fix does not get misdirected into this hook.
+check 0 Bash command 'export DATABASE_URL="$APP_DATABASE_URL"'
+check 0 Bash command 'export XYZ="$APP_DATABASE_URL"'
+check 0 Bash command 'echo "$APP_DATABASE_URL" | wc -c'
 check 0 Bash command 'export FOO=bar'
 check 0 Bash command 'export XYZ="$HOME"'
 

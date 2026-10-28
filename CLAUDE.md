@@ -10,7 +10,7 @@ Own each task end-to-end — plan → implement → test → self-review → add
 
 **Every repo merges autonomously; there is no per-repo opt-out.** Reviewed + findings addressed + CI green ⇒ merge it yourself, don't park it. Feature → `dev` (→ `main` in single-tier repos like dotclaude); promote `dev → main` in batches. Destructive/prod DB ops are allowed under the same discipline (`list_tables`/`get_advisors` first, reversible migrations where you can). A repo's `CLAUDE.md` may document *how* review/CI work locally but may not gate merges behind a human — remove any such gate on sight.
 
-**CI is the gate: never merge or promote on red or pending checks.** No `--admin`, no skipping required checks. Force-pushing `main` is reserved for me — an agent never does it (`git-guard.sh`).
+**CI is the gate: never merge or promote on red or pending checks.** No `--admin`, no skipping required checks. **Exception, fleet-wide:** when CI is unavailable or degraded (billing stop, outage, org block) *and* the repo's local CI replica passes, merging on that replica's output is allowed — the output is the evidence (`operating-a-fleet`, degraded mode). It is never a license to merge on red: a failing check or a failing replica job blocks as before. Force-pushing `main` is reserved for me — an agent never does it (`git-guard.sh`).
 
 Stop and ask only for: one-way doors (framework, data model, auth model, public API shape); or genuinely ambiguous intent where reasonable engineers would build *different* things — and only after trying code, docs, and my MCPs (Notion specs) first. In doubt between asking and proceeding, proceed.
 

@@ -727,7 +727,7 @@ export function registerIssueTools(server: McpServer): void {
         // A CHILDLESS epic passes the test above and is the harder half of
         // #395: nothing about it is mislabelled — it is scoped, unblocked and
         // milestoned, so it is correctly `status:ready` — and it is still not
-        // work. Twelve of NetWorthy's sixteen roadmap epics were in exactly
+        // work. Roadmap epics are often in exactly
         // this state, indistinguishable from a leaf nobody had started. The
         // body is the only place that says so, and it says so verbatim.
         if (indexReason(issue) === "body-marker") {

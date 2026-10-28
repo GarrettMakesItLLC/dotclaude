@@ -127,19 +127,14 @@ SECRET_ENV_FILES=(
   "$HOME/.config/secrets/gmi.env"
   "$HOME/.musclebuddy/agent.env"
   "$HOME/.musclebuddy/ops.env"
-  "$HOME/.networthy/agent.env"
-  "$HOME/.networthy/ops.env"
   "$HOME/.adventureos/agent.env"
   "$HOME/.redthread/agent.env"
 )
 
 # Railway: projectId:serviceId:environmentId:label
 RAILWAY_TARGETS=(
-  "d4839f4b-63ed-4dd6-a1e6-58cea7eba8ea:7d4e72b8-bfe3-41d3-ba05-6e82399bd1f5:99b2cf8c-cf3b-435f-bd23-ca7a7bcd03e0:sidequest/server (production)"
   "2e903006-f3ea-4df3-b668-8def44031d1e:f38d30ad-d16c-4688-a45c-95d919b1180a:45e02372-bd25-4dfc-a6e8-7185e9991e29:adventureos-server/server (production)"
   "2e903006-f3ea-4df3-b668-8def44031d1e:f38d30ad-d16c-4688-a45c-95d919b1180a:4aef1894-5b4b-4467-b183-c09b88aeac0b:adventureos-server/server (staging)"
-  "95548a10-abec-495a-8f3b-f3f31f5cf403:97b61198-1e0f-4515-a171-88125331076d:5ef9a644-3b69-4032-9463-aa2631e985d7:networthy/server-QOzy (production)"
-  "95548a10-abec-495a-8f3b-f3f31f5cf403:7f6aa3e3-8d5e-4d74-a25f-2b1302c14a9c:5ef9a644-3b69-4032-9463-aa2631e985d7:networthy/server-v2 (production)"
   "27db0fce-866f-4ebf-aaa4-cf0b92479859:15d76f3a-54a7-4e00-849a-44d411b80cad:cb0781b9-8f4f-45f3-a7c3-85ca9c25fb78:precious-victory/@musclebuddy/server (production)"
   "27db0fce-866f-4ebf-aaa4-cf0b92479859:15d76f3a-54a7-4e00-849a-44d411b80cad:f92caf58-0050-4541-af80-ec5cfadfc6dc:precious-victory/@musclebuddy/server (staging)"
   "b8918dae-a674-43ab-b643-6ff312b7ee0c:7998e33c-635a-466d-b36b-d29031feee52:94018006-44da-452f-bb90-ae3aced9a414:observant-ambition/redthread-worker (production)"
@@ -155,13 +150,8 @@ VERCEL_TARGETS=(
   "prj_PSTcfZoVVf18SAHneHrAC7sIgV8s:production:muscle-buddy"
   "prj_oC1J2i2Nt2UsQBlZcxZ0igc5dm91:preview:muscle-buddy-demo"
   "prj_oC1J2i2Nt2UsQBlZcxZ0igc5dm91:production:muscle-buddy-demo"
-  "prj_IAPKOOo1eFhBGGDYLvNNi73OT22u:preview:sidequest"
-  "prj_IAPKOOo1eFhBGGDYLvNNi73OT22u:production:sidequest"
   "prj_fQwpmfGqhq1oFbuT8mWmCTtGY3x5:preview:adventureos-web-vite"
   "prj_fQwpmfGqhq1oFbuT8mWmCTtGY3x5:production:adventureos-web-vite"
-  "prj_X5E28w6xFTOdD8BCTXGkWLcAEn3c:development:networthy-web"
-  "prj_X5E28w6xFTOdD8BCTXGkWLcAEn3c:preview:networthy-web"
-  "prj_X5E28w6xFTOdD8BCTXGkWLcAEn3c:production:networthy-web"
   "prj_mhHreQh3gSMa9PCuk3ChljOex4uS:preview:adventureos"
   "prj_mhHreQh3gSMa9PCuk3ChljOex4uS:production:adventureos"
 )

@@ -1,7 +1,8 @@
 # Degraded mode: the wave procedure
 
-Degraded mode is what runs when CI cannot be the gate. Entering it lifts branch protection, so it is
-**owner-authorized policy** — an agent observes the trigger and asks; it does not decide.
+Degraded mode is what runs when CI cannot be the gate. It is standing owner policy, fleet-wide: allowed
+when CI is unavailable or degraded *and* the repo's local CI replica passes, with that output as the
+evidence. It is never a license to merge on red.
 
 Work moves in **waves**. A wave is a set of batch PRs, stacked into one integration branch, validated
 once, merged once.

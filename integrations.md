@@ -213,7 +213,7 @@ check. Those wait for CI or for the toggle above.
 success, and never applies it:
 
 ```
-update-service(serviceId, source: {repo: "GarrettMakesItLLC/SideQuest", branch: "dev"},
+update-service(serviceId, source: {repo: "GarrettMakesItLLC/<repo>", branch: "dev"},
                builder, buildCommand, startCommand, healthcheckPath)
 → {"updatedFields": ["buildCommand", "startCommand", "healthcheckPath"]}
 ```
@@ -232,34 +232,6 @@ looks finished.
 its trace shows it calling `updateServiceTool` with exactly the config the
 direct tool dropped. So the gap is the direct tool's argument handling, not the
 Railway API. Verify with `get-service-config` either way (#240).
-
-## Per-project context tools
-
-Registered/installed once per machine by `bootstrap.sh`; which one to reach
-for in a given app repo: `rules/context-tools.md`. Not wired into `dotclaude`
-itself — too small and markdown-heavy for either to pay off.
-
-| Tool | Surface | Tool prefix | Used for |
-|------|---------|-------------|----------|
-| **Serena** | MCP server (`claude mcp add --scope user serena -- serena start-mcp-server --context claude-code --project-from-cwd`) | `mcp__serena__*` | LSP-backed symbol navigation and refactors — `find_symbol`, `find_referencing_symbols`, `rename_symbol` |
-| **Graphify** | Claude Code skill at user scope (`~/.claude/skills/graphify`, generated from the CLI by `bin/graphify-skill.sh`), not an MCP | `/graphify` | Local tree-sitter knowledge graph — impact analysis, call graphs, shortest path between two symbols |
-
-**Freshness contract.** Serena self-indexes live via the language server on
-first use — no reindex step, no staleness to track. Graphify is
-snapshot-based: a repo's `.husky/post-merge` and `.husky/post-checkout` hooks
-run `graphify update` after every pull/checkout, and `.github/workflows/ci.yml`
-re-runs `graphify update` + `graphify export callflow-html` on every push to
-`main`, so the published call-flow view is never more than one push stale.
-`graphify-out/` is gitignored (generated, regenerable) — none of this ever
-requires a manual reindex. The skill is user-scope: `bootstrap.sh` upgrades
-the CLI and regenerates `~/.claude/skills/graphify` from it
-(`bin/graphify-skill.sh`; `bootstrap.sh --check` reports a skill older than
-the CLI), so no repo commits a copy. Each product repo runs
-`graphify claude install` as part of its scaffold — see
-`bootstrapping-a-product-repo` — which writes the repo's `CLAUDE.md` section
-and the `graphify hook-guard` PreToolUse hooks; those hooks are also the CI
-job's opt-in marker. A repo without them is the only case where the husky
-hooks and the CI job still no-op.
 
 ## Custom MCPs vendored in this repo
 

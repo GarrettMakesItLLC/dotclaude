@@ -113,10 +113,12 @@ a gate that is not running is worse than telling it nothing.
 
 Full matrix, the signature, the file format and the caching: `references/mode-detection.md`.
 
-**Degraded mode is owner-authorized policy, not an agent's call.** An agent may *observe* the triggers
-and say so; entering the mode means lifting branch protection, which needs Garrett's authorization for
-this repo, in writing, on the coordination issue. An agent that finds itself wanting degraded mode
-files or comments and stops.
+**Degraded mode is standing owner policy, fleet-wide.** It is allowed whenever CI is unavailable or
+degraded *and* the repo's local CI replica passes (`bin/ci-replica.sh`); that output, `ALL GREEN @ <sha>`,
+is the evidence a merge cites. An agent that observes the trigger declares the mode on the coordination
+issue and proceeds with the wave. It is never a license to merge on red: a red PR check or a FAIL or
+NOT-RUN replica job on work that needs it blocks the merge exactly as in normal mode, and a repo with
+no replica manifest has no gate to substitute.
 
 The wave procedure, and the traps that cost a full session the first time through, are in
 `references/degraded-mode.md`.

@@ -213,16 +213,6 @@ doctor() {
       && echo "    ✓ $cmd" \
       || echo "    · $cmd — absent (gh: fleet tools; jq: bin/fleet-merge.sh, apt install jq; node/npm: github MCP build; rsync: bin/kb-sync.sh)"
   done
-  # The graphify skill is generated from the CLI (bin/graphify-skill.sh), so a
-  # CLI upgraded without a re-bootstrap leaves the skill describing another
-  # version. Soft, like the tools above.
-  if command -v graphify >/dev/null 2>&1; then
-    if "$REPO_DIR/bin/graphify-skill.sh" --check >/dev/null 2>&1; then
-      echo "    ✓ skills/graphify (matches the graphify CLI)"
-    else
-      echo "    · skills/graphify — missing or older than the CLI; run $REPO_DIR/bin/graphify-skill.sh"
-    fi
-  fi
   if command -v gh >/dev/null 2>&1 && ! gh auth status >/dev/null 2>&1; then
     echo "    · gh is installed but not authenticated — \`gh auth login\`"
   fi
@@ -425,44 +415,26 @@ if command -v claude >/dev/null 2>&1; then
 fi
 
 # --------------------------------------------------------------------------
-# Context-graph tools for app-repo sessions: Serena (LSP-backed symbol
-# navigation, self-indexes live — no freshness plumbing needed) and Graphify
-# (local tree-sitter knowledge graph, kept fresh per-repo by the scaffold's
-# husky hooks + CI step). Decision rule: rules/context-tools.md. Both are
-# per-machine installs, not per-repo state, same tier as the rest of this
-# script. Neither is wired into dotclaude itself — see
-# skills/bootstrapping-a-product-repo for the per-repo scaffold.
+# Retired tools: Serena and Graphify showed no measured advantage over rg/Read
+# and are no longer installed. Every bootstrap removes what an earlier one put
+# on this machine. Idempotent, and silent when nothing is left to remove.
 # --------------------------------------------------------------------------
 if command -v uv >/dev/null 2>&1; then
-  echo
-  echo "→ Installing Graphify (local knowledge-graph CLI) and its skill"
-  # PyPI package is graphifyy (double-y); the command it installs is graphify.
-  # --upgrade so every bootstrap refreshes it, and the skill is regenerated from
-  # the CLI right after, so the two never disagree about the version.
-  uv tool install --upgrade graphifyy
-  "$REPO_DIR/bin/graphify-skill.sh" \
-    || echo "  WARNING: graphify skill not installed — run $REPO_DIR/bin/graphify-skill.sh" >&2
-
-  echo
-  echo "→ Installing Serena (LSP-backed symbol navigation)"
-  uv tool install -p 3.13 serena-agent
-
-  if command -v claude >/dev/null 2>&1; then
-    echo
-    echo "→ Registering serena MCP (Serena symbol navigation, user scope)"
-    if claude mcp get serena >/dev/null 2>&1; then
-      echo "  already registered: serena (run \`claude mcp remove serena\` to re-add)"
-    else
-      claude mcp add --scope user serena -- serena start-mcp-server --context claude-code --project-from-cwd
-      echo "  registered: serena (user scope)"
+  retired_installed="$(uv tool list 2>/dev/null || true)"
+  for pkg in serena-agent graphifyy; do
+    if grep -q "^$pkg " <<<"$retired_installed"; then
+      echo "→ Removing retired tool: $pkg"
+      uv tool uninstall "$pkg" || echo "  WARNING: could not uninstall $pkg — run \`uv tool uninstall $pkg\`" >&2
     fi
-  else
-    echo "  NOTE: \`claude\` CLI not found — register manually:"
-    echo "        claude mcp add --scope user serena -- serena start-mcp-server --context claude-code --project-from-cwd"
-  fi
-else
-  echo
-  echo "  WARNING: uv not found — skipping Graphify + Serena install. Install uv (https://docs.astral.sh/uv/getting-started/installation/), then re-run bootstrap." >&2
+  done
+fi
+if command -v claude >/dev/null 2>&1 && claude mcp get serena >/dev/null 2>&1; then
+  echo "→ Removing retired MCP: serena"
+  claude mcp remove serena || echo "  WARNING: could not remove the serena MCP — run \`claude mcp remove serena\`" >&2
+fi
+if [ -e "$CLAUDE_DIR/skills/graphify" ] || [ -L "$CLAUDE_DIR/skills/graphify" ]; then
+  echo "→ Removing retired skill: graphify"
+  rm -rf "$CLAUDE_DIR/skills/graphify"
 fi
 
 # --------------------------------------------------------------------------

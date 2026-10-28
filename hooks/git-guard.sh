@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# dotclaude git-guard — PreToolUse hook for the Bash tool (and, through
-# mcp-tool-adapter.sh, Serena's execute_shell_command).
+# dotclaude git-guard — PreToolUse hook for the Bash tool.
 #
 # Turns the non-negotiable git rules in ~/dotclaude/CLAUDE.md from prose that
 # Claude follows probabilistically into hard, deterministic blocks. Wired in

@@ -59,7 +59,6 @@ in the environment overrides discovery (the self-tests use it).
 | `linkRootBin` | bool | `mirror`: per-binary links for the main checkout's `node_modules/.bin`. |
 | `lockWorktree` | string | `git worktree lock` reason, so generic sweeps cannot remove a live tree. Use `agent session worktree — remove via bin/worktree-reap.sh`: `bin/worktree-reap.sh` recognises that text as its own lock and looks past it; any other reason reads as a person's hands-off. |
 | `prismaGenerate` | command | Run after dependencies, e.g. `npx prisma generate`. |
-| `graphify` | bool | Build `graphify-out/` best-effort. |
 | `postSteps` | commands | Run last, in the worktree, with the step environment below exported. |
 | `checkSteps` | commands | Run by `--check`, with the same environment. |
 
@@ -223,13 +222,13 @@ The credentials, ops and doctor database fields of MuscleBuddy's manifest.
 
 ```json
 {
-  "name": "NetWorthy",
-  "envPrefix": "NW",
-  "stateDir": "~/.networthy",
+  "name": "ExampleApp",
+  "envPrefix": "APP",
+  "stateDir": "~/.exampleapp",
   "credentials": {
     "sources": ["apps/web/.env.local", "apps/server/.env.local", ".env.local"],
     "direct": ["VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY", "SUPABASE_URL", "GMI_PACKAGES_TOKEN"],
-    "namespaced": { "NW_DATABASE_URL": "DATABASE_URL" },
+    "namespaced": { "APP_DATABASE_URL": "DATABASE_URL" },
     "railway": { "service": "server-v2", "environment": "production", "projectId": "<railway-project-id>" }
   },
   "ops": {
@@ -237,6 +236,6 @@ The credentials, ops and doctor database fields of MuscleBuddy's manifest.
     "vercelKeys": ["VITE_SUPABASE_URL", "VITE_SUPABASE_ANON_KEY"],
     "railwayKeys": { "DATABASE_URL": "DATABASE_URL", "SUPABASE_URL": "SUPABASE_URL", "NODE_AUTH_TOKEN": "GMI_PACKAGES_TOKEN" }
   },
-  "worktree": { "strategy": "mirror", "envFiles": ["apps/web/.env.local", "apps/server/.env.local"], "workspaceScope": "@networthy" }
+  "worktree": { "strategy": "mirror", "envFiles": ["apps/web/.env.local", "apps/server/.env.local"], "workspaceScope": "@exampleapp" }
 }
 ```
