@@ -172,6 +172,30 @@ may be entirely fine and must be stated rather than assumed. Stating it does not
 window's NOT-RUN jobs are debts, and they are listed in an owed-verdicts ledger (see
 `degraded-mode.md`) so the first run that can pay them does.
 
+### `verdict.json`
+
+Every run, full or `--job`, writes `<logDir>/verdict.json` and prints its path and `sha256=`. It is
+the merge authorization in degraded mode, so its fields are a contract with `bin/fleet-merge.sh`:
+
+| Field | Meaning |
+|---|---|
+| `schema` | `2`. Schema-1 files (no `machine`, no `selectedJobs`, no per-job times) are still read. |
+| `sha`, `treeClean` | The HEAD the run started from, and whether the working tree was clean then. |
+| `machine` | `CI_REPLICA_MACHINE_ID`, else the hostname. |
+| `full`, `selectedJobs` | `full` is true with no `--job`; otherwise `selectedJobs` lists the names selected. |
+| `manifestSha256` | sha256 of the manifest file the run read. |
+| `finishedAt` | UTC time the run ended. |
+| `jobs[]` | Per job in manifest order: `name`, `result` (PASS/FAIL/NOT-RUN), `local`, `needsDataPlane`, `selected`, `detail`, and `startedAt`/`finishedAt` (UTC, null for a job that did not run). |
+| `exit` | 1 if any job FAILed, else 0. |
+
+`fleet-merge.sh` accepts one full verdict alone, or several verdicts (`--verdict` repeated) whose
+union covers every job the base branch's manifest runs locally. Every file must carry the PR head's
+`sha`, `treeClean: true` and the same `manifestSha256`, equal to the base's manifest; one file that
+fails any of these refuses the set. Per job, the latest PASS or FAIL row across the files wins,
+ordered by the row's `finishedAt` (else the file's), FAIL winning a tie. NOT-RUN rows never cover a
+job and never override a result. The merge refuses on any effective FAIL and on any local job with no
+effective PASS, naming it, unless `--allow-not-run` excuses it.
+
 An `over budget` flag is ambiguous on its own: over budget when run **alone** is structural, over
 budget only **in-suite** is contention from sibling agents. Re-run the one job with `--job <name>`
 before treating it as a finding.

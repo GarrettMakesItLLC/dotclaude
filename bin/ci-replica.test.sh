@@ -130,6 +130,18 @@ echo "ci-replica: every run writes verdict.json"
 V="$TMP/logs/verdict.json"
 [ -f "$V" ] && ok "verdict.json is written" || bad "no verdict at $V: $OUT"
 [ "$(jq -r .full "$V")" = false ] && ok "a --job run is recorded as full=false" || bad "partial run marked full: $(cat "$V")"
+[ "$(jq -c .selectedJobs "$V")" = '["b"]' ] && ok "and names the jobs it selected" || bad "selectedJobs: $(cat "$V")"
+[ "$(jq -r '[.jobs[]|"\(.name):\(.selected)"]|join(",")' "$V")" = "a:false,b:true,c:false" ] \
+  && ok "each row says whether it was selected" || bad "selected flags: $(cat "$V")"
+jq -e '.jobs[1].finishedAt|test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")' "$V" >/dev/null \
+  && jq -e '.jobs[1].startedAt <= .jobs[1].finishedAt' "$V" >/dev/null \
+  && ok "a job that ran records when it started and finished" || bad "job times: $(cat "$V")"
+[ "$(jq -c '[.jobs[0].finishedAt, .jobs[2].finishedAt]' "$V")" = '[null,null]' ] \
+  && ok "a deselected job records no time" || bad "deselected times: $(cat "$V")"
+[ "$(jq -r .machine "$V")" = "$(hostname)" ] && ok "the machine defaults to the hostname" || bad "machine: $(jq -r .machine "$V")"
+[ "$(jq -r .schema "$V")" = 2 ] && ok "the verdict is schema 2" || bad "schema: $(jq -r .schema "$V")"
+OUT="$(CI_REPLICA_MACHINE_ID=laptop-kvm "$CIR" --repo-root "$ROOT" --log-dir "$TMP/logs" --job b 2>&1)"
+[ "$(jq -r .machine "$V")" = laptop-kvm ] && ok "CI_REPLICA_MACHINE_ID names the machine" || bad "machine override: $(jq -r .machine "$V") $OUT"
 run '{"version":1,"jobs":[{"name":"a","commands":["true"]},{"name":"r","commands":["exit 4"]},{"name":"m","local":false,"localReason":"mac","commands":[]}]}'
 [ "$(jq -r .full "$V")" = true ] && ok "a run with no --job is full=true" || bad "full run not marked: $(cat "$V")"
 [ "$(jq -r .exit "$V")" = 1 ] && ok "a failing run records exit 1" || bad "exit not recorded: $(cat "$V")"

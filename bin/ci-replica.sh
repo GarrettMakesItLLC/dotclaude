@@ -30,6 +30,11 @@
 # removed, so the base a job measures against is always the one this run was
 # given.
 #
+# Every run writes <log-dir>/verdict.json: the SHA and tree state it started
+# from, the machine (CI_REPLICA_MACHINE_ID, else the hostname), the manifest's
+# sha256, whether it was full or which --job names it selected, and per job the
+# result with the UTC time it started and finished.
+#
 # Exit 0 when no job FAILed, 1 when any did, 2 on a bad manifest or usage.
 set -uo pipefail
 
@@ -56,7 +61,7 @@ while [ $# -gt 0 ]; do
     --no-tree-guard) TREE_GUARD=0; shift ;;
     --base)      BASE="${2:-}"; shift 2 || die "--base needs a ref"; [ -n "$BASE" ] || die "--base needs a ref" ;;
     --list)      LIST_ONLY=1; shift ;;
-    -h|--help)   sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)   sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option '$1'" ;;
   esac
 done
@@ -338,6 +343,8 @@ echo ""
 
 RESULTS="$PLAN/results"
 : > "$RESULTS"
+TIMES="$PLAN/times"
+: > "$TIMES"
 any_fail=0
 
 # The tree and HEAD the run STARTS from: what `verdict.json` describes. A tree
@@ -431,6 +438,7 @@ while IFS="	" read -r idx name; do
   done < "$d/without"
 
   started=$(date +%s)
+  started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   rc=0
   failed_cmd=""
   while IFS= read -r cmd; do
@@ -539,6 +547,9 @@ TREEPY
     printf 'FAIL     %-22s %ss  exit %s  %s\n' "$name" "$elapsed" "$rc" "$failed_cmd"
     printf 'FAIL\t%s\t%s\texit %s on: %s (log: %s)\n' "$name" "$elapsed" "$rc" "$failed_cmd" "$log" >> "$RESULTS"
   fi
+  # When this job's result was measured. `fleet-merge.sh` orders several
+  # verdicts' rows for one job by it, so a later FAIL overrides an earlier PASS.
+  printf '%s\t%s\t%s\n' "$name" "$started_at" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$TIMES"
 done < "$PLAN/order"
 
 echo ""
@@ -550,16 +561,19 @@ done < "$RESULTS"
 echo "──────────────────────────────────────────────────────────────"
 
 # The verdict as an artifact, not prose (MuscleBuddy#8955). `fleet-merge.sh`
-# refuses to lift branch protection unless a verdict for the exact head SHA
-# exists, came from a FULL run (no --job), measured a clean tree against the
-# BASE branch's manifest, and failed nothing. A hand-written `ALL GREEN` comment
-# is a report of this file, never a substitute for it.
+# refuses to lift branch protection unless the verdicts it is given are all for
+# the exact head SHA, measured a clean tree, ran the BASE branch's manifest, and
+# between them PASS every local job, with no job's latest result a FAIL. One full
+# run covers every job by itself; `--job` runs on several machines can cover the
+# set together. A hand-written `ALL GREEN` comment is a report of these files,
+# never a substitute for them.
 VERDICT="$LOG_DIR/verdict.json"
 RESULTS="$RESULTS" PLAN="$PLAN" VERDICT="$VERDICT" RUN_SHA="$RUN_SHA" \
 RUN_TREE_CLEAN="$RUN_TREE_CLEAN" MANIFEST="$MANIFEST" BASE="${BASE:-}" \
 DATA_PLANE="$DATA_PLANE" FULL="$([ ${#SELECTED[@]} -eq 0 ] && echo 1 || echo 0)" \
-ANY_FAIL="$any_fail" python3 - <<'VERDICTPY' || die "could not write $VERDICT"
-import hashlib, json, os, datetime
+SELECTED_JOBS="$(printf '%s\n' "${SELECTED[@]+"${SELECTED[@]}"}")" TIMES="$TIMES" \
+MACHINE="${CI_REPLICA_MACHINE_ID:-}" ANY_FAIL="$any_fail" python3 - <<'VERDICTPY' || die "could not write $VERDICT"
+import hashlib, json, os, datetime, socket
 meta = {}
 for line in open(os.path.join(os.environ["PLAN"], "order")):
     line = line.rstrip("\n")
@@ -568,6 +582,13 @@ for line in open(os.path.join(os.environ["PLAN"], "order")):
     idx, name = line.split("\t", 1)
     kv = dict(l.rstrip("\n").split("=", 1) for l in open(os.path.join(os.environ["PLAN"], "jobs", idx, "meta")) if "=" in l)
     meta[name] = kv
+times = {}
+for line in open(os.environ["TIMES"]):
+    parts = line.rstrip("\n").split("\t")
+    if len(parts) == 3:
+        times[parts[0]] = (parts[1], parts[2])
+full = os.environ["FULL"] == "1"
+selected = [n for n in os.environ["SELECTED_JOBS"].splitlines() if n]
 jobs = []
 for line in open(os.environ["RESULTS"]):
     parts = line.rstrip("\n").split("\t")
@@ -583,14 +604,19 @@ for line in open(os.environ["RESULTS"]):
         "detail": detail,
         "local": m.get("local") == "1",
         "needsDataPlane": m.get("needs_data_plane") == "1",
+        "selected": full or name in selected,
+        "startedAt": times.get(name, (None, None))[0],
+        "finishedAt": times.get(name, (None, None))[1],
     })
 with open(os.environ["MANIFEST"], "rb") as fh:
     manifest_sha = hashlib.sha256(fh.read()).hexdigest()
 verdict = {
-    "schema": 1,
+    "schema": 2,
     "sha": os.environ["RUN_SHA"],
+    "machine": os.environ["MACHINE"] or socket.gethostname(),
     "treeClean": os.environ["RUN_TREE_CLEAN"] == "1",
-    "full": os.environ["FULL"] == "1",
+    "full": full,
+    "selectedJobs": None if full else selected,
     "dataPlane": os.environ["DATA_PLANE"] == "1",
     "base": os.environ["BASE"] or None,
     "manifestSha256": manifest_sha,

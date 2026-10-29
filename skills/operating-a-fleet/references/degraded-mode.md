@@ -31,15 +31,25 @@ once, merged once.
    will fix.
 
 6. **Integrator fixes on the integration branch**, pushes, and posts a new `READY <sha>`. The validator
-   re-runs what failed plus anything the fix could plausibly touch — and always the full suite on the
-   final SHA, because a targeted re-run has never been the thing that catches the interaction.
+   re-runs what failed plus anything the fix could plausibly touch — and always every local job on
+   the final SHA, because a targeted re-run has never been the thing that catches the interaction.
+   One full run covers them. When no single machine can run them all (`native` needs `/dev/kvm`),
+   split them across machines with `ci-replica.sh --job <name>` runs, every one of them on the final
+   SHA; set `CI_REPLICA_MACHINE_ID` where the hostname does not identify the box.
 
 7. **`ALL GREEN @ <sha>`, then `fleet-merge.sh`.** The authorization is the `verdict.json` that
-   `ci-replica.sh` writes into its log dir, not the comment. The comment reports it: quote the
-   verdict's path and the `sha256=` line the run printed. Merge with
-   `fleet-merge.sh <PR> --verdict <logdir>/verdict.json`. It refuses unless the verdict is for the
-   PR's current head, came from a full run (no `--job`), measured a clean tree against the base
-   branch's manifest (read from GitHub at merge time), and every local job PASSed. It then lifts every merge-gating ruleset on the base
+   `ci-replica.sh` writes into its log dir, not the comment. The comment reports it: quote each
+   verdict's path and the `sha256=` line its run printed. Merge with
+   `fleet-merge.sh <PR> --verdict <logdir>/verdict.json`, repeating `--verdict` once per file when the
+   jobs were split across machines. One verdict must come from a full run (no `--job`); a lone `--job`
+   verdict refuses and names the local jobs it leaves uncovered. Several verdicts authorize together
+   only when every one is for the PR's current head and measured a clean tree, all ran the same
+   manifest and it is the base branch's (read from GitHub at merge time), and between them every job
+   the base manifest runs locally has an effective result of PASS. A job's effective result is its
+   latest PASS or FAIL row across the files, by the row's finish time, FAIL winning a tie: a later
+   FAIL overrides an earlier PASS and refuses, a later PASS clears an earlier FAIL. NOT-RUN rows never
+   cover a job. The merge output and the verdict comment name the file and machine behind each job's
+   result. It then lifts every merge-gating ruleset on the base
    (repo and org), merges pinned to that SHA, and restores and reads back each ruleset's
    `bypass_actors`, restoring even when the merge fails. Each lift is also a durable record under
    `${XDG_STATE_HOME:-~/.local/state}/fleet-merge/<owner>-<repo>/` (before-state, pid, PR, time), because
@@ -54,7 +64,8 @@ once, merged once.
    `GH_TOKEN=`: a profile or `BASH_ENV` can re-export `GH_TOKEN` under the script. The script prints
    which token source it used, and a failed org-ruleset call names the missing scope (GitHub answers
    404, not 403, for an org ruleset the token cannot see). A job carried over from an earlier SHA is
-   not a verdict. Re-run the full suite on the final SHA.
+   not a verdict: every local job is measured on the final SHA, by one full run or by `--job` runs
+   whose union covers the set.
 
 8. **Reconcile.** `fleet-reconcile.sh --pr <N> --apply`, then release the lease. The wave is not
    over until the tracker matches the code.

@@ -114,6 +114,117 @@ verdict '.jobs[1].result="NOT-RUN"'; run --allow-not-run e2e
 verdict '.'; run --allow-not-run nosuch
 [ "$RC" = 1 ] && [ "$(writes)" = 0 ] && ok "--allow-not-run of an unknown job refuses" || bad "unknown allow: rc=$RC"
 
+echo "fleet-merge: a lone --job verdict names the jobs it leaves uncovered"
+verdict '.full=false|.jobs[1].result="NOT-RUN"|.jobs[1].detail="not selected (--job)"'; run
+[ "$RC" = 1 ] && [ "$(writes)" = 0 ] && grep -q 'came from a --job subset' <<<"$OUT" && grep -q 'uncovered: e2e' <<<"$OUT" \
+  && ok "refuses and names e2e" || bad "lone partial: rc=$RC writes=$(writes) $OUT"
+
+echo "fleet-merge: one full verdict still authorizes alone"
+verdict '.schema=2|.machine="desk"|.jobs[0].finishedAt="2026-01-01T00:00:00Z"'; run
+[ "$RC" = 0 ] && grep -q "lint PASS at 2026-01-01T00:00:00Z from $TMP/verdict.json (machine desk)" <<<"$OUT" \
+  && ok "a single full schema-2 verdict merges and is attributed" || bad "single full: rc=$RC $OUT"
+verdict '.'; run
+[ "$RC" = 0 ] && grep -q "machine unrecorded" <<<"$OUT" && ok "a single full schema-1 verdict merges" || bad "single old: rc=$RC $OUT"
+
+echo "fleet-merge: several per-job verdicts for one SHA"
+# The base manifest gates: lint and native run locally, ios does not. The desktop
+# runs lint, the laptop (the one with /dev/kvm) runs native.
+printf '%s\n' '{"version":1,"jobs":[{"name":"lint","commands":["true"]},{"name":"native","commands":["true"]},{"name":"ios","local":false,"localReason":"macOS","commands":[]}]}' > "$TMP/manifest"
+MM="$(sha256sum "$TMP/manifest" | cut -d' ' -f1)"
+T1=2026-01-01T00:10:00Z T2=2026-01-01T00:20:00Z T3=2026-01-01T00:30:00Z
+# pv <file> <machine> <lint result> <lint finishedAt> <native result> <native finishedAt> [jq filter]
+# A NOT-RUN row is written the way ci-replica.sh writes a deselected job.
+pv() {
+  jq -n --arg sha "$HEAD" --arg m "$MM" --arg mach "$2" --arg lr "$3" --arg lt "$4" --arg nr "$5" --arg nt "$6" '
+    def row($n; $r; $t): {name:$n, result:$r, local:true, selected:($r!="NOT-RUN"),
+      detail:(if $r=="NOT-RUN" then "not selected (--job)" else "" end),
+      startedAt:(if $r=="NOT-RUN" then null else $t end), finishedAt:(if $r=="NOT-RUN" then null else $t end)};
+    {schema:2, sha:$sha, machine:$mach, treeClean:true, full:false, manifestSha256:$m, finishedAt:$T3,
+     exit:(if $lr=="FAIL" or $nr=="FAIL" then 1 else 0 end),
+     jobs:[row("lint"; $lr; $lt), row("native"; $nr; $nt),
+           {name:"ios", result:"NOT-RUN", local:false, selected:false, detail:"not selected (--job)", startedAt:null, finishedAt:null}]}' \
+    --arg T3 "$T3" | jq "${7:-.}" > "$1"
+}
+runm() {  # runm <verdict>... [-- args...]
+  local vs=()
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do vs+=(--verdict "$1"); shift; done
+  [ "${1:-}" = -- ] && shift
+  : > "$TMP/calls"; rm -f "$TMP"/state-*.json "$TMP/comment.json"
+  OUT="$(PATH="$TMP/bin:$PATH" STUB_LOG="$TMP/calls" STUB_DIR="$TMP" STUB_HEAD="$HEAD" \
+    "$FM" 7 --repo o/r "${vs[@]}" "$@" 2>&1)"; RC=$?
+}
+refused() {  # refused <label> <expected output fragment>
+  [ "$RC" = 1 ] && [ "$(writes)" = 0 ] && ! grep -q -- '-X POST' "$TMP/calls" && grep -qF -- "$2" <<<"$OUT" \
+    && ok "refuses $1" || bad "$1: rc=$RC writes=$(writes) $OUT"
+}
+D="$TMP/desk.json" L="$TMP/lap.json" L2="$TMP/lap2.json"
+
+pv "$D" desk PASS "$T1" NOT-RUN ""; pv "$L" lap NOT-RUN "" PASS "$T2"
+runm "$D" "$L"
+[ "$RC" = 0 ] && grep -q -- "-X PUT repos/o/r/pulls/7/merge -f sha=$HEAD" "$TMP/calls" \
+  && ok "accepts a union that covers every local job" || bad "union: rc=$RC $OUT"
+grep -q "lint PASS at $T1 from $D (machine desk)" <<<"$OUT" && grep -q "native PASS at $T2 from $L (machine lap)" <<<"$OUT" \
+  && ok "the output names the file and machine behind each job" || bad "attribution: $OUT"
+grep -q "verdict file $L: machine lap" <<<"$OUT" && ok "and each verdict file's machine" || bad "machines: $OUT"
+body="$(jq -r .body "$TMP/comment.json" 2>/dev/null)"
+grep -qF "| \`native\` | PASS | $T2 | \`$L\` | \`lap\` |" <<<"$body" \
+  && grep -qF "sha256 \`$(sha256sum "$D" | cut -d' ' -f1)\`" <<<"$body" && grep -qF "sha256 \`$(sha256sum "$L" | cut -d' ' -f1)\`" <<<"$body" \
+  && grep -q "fleet-verdict sha=$HEAD" <<<"$body" \
+  && ok "the comment carries the attribution table and every verdict with its hash" || bad "comment: $body"
+
+pv "$L" lap NOT-RUN "" NOT-RUN ""
+runm "$D" "$L"; refused "a union with a gap, naming the job" "no verdict covers with a PASS: native"
+pv "$L" lap NOT-RUN "" PASS "$T2" '.jobs[1].result="NOT-RUN"|.jobs[1].detail="unmeasured: exit 75"'
+runm "$D" "$L"; refused "a union whose only native row is unmeasured" "no verdict covers with a PASS: native"
+pv "$L" lap NOT-RUN "" NOT-RUN ""
+runm "$D" "$L" -- --allow-not-run native
+[ "$RC" = 0 ] && grep -q 'native was not measured by any verdict, excused by --allow-not-run' <<<"$OUT" \
+  && ok "--allow-not-run excuses a gap in the union, visibly" || bad "union allow: rc=$RC $OUT"
+runm "$D" "$L" -- --allow-not-run nosuch; refused "an --allow-not-run naming no base job" "names no job in dev's"
+
+pv "$L" lap NOT-RUN "" PASS "$T2" '.sha="bbbb"'
+runm "$D" "$L"; refused "a verdict from another SHA" "verdict $L is for bbbb"
+pv "$L" lap NOT-RUN "" PASS "$T2" '.manifestSha256="x"'
+runm "$D" "$L"; refused "verdicts that ran different manifests" "the verdicts ran different manifests"
+pv "$D" desk PASS "$T1" NOT-RUN "" '.manifestSha256="y"'; pv "$L" lap NOT-RUN "" PASS "$T2" '.manifestSha256="y"'
+runm "$D" "$L"; refused "verdicts that agree on a manifest the base does not have" "different manifest than dev's"
+pv "$D" desk PASS "$T1" NOT-RUN ""
+pv "$L" lap NOT-RUN "" PASS "$T2" '.treeClean=false'
+runm "$D" "$L"; refused "a set with one dirty-tree verdict" "verdict $L measured a dirty working tree"
+
+pv "$L" lap NOT-RUN "" PASS "$T2"; pv "$L2" lap FAIL "$T3" NOT-RUN ""
+runm "$D" "$L" "$L2"; refused "a PASS then a later FAIL for the same job" "jobs FAILed: lint (latest: $L2 on lap at $T3)"
+pv "$D" desk FAIL "$T1" NOT-RUN ""; pv "$L2" lap PASS "$T3" NOT-RUN ""
+runm "$D" "$L" "$L2"
+[ "$RC" = 0 ] && grep -q "lint PASS at $T3 from $L2 (machine lap)" <<<"$OUT" \
+  && ok "accepts a FAIL then a later PASS, attributed to the later file" || bad "fail then pass: rc=$RC $OUT"
+pv "$D" desk PASS "$T1" NOT-RUN ""; pv "$L2" lap FAIL "$T1" NOT-RUN ""
+runm "$D" "$L" "$L2"; refused "a PASS and a FAIL at the same time (FAIL wins the tie)" "jobs FAILed: lint"
+pv "$D" desk PASS "$T1" NOT-RUN ""; pv "$L2" lap NOT-RUN "" NOT-RUN "" '.finishedAt="2027-01-01T00:00:00Z"'
+runm "$D" "$L" "$L2"
+[ "$RC" = 0 ] && ok "a newer verdict's NOT-RUN rows do not override earlier PASSes" || bad "not-run override: rc=$RC $OUT"
+
+echo "fleet-merge: old-format (schema 1) verdicts still combine"
+# No machine, no per-job timestamps: rows are ordered by the verdict's finishedAt.
+old() {  # old <file> <finishedAt> <lint result> <native result>
+  jq -n --arg sha "$HEAD" --arg m "$MM" --arg t "$2" --arg lr "$3" --arg nr "$4" '
+    def row($n; $r): {name:$n, result:$r, seconds:0, local:true, needsDataPlane:false,
+      detail:(if $r=="NOT-RUN" then "not selected (--job)" else "" end)};
+    {schema:1, sha:$sha, treeClean:true, full:false, dataPlane:false, base:null, manifestSha256:$m, finishedAt:$t,
+     jobs:[row("lint"; $lr), row("native"; $nr), {name:"ios", result:"NOT-RUN", seconds:0, local:false, needsDataPlane:false, detail:"not selected (--job)"}],
+     exit:(if $lr=="FAIL" or $nr=="FAIL" then 1 else 0 end)}' > "$1"
+}
+old "$D" "$T1" PASS NOT-RUN; old "$L" "$T2" NOT-RUN PASS
+runm "$D" "$L"
+[ "$RC" = 0 ] && grep -q "native PASS at $T2 from $L (machine unrecorded)" <<<"$OUT" \
+  && ok "accepts two old --job verdicts whose union is complete" || bad "old union: rc=$RC $OUT"
+old "$L2" "$T3" FAIL NOT-RUN
+runm "$D" "$L" "$L2"; refused "an old verdict's later FAIL, ordered by the verdict's finishedAt" "jobs FAILed: lint"
+pv "$D" desk PASS "$T1" NOT-RUN ""
+runm "$D" "$L"
+[ "$RC" = 0 ] && ok "a schema-2 and a schema-1 verdict combine" || bad "mixed schemas: rc=$RC $OUT"
+printf '%s' "$MANIFEST" > "$TMP/manifest"
+
 echo "fleet-merge: the happy path lifts, merges pinned, restores"
 verdict '.'; run
 [ "$RC" = 0 ] && ok "merges on a good verdict" || bad "rc=$RC $OUT"

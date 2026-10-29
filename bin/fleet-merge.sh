@@ -7,10 +7,13 @@
 # checked that a full passing run existed for the merged head: four PRs merged
 # with no replica run at all, and three wave verdicts were assembled from jobs
 # carried over from other SHAs (MuscleBuddy#8955). This script is the lift, and
-# it refuses unless `ci-replica.sh`'s own `verdict.json` says:
+# it refuses unless `ci-replica.sh`'s own `verdict.json` files say so.
+#
+# One --verdict (a full run on one machine) must say:
 #
 #   - sha            == the PR's head SHA, read from GitHub now
-#   - full           == true   (no --job subset)
+#   - full           == true   (no --job subset; a lone --job verdict refuses and
+#                               names the local jobs it leaves uncovered)
 #   - treeClean      == true   (the run measured a commit, not a working copy)
 #   - exit           == 0 and no job FAILed
 #   - every local job PASSed   (a data-plane job may be NOT-RUN only when named
@@ -22,6 +25,25 @@
 #                       itself. A PR that changes the manifest is still judged by
 #                       the base's: run `ci-replica.sh --manifest <base's copy>` on
 #                       the head, and the new job list gates the PRs after it lands.
+#
+# Several --verdict files (full or --job runs, e.g. one machine with /dev/kvm for
+# `native` and another for the rest) authorize together only when:
+#
+#   - every verdict's sha == the PR's head SHA, and every verdict's treeClean is
+#     true. One bad file refuses the whole set; a job measured on another SHA
+#     never counts.
+#   - every verdict's manifestSha256 is the same, and equals the base's (above)
+#   - every job the BASE manifest runs locally (`local` not false) has an
+#     effective result of PASS. A job's effective result is its latest PASS or
+#     FAIL row across all the files, ordered by the row's `finishedAt` (else the
+#     verdict's); on a tie FAIL wins. NOT-RUN rows (not selected, unmeasured,
+#     needs a data plane) never cover a job and never override one.
+#   - no job's effective result is FAIL. An earlier FAIL a later PASS replaced
+#     does not refuse; a later FAIL over an earlier PASS does.
+#   - a job no file covers refuses, naming it, unless excused by --allow-not-run.
+#
+# The merge output names, per job, the verdict file and machine that supplied
+# its result, and the published comment carries that table.
 #
 # It then publishes the verdict as a comment on the PR, reads it back, and refuses to
 # lift if that write fails: the replica's verdict.json lives in the validator's
@@ -46,7 +68,8 @@
 # any record whose pid is dead; a record whose pid is alive is another merge in
 # flight and is left alone (and blocks a second lift of the same ruleset).
 #
-#   fleet-merge.sh <PR> --verdict <verdict.json> [--repo OWNER/NAME]
+#   fleet-merge.sh <PR> --verdict <verdict.json> [--verdict <verdict.json>]...
+#                  [--repo OWNER/NAME]
 #                  [--manifest-path .claude/ci-replica.json]
 #                  [--allow-not-run JOB]... [--method squash|merge|rebase] [--title T]
 #                  [--dry-run]
@@ -71,16 +94,16 @@
 # Exit: 0 merged (or dry-run clean), 1 refused, 2 usage, 3 merge or restore failed.
 set -uo pipefail
 
-usage() { sed -n '2,70p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,94p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 die() { echo "fleet-merge: $*" >&2; exit 2; }
 refuse() { echo "fleet-merge: REFUSED — $*" >&2; exit 1; }
 
-PR="" VERDICT="" REPO="" MANIFEST_PATH=".claude/ci-replica.json" METHOD="" TITLE="" DRY=0 ACTION=merge
-ALLOW=()
+PR="" REPO="" MANIFEST_PATH=".claude/ci-replica.json" METHOD="" TITLE="" DRY=0 ACTION=merge
+ALLOW=() VERDICTS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) usage ;;
-    --verdict) VERDICT="${2:-}"; shift 2 ;;
+    --verdict) VERDICTS+=("${2:-}"); shift 2 ;;
     --repo) REPO="${2:-}"; shift 2 ;;
     --manifest-path) MANIFEST_PATH="${2:-}"; shift 2 ;;
     --allow-not-run) ALLOW+=("${2:-}"); shift 2 ;;
@@ -95,8 +118,8 @@ while [ $# -gt 0 ]; do
 done
 if [ "$ACTION" = merge ]; then
   [[ "$PR" =~ ^[0-9]+$ ]] || usage
-  [ -n "$VERDICT" ] || die "--verdict <verdict.json> is required: the verdict is the authorization"
-  [ -f "$VERDICT" ] || refuse "no verdict file at $VERDICT"
+  [ "${#VERDICTS[@]}" -gt 0 ] || die "--verdict <verdict.json> is required: the verdict is the authorization"
+  for f in "${VERDICTS[@]}"; do [ -n "$f" ] && [ -f "$f" ] || refuse "no verdict file at $f"; done
 fi
 command -v jq >/dev/null || die "jq is required (verdict, ruleset and merge JSON are all read with it) — install it: sudo apt install jq"
 if [ -n "${FLEET_MERGE_GH_TOKEN:-}" ]; then
@@ -205,7 +228,7 @@ if [ -z "$REPO" ] && [ "$ACTION" = merge ]; then
   REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || die "cannot infer --repo"
 fi
 
-jq -e . "$VERDICT" >/dev/null 2>&1 || refuse "$VERDICT is not valid JSON"
+for f in "${VERDICTS[@]}"; do jq -e . "$f" >/dev/null 2>&1 || refuse "$f is not valid JSON"; done
 
 pr_json="$(gh api "repos/$REPO/pulls/$PR")" || die "cannot read PR #$PR"
 head_sha="$(jq -r .head.sha <<<"$pr_json")"
@@ -224,36 +247,112 @@ case "$METHOD" in squash|merge|rebase) ;; *) die "--method must be squash, merge
 echo "fleet-merge: GitHub token source: $TOKEN_SRC"
 [ "$state" = open ] || refuse "PR #$PR is $state"
 
-v() { jq -r "$1" "$VERDICT"; }
-[ "$(v .sha)" = "$head_sha" ] \
-  || refuse "the verdict is for $(v .sha), but PR #$PR's head is $head_sha. Re-run the replica on the head."
-[ "$(v .full)" = true ] || refuse "the verdict came from a --job subset, not a full run"
-[ "$(v .treeClean)" = true ] || refuse "the verdict measured a dirty working tree, not the commit"
-[ "$(v .exit)" = 0 ] || refuse "the verdict's run exited $(v .exit)"
-fails="$(jq -r '[.jobs[]|select(.result=="FAIL")|.name]|join(", ")' "$VERDICT")"
-[ -z "$fails" ] || refuse "jobs FAILed: $fails"
-
 allowed_json="$(printf '%s\n' "${ALLOW[@]+"${ALLOW[@]}"}" | jq -R . | jq -sc 'map(select(. != ""))')"
-unmeasured="$(jq -r --argjson allow "$allowed_json" \
-  '[.jobs[]|select(.local and .result!="PASS" and ((.name|IN($allow[]))|not))|.name]|join(", ")' "$VERDICT")"
-[ -z "$unmeasured" ] || refuse "local jobs were not measured: $unmeasured (a data-plane job may be excused with --allow-not-run, visibly)"
-for a in "${ALLOW[@]+"${ALLOW[@]}"}"; do
-  r="$(jq -r --arg n "$a" '.jobs[]|select(.name==$n)|.result' "$VERDICT")"
-  [ -n "$r" ] || refuse "--allow-not-run $a names no job in the verdict"
-  [ "$r" = PASS ] || echo "fleet-merge: NOTE — $a was not measured ($r), excused by --allow-not-run"
-done
 
 # Written to a file, not captured: `$(...)` strips the trailing newline the
 # replica hashed, and a failed read piped into sha256sum hashes nothing and exits 0.
+# Kept until the verdicts are judged: the multi-verdict path reads its job list.
 base_manifest="$(mktemp)"
-gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$MANIFEST_PATH?ref=$base_ref" \
-  > "$base_manifest" 2>/dev/null && [ -s "$base_manifest" ] \
-  || { rm -f "$base_manifest"; refuse "cannot read $MANIFEST_PATH on the base $base_ref; the verdict is judged against the base's manifest, so a base without one has no gate to merge on"; }
-base_manifest_sha="$(sha256sum "$base_manifest" | cut -d' ' -f1)"; rm -f "$base_manifest"
-[ "$(v .manifestSha256)" = "$base_manifest_sha" ] \
-  || refuse "the verdict ran a different manifest than $base_ref's $MANIFEST_PATH. The job list comes from the base, not the head: re-run with \`ci-replica.sh --manifest <$MANIFEST_PATH as of $base_ref>\` on the head"
+fetch_base_manifest() {
+  gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/$MANIFEST_PATH?ref=$base_ref" \
+    > "$base_manifest" 2>/dev/null && [ -s "$base_manifest" ] \
+    || { rm -f "$base_manifest"; refuse "cannot read $MANIFEST_PATH on the base $base_ref; the verdict is judged against the base's manifest, so a base without one has no gate to merge on"; }
+  base_manifest_sha="$(sha256sum "$base_manifest" | cut -d' ' -f1)"
+}
+manifest_refusal="the verdict ran a different manifest than $base_ref's $MANIFEST_PATH. The job list comes from the base, not the head: re-run with \`ci-replica.sh --manifest <$MANIFEST_PATH as of $base_ref>\` on the head"
 
-echo "fleet-merge: verdict OK for PR #$PR @ $head_sha ($(jq '[.jobs[]|select(.result=="PASS")]|length' "$VERDICT") PASS, $(jq '[.jobs[]|select(.result=="NOT-RUN")]|length' "$VERDICT") NOT-RUN)"
+# ATTRIB: one TSV row per job that was measured, `job result finishedAt file machine`,
+# printed below and carried into the published comment.
+ATTRIB=""
+
+if [ "${#VERDICTS[@]}" = 1 ]; then
+  VERDICT="${VERDICTS[0]}"
+  v() { jq -r "$1" "$VERDICT"; }
+  [ "$(v .sha)" = "$head_sha" ] \
+    || refuse "the verdict is for $(v .sha), but PR #$PR's head is $head_sha. Re-run the replica on the head."
+  if [ "$(v .full)" != true ]; then
+    uncovered="$(jq -r '[.jobs[]|select(.local and .result!="PASS")|.name]|join(", ")' "$VERDICT")"
+    refuse "the verdict came from a --job subset, not a full run. Local jobs it leaves uncovered: ${uncovered:-none listed}. Pass the --job verdicts for the same SHA that cover them as more --verdict files, or run the full suite"
+  fi
+  [ "$(v .treeClean)" = true ] || refuse "the verdict measured a dirty working tree, not the commit"
+  [ "$(v .exit)" = 0 ] || refuse "the verdict's run exited $(v .exit)"
+  fails="$(jq -r '[.jobs[]|select(.result=="FAIL")|.name]|join(", ")' "$VERDICT")"
+  [ -z "$fails" ] || refuse "jobs FAILed: $fails"
+
+  unmeasured="$(jq -r --argjson allow "$allowed_json" \
+    '[.jobs[]|select(.local and .result!="PASS" and ((.name|IN($allow[]))|not))|.name]|join(", ")' "$VERDICT")"
+  [ -z "$unmeasured" ] || refuse "local jobs were not measured: $unmeasured (a data-plane job may be excused with --allow-not-run, visibly)"
+  for a in "${ALLOW[@]+"${ALLOW[@]}"}"; do
+    r="$(jq -r --arg n "$a" '.jobs[]|select(.name==$n)|.result' "$VERDICT")"
+    [ -n "$r" ] || refuse "--allow-not-run $a names no job in the verdict"
+    [ "$r" = PASS ] || echo "fleet-merge: NOTE — $a was not measured ($r), excused by --allow-not-run"
+  done
+
+  fetch_base_manifest; rm -f "$base_manifest"
+  [ "$(v .manifestSha256)" = "$base_manifest_sha" ] || refuse "$manifest_refusal"
+
+  ATTRIB="$(jq -r --arg f "$VERDICT" '. as $v | .jobs[] | select(.result=="PASS")
+    | [.name, .result, (.finishedAt // $v.finishedAt // "-"), $f, ($v.machine // "unrecorded")] | @tsv' "$VERDICT")"
+  echo "fleet-merge: verdict OK for PR #$PR @ $head_sha ($(jq '[.jobs[]|select(.result=="PASS")]|length' "$VERDICT") PASS, $(jq '[.jobs[]|select(.result=="NOT-RUN")]|length' "$VERDICT") NOT-RUN)"
+else
+  # Every file is judged before any is combined: one verdict from another SHA,
+  # a dirty tree or another manifest refuses the set rather than being dropped.
+  for f in "${VERDICTS[@]}"; do
+    s="$(jq -r .sha "$f")"
+    [ "$s" = "$head_sha" ] \
+      || refuse "verdict $f is for $s, but PR #$PR's head is $head_sha. Every verdict must be for the head; a job measured on another SHA never counts. Re-run that job on the head."
+    [ "$(jq -r .treeClean "$f")" = true ] || refuse "verdict $f measured a dirty working tree, not the commit"
+  done
+  hashes="$(for f in "${VERDICTS[@]}"; do printf '%s\t%s\n' "$(jq -r .manifestSha256 "$f")" "$f"; done)"
+  if [ "$(cut -f1 <<<"$hashes" | sort -u | wc -l)" != 1 ]; then
+    refuse "the verdicts ran different manifests ($(awk -F'\t' '{printf "%s%s: %s", (NR>1?", ":""), $2, $1}' <<<"$hashes")). Every verdict must run $base_ref's $MANIFEST_PATH"
+  fi
+  fetch_base_manifest
+  [ "$(head -1 <<<"$hashes" | cut -f1)" = "$base_manifest_sha" ] || { rm -f "$base_manifest"; refuse "$manifest_refusal"; }
+
+  # The job list is the base manifest's (already proven to be what every verdict
+  # ran), not the verdicts' rows: a truncated verdict cannot drop a job from it.
+  required="$(jq -c '[.jobs[]|select(.local != false)|.name]' "$base_manifest" 2>/dev/null)" \
+    || { rm -f "$base_manifest"; refuse "$base_ref's $MANIFEST_PATH is not a valid manifest"; }
+  all_jobs="$(jq -c '[.jobs[].name]' "$base_manifest")"
+  rm -f "$base_manifest"
+
+  # A job's effective result is its latest measured row: PASS or FAIL only, ordered
+  # by finishedAt (the row's, else the verdict's); FAIL sorts last on a tie.
+  effective="$(jq -nc '[inputs as $v | input_filename as $f | $v.jobs[]
+      | select(.result=="PASS" or .result=="FAIL")
+      | {name, result, file:$f, machine:($v.machine // "unrecorded"), ts:(.finishedAt // $v.finishedAt // "")}]
+    | group_by(.name) | map(sort_by(.ts, (.result=="FAIL")) | last)' "${VERDICTS[@]}")" \
+    || refuse "cannot combine the verdict files"
+
+  fails="$(jq -r '[.[]|select(.result=="FAIL")
+    |"\(.name) (latest: \(.file) on \(.machine) at \(.ts))"]|join(", ")' <<<"$effective")"
+  [ -z "$fails" ] || refuse "jobs FAILed: $fails"
+
+  for a in "${ALLOW[@]+"${ALLOW[@]}"}"; do
+    jq -e --arg n "$a" 'index($n) != null' <<<"$all_jobs" >/dev/null \
+      || refuse "--allow-not-run $a names no job in $base_ref's $MANIFEST_PATH"
+  done
+  uncovered="$(jq -r --argjson req "$required" --argjson allow "$allowed_json" \
+    '[$req[] as $j | select(([.[]|select(.result=="PASS")|.name]|index($j)) == null and (($j|IN($allow[]))|not)) | $j]|join(", ")' <<<"$effective")"
+  [ -z "$uncovered" ] \
+    || refuse "local jobs no verdict covers with a PASS: $uncovered. Run them on the head with \`ci-replica.sh --job <name>\` on a machine that can, and pass that verdict too (a data-plane job may be excused with --allow-not-run, visibly)"
+  for a in "${ALLOW[@]+"${ALLOW[@]}"}"; do
+    jq -e --arg n "$a" 'any(.[]; .name==$n and .result=="PASS")' <<<"$effective" >/dev/null \
+      || echo "fleet-merge: NOTE — $a was not measured by any verdict, excused by --allow-not-run"
+  done
+
+  ATTRIB="$(jq -r '.[]|[.name, .result, (if .ts=="" then "-" else .ts end), .file, .machine]|@tsv' <<<"$effective")"
+  echo "fleet-merge: verdicts OK for PR #$PR @ $head_sha (${#VERDICTS[@]} files; machines: $(jq -r 'map(.machine)|unique|join(", ")' <<<"$effective"); $(jq -r 'length' <<<"$required") local jobs covered)"
+fi
+
+echo "fleet-merge: job results and where each came from:"
+while IFS="	" read -r j r t f m; do
+  [ -n "$j" ] && echo "fleet-merge:   $j $r at $t from $f (machine $m)"
+done <<<"$ATTRIB"
+for f in "${VERDICTS[@]}"; do
+  echo "fleet-merge:   verdict file $f: machine $(jq -r '.machine // "unrecorded"' "$f")"
+done
 
 # Rulesets on the base branch that gate a merge. Organization-level ones are
 # the trap: lifting only the repo's leaves "Required status check ... is failing"
@@ -292,18 +391,42 @@ WORK="$(mktemp -d)"
 LIFTED=()
 
 # Publish the verdict before anything is lifted. Marker line first so a later
-# fleet-verify can find it by head SHA; the JSON is the whole file, verbatim.
-verdict_sha256="$(sha256sum "$VERDICT" | cut -d' ' -f1)"
-comment_body="$(printf '<!-- fleet-verdict sha=%s sha256=%s -->\nReplica verdict for `%s` (sha256 `%s`), the authorization for this merge:\n\n```json\n%s\n```\n' \
-  "$head_sha" "$verdict_sha256" "$head_sha" "$verdict_sha256" "$(jq . "$VERDICT")")"
+# fleet-verify can find it by head SHA; each verdict JSON is the whole file,
+# verbatim, under its own sha256, after the table of which file and machine
+# supplied each job's result. The marker's sha256= lists every file's hash, and
+# the read-back must find each one.
+verdict_hashes=()
+for f in "${VERDICTS[@]}"; do verdict_hashes+=("$(sha256sum "$f" | cut -d' ' -f1)"); done
+verdict_sha256="$(IFS=,; echo "${verdict_hashes[*]}")"
+{
+  printf '<!-- fleet-verdict sha=%s sha256=%s -->\n' "$head_sha" "$verdict_sha256"
+  if [ "${#VERDICTS[@]}" = 1 ]; then
+    printf 'Replica verdict for `%s` (sha256 `%s`), the authorization for this merge.\n\n' "$head_sha" "$verdict_sha256"
+  else
+    printf 'Replica verdicts for `%s` (%s files), together the authorization for this merge. Each job'"'"'s result is its latest PASS or FAIL across the files.\n\n' "$head_sha" "${#VERDICTS[@]}"
+  fi
+  printf '| job | result | finished | verdict file | machine |\n|---|---|---|---|---|\n'
+  while IFS="	" read -r j r t f m; do
+    [ -n "$j" ] && printf '| `%s` | %s | %s | `%s` | `%s` |\n' "$j" "$r" "$t" "$f" "$m"
+  done <<<"$ATTRIB"
+  i=0
+  for f in "${VERDICTS[@]}"; do
+    printf '\n`%s` (machine `%s`, sha256 `%s`):\n\n```json\n%s\n```\n' \
+      "$f" "$(jq -r '.machine // "unrecorded"' "$f")" "${verdict_hashes[$i]}" "$(jq . "$f")"
+    i=$((i + 1))
+  done
+} > "$WORK/comment.md"
+comment_body="$(cat "$WORK/comment.md")"; rm -f "$WORK/comment.md"
 jq -n --arg body "$comment_body" '{body:$body}' > "$WORK/comment.json"
 posted="$(gh api -X POST "repos/$REPO/issues/$PR/comments" --input "$WORK/comment.json" 2>&1)" \
   || { rm -rf "$WORK"; refuse "cannot publish the verdict to PR #$PR ($posted); nothing was lifted"; }
 comment_id="$(jq -r '.id // empty' <<<"$posted" 2>/dev/null)"
 [ -n "$comment_id" ] || { rm -rf "$WORK"; refuse "the verdict comment on PR #$PR returned no id; nothing was lifted"; }
 readback="$(gh api "repos/$REPO/issues/comments/$comment_id" --jq .body 2>/dev/null)" || readback=""
-grep -qF "sha256=$verdict_sha256" <<<"$readback" \
-  || { rm -rf "$WORK"; refuse "the verdict comment $comment_id did not read back; nothing was lifted"; }
+for h in "${verdict_hashes[@]}"; do
+  grep -qF "sha256 \`$h\`" <<<"$readback" && grep -qF "sha256=$verdict_sha256" <<<"$readback" \
+    || { rm -rf "$WORK"; refuse "the verdict comment $comment_id did not read back; nothing was lifted"; }
+done
 echo "fleet-merge: verdict published as comment $comment_id on PR #$PR (sha256 $verdict_sha256)"
 
 restore() {
