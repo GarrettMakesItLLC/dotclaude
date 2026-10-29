@@ -66,10 +66,13 @@ It carries, in comments:
 - `READY <sha>` from the integrator — this exact tree is frozen and wants a gate run.
 - `## Run N` from a validator — a PASS/FAIL/NOT-RUN table, and for each failure the command, the exit
   code, a log excerpt, and the **owning batch**, so the fix has an address.
-- `ALL GREEN @ <sha>` when a full run passes, linking the verdict comment `bin/fleet-merge.sh`
-  publishes on the PR (the full `verdict.json`, kept after the validator's worktree is reaped). Merge
-  authorization is that verdict file, for that SHA, checked by `bin/fleet-merge.sh` before it lifts
-  anything. The comment reports the verdict and never substitutes for it.
+- `ALL GREEN @ <sha>` when every local job passes on that SHA (one full run, or `--job` runs that
+  together cover the set), linking the verdict comment `bin/fleet-merge.sh`
+  publishes on the PR (every `verdict.json` it was given, kept after the validator's worktree is
+  reaped). Merge authorization is the verdict files for that SHA, checked by `bin/fleet-merge.sh`
+  before it lifts anything: one full run, or `--job` runs from several machines whose union PASSes
+  every local job of the base's manifest with no job's latest result a FAIL. The comment reports the
+  verdicts and never substitutes for them.
 
 MuscleBuddy#8137 (standing) and MuscleBuddy#8132 (one wave) are the worked examples — read both before
 writing a new one. #8132 shows the per-wave shape; #8137 shows it generalized into a standing gate.
